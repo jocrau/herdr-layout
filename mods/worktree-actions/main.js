@@ -1,0 +1,234 @@
+// A worktree's menu, opened by `worktree-support` as a popup with props
+// { path, branch, tab, base, behind, machine, repoSpace, repoName, space, main, remove, pr, github, editors },
+// or a top-level space's with { kind: "space", path, machine, space, editors, git, branch, linked }.
+// ↑/↓ move, Enter runs, Esc closes. Nothing here creates a worktree; removing
+// one runs the repo's own `herdr.worktreeRemove` command, after asking. Git
+// operations run in `worktree-support` (this popup is gone by then), which
+// shows how each went as a toast. Opened with { confirm: { title, detail, request } }
+// it asks first instead (a force push), and Enter or Confirm sends the request.
+
+import { View, div, svg } from "gpui-kit";
+import { v_flex, h_flex } from "gpui-base";
+import { run, props, closeOverlay, openOverlay, shared, setShared, exec, theme } from "herdr";
+import { branchTitle } from "./lib/names.js";
+import { customRemove } from "./lib/worktree.js";
+// A confirm dialog ignores ⏎ this long after it opens: a force-push or clean-up question can appear seconds
+// after the click (after a push or a count), and an ⏎ meant for a terminal must not confirm it.
+const ARM_MS = 700;
+
+// Requests to worktree-support (which runs git and closes spaces): a short queue in shared state, so two in a
+// row (within its 250 ms look) both arrive; ones older than 5 s are dropped as stale.
+const REQUESTS = "worktree-support.request";
+function sendRequest(req) {
+  const now = Date.now(), q = shared(REQUESTS);
+  const kept = (Array.isArray(q) ? q : q ? [q] : []).filter((r) => now - (r?.at ?? 0) < 5000);
+  setShared(REQUESTS, [...kept, { ...req, id: req.id ?? `${now}-${Math.random()}`, at: req.at ?? now }]);
+}
+
+
+// A folder on another machine opens over the editor's SSH remote, so it needs the CLI.
+function editorItems(p) {
+  return (p.editors ?? []).filter((e) => !p.machine || e.cli).map((e) => [`Open in ${e.label}`, "square-pen", () =>
+    p.machine ? exec(e.cli, ["--remote", `ssh-remote+${p.machine}`, p.path])
+      : e.cli ? exec(e.cli, [p.path]) : exec("open", ["-a", e.app, p.path])]);
+}
+
+function folderItems(p) {
+  return [
+    ["Copy path", "file-text", (cx) => cx.write_to_clipboard(p.path)],
+    ...(p.machine ? [] : [["Reveal in Finder", "folder", () => exec("open", ["-R", p.path])]]),
+  ];
+}
+
+function items(p) {
+  // A top-level space row: where its terminal is now.
+  if (p.kind === "space") return [
+    ...editorItems(p),
+    ...folderItems(p),
+    ...(p.git ? syncItems(p) : []),
+    // Herdr's own worktree dialog, sized as the shipped menu opens it.
+    ...(p.git ? [
+      ["New worktree", "git-branch", () => openOverlay({ mod: "worktree", kind: "dialog", width: 440, height: 260, props: { space: p.space, action: "new" } }), true],
+      ["Open worktree", "git-branch", () => openOverlay({ mod: "worktree", kind: "dialog", width: 560, height: 480, props: { space: p.space, action: "open" } })],
+    ] : []),
+    ...(p.linked ? [herdrRemove(p.space)] : []),
+    ["Rename", "square-pen", () => run("space.rename", { id: p.space }), !p.git],
+    ["Close space", "x", () => run("space.close", { id: p.space })],
+  ];
+  const at = p.machine ? { machine: p.machine } : {};
+  // Local change: first, a tab in this space (what a double-click does): open one, or go to
+  // the one it has; then a tab another space has; a worktree can be open in several spaces.
+  const openHere = [`Open as tab in ${p.repoName}`, "terminal", () => {
+    run("space.select", { id: p.repoSpace });
+    run("tab.new", { space: p.repoSpace, folder: p.path, name: p.branch ? branchTitle(p.branch) : undefined });
+  }];
+  const goTab = p.tab && p.tabSpace ? [`Go to tab in ${p.tabSpaceName}`, "terminal", () => {
+    run("space.select", { id: p.tabSpace });
+    run("tab.select", { id: p.tab });
+  }] : null;
+  const list = [
+    ...(p.tabHere ? [goTab] : [openHere, ...(goTab ? [goTab] : [])]),
+    [p.space ? "Go to space" : "Open as space", "folder-plus", () =>
+      p.space ? run("space.select", { id: p.space })
+        // Asks for its name (see `new-space`), the branch's in words to start with.
+        : openOverlay({ mod: "new-space", kind: "dialog", width: 520, height: 560, props: { value: branchTitle(p.branch), folder: p.path, ...at } })],
+    // worktree-support does this one: it needs the new space's id.
+    ["Show changes", "git-compare", () =>
+      sendRequest({ id: `${Date.now()}-${Math.random()}`, at: Date.now(), action: "changes", path: p.path, machine: p.machine })],
+    ...editorItems(p),
+    ...gitItems(p),
+  ];
+  // Local change: finished (merged, PR closed, remote gone): clean it up in one go, after asking.
+  // worktree-support works out what it would take away and asks (this popup is gone by then).
+  if (p.finished && p.branch) {
+    const after = list.findIndex((it) => it[1] === "folder-plus") + 1;
+    list.splice(after, 0, [`Clean up (${p.finished})…`, "archive", () => sendRequest({
+      id: `${Date.now()}-${Math.random()}`, at: Date.now(), action: "askCleanup",
+      path: p.path, branch: p.branch, base: p.base ?? null, machine: p.machine ?? null, main: p.main, space: p.space ?? null,
+      tab: p.tab ?? null, tabSpaceName: p.tabSpaceName ?? null, repoSpace: p.repoSpace, repoName: p.repoName, remove: p.remove ?? null, dirty: Boolean(p.dirty), finished: p.finished }), true]);
+    if (list[after + 1] && list[after + 1].length < 4) list[after + 1].push(true);
+  }
+  list.push(...folderItems(p));
+  if (p.space) list.push(["Close space", "x", () => run("space.close", { id: p.space }), true]);
+  if (p.remove) {
+    const cmd = customRemove(p.remove, p.path, p.branch ?? "");
+    list.push(["Remove worktree…", "archive", () => openOverlay({
+      mod: "confirm", kind: "dialog", width: 420, height: 180,
+      props: {
+        title: `Remove ${p.branch ?? p.path}?`,
+        detail: cmd,
+        command: { name: "tab.new", args: { space: p.repoSpace, folder: p.main, name: `remove ${p.branch ?? ""}`.trim(), argv: ["sh", "-c", cmd] } },
+      },
+    }), !p.space]);
+  } else if (p.space) list.push(herdrRemove(p.space));
+  return list;
+}
+
+// The git a worktree most often needs: in sync with its remote, up to date with
+// the main checkout's branch, a pull request, the graph.
+// Run by `worktree-support`, in p.path.
+const gitOp = (p, op) => () => sendRequest({
+  id: `${Date.now()}-${Math.random()}`, at: Date.now(), action: "git", op,
+  path: p.path, machine: p.machine, branch: p.branch, base: p.base,
+});
+
+// In step with the remote, set apart as a group; pull and push need a branch.
+function syncItems(p) {
+  const list = [];
+  if (p.branch) list.push(
+    ["Pull", "@git-graph/icons/fetch", gitOp(p, "pull")],
+    ["Push", "@git-graph/icons/push", gitOp(p, "push")],
+  );
+  list.push(["Fetch", "@git-graph/icons/cloud", gitOp(p, "fetch")]);
+  list[0].push(true);
+  return list;
+}
+
+function gitItems(p) {
+  const git = (op) => gitOp(p, op);
+  const list = syncItems(p);
+  if (p.branch && p.base && p.behind > 0) list.push(
+    [`Rebase onto ${p.base} (\u2193${p.behind})`, "@git-graph/icons/rebase", git("rebase")],
+    [`Merge ${p.base} into ${p.branch}`, "@git-graph/icons/merge", git("merge")],
+  );
+  if (p.pr) list.push(["Open pull request", "git-branch", (cx) => cx.open_url(p.pr)]);
+  else if (p.branch && p.github) list.push(["Create pull request", "git-branch", git("pr")]);
+  // The graph reads the folder on this computer only.
+  if (!p.machine) list.push(["Open in Git graph", "@git-graph/icons/graph", () =>
+    openOverlay({ mod: "git-graph", kind: "dialog", width: 0.92, height: 0.9, props: { folder: p.path } })]);
+  if (p.branch) list.push(["Copy branch name", "@git-graph/icons/copy", (cx) => cx.write_to_clipboard(p.branch)]);
+  return list;
+}
+
+// Herdr's own removal of a worktree space, as the shipped menu offers it.
+const herdrRemove = (space, apart) => ["Remove worktree", "archive",
+  () => openOverlay({ mod: "worktree", kind: "dialog", width: 440, height: 260, props: { space, action: "remove" } }), apart];
+
+export default class WorktreeActions extends View {
+  init(_props, cx) {
+    this.openedAt = Date.now(); // a confirm dialog takes ⏎ only after ARM_MS: it may open late, while you type elsewhere
+    this.at = 0;
+    this.handle = cx.focus_handle();
+    this.handle.focus();
+  }
+
+  // A confirmed request goes to `worktree-support`, which runs it.
+  confirm() {
+    const c = props()?.confirm;
+    closeOverlay(props()?.overlay);
+    if (c) sendRequest({ ...c.request, id: `${Date.now()}-${Math.random()}`, at: Date.now() });
+  }
+
+  renderConfirm(c) {
+    const t = theme();
+    const button = (id, label, bg, fg, border, onClick) => h_flex().id(id).h(32).px(14).items_center().rounded(8)
+      .border_1().border_color(border).bg(bg).text_color(fg).cursor_pointer().hover((s) => s.opacity(0.88)).on_click(onClick).child(label);
+    return v_flex()
+      .id("worktree-confirm")
+      .track_focus(this.handle)
+      .on_key_down((e, cx) => {
+        if (e.key === "enter") { if (Date.now() - this.openedAt >= ARM_MS) this.confirm(); }
+        else return; // (Esc never arrives: Herdr closes a dialog itself)
+        cx.stop_propagation();
+      })
+      .size_full().min_h(0).p(18).gap(12).rounded(8).bg(t.popover).text_size(13)
+      .child(h_flex().items_center()
+        .child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child(c.title))
+        .child(div().text_size(11).text_color(t.dim).child("⏎ confirms · Esc")))
+      .child(div().flex_1().min_h(0).overflow_y_scrollbar().text_color(t.muted).child(c.detail ?? ""))
+      .child(h_flex().justify_end().gap(8).text_size(12)
+        .child(button("no", "Cancel", t.raised, t.foreground, t.input, () => closeOverlay(props().overlay)))
+        .child(c.danger ? button("yes", c.button ?? "Force push", t.ansi1, t.background, t.ansi1, () => this.confirm())
+          : button("yes", c.button ?? "Force push", t.solid, t.solid_foreground, t.solid, () => this.confirm())));
+  }
+
+  choose(i, cx) {
+    const it = items(props() ?? {})[i];
+    if (!it) return;
+    closeOverlay(props()?.overlay);
+    it[2](cx);
+  }
+
+  render() {
+    if (props()?.confirm) return this.renderConfirm(props().confirm);
+    const t = theme();
+    const list = items(props() ?? {});
+    return v_flex()
+      .id("worktree-actions")
+      .track_focus(this.handle)
+      .w_full()
+      .min_h(0)
+      .p(5)
+      .bg(t.popover)
+      .text_size(12.8)
+      .on_key_down((e, cx) => {
+        if (e.key === "down") this.at = (this.at + 1) % list.length;
+        else if (e.key === "up") this.at = (this.at + list.length - 1) % list.length;
+        else if (e.key === "enter") return this.choose(this.at, cx);
+        else if (e.key === "escape") return closeOverlay(props().overlay);
+        else return;
+        cx.notify();
+      })
+      .children(list.map((it, i) =>
+        v_flex()
+          // it[3]: the first of a group (git, or the destructive items), set apart.
+          .when(Boolean(it[3]), (el) => el.child(div().mx(7).my(4).h(1).bg(t.border)))
+          .child(h_flex()
+            .id(`wa-${i}`)
+            .h(31)
+            .px(8)
+            .gap(9)
+            .rounded(7)
+            .items_center()
+            .text_color(t.foreground)
+            .when(i === this.at, (el) => el.bg(t.selected))
+            .hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => this.choose(i, cx))
+            .child(svg(icon(it[1])).size(14).flex_none().text_color(t.muted))
+            .child(div().flex_1().truncate().child(it[0]))),
+      ));
+  }
+}
+
+// "name" is one of workspace-chrome's icons, "@mod/path" another mod's.
+const icon = (name) => name.startsWith("@") ? `mods/${name.slice(1)}.svg` : `mods/workspace-chrome/${name}.svg`;

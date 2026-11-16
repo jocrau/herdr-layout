@@ -1,0 +1,9 @@
+> Add refunds to the payments API.
+* Update(app/payments.py)
++ Added refund(charge_id)
+* Bash(pytest -q)
++ 24 passed in 1.8s
+* Bash(git commit -m "Refund a charge")
++ [feat/refunds 3f2a91c] Refund a charge
+
+Refunds work for a whole charge; partial refunds are a follow-up.

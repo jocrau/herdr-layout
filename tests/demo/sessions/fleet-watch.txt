@@ -1,0 +1,9 @@
+> /agent-fleet:run forklift
+* Bash(fleet run forklift --dry-run)
++ wave 1 started: forklift.1, forklift.2, forklift.6
+* Bash(fleet status)
++ 1 merged, 2 running, 2 wait for you
+? forklift.4 asks: How many demo tickets should each site get?
+  1. Three per site (proposed)
+  2. Ten per site
+~ Waiting for the wave

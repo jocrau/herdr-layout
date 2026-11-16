@@ -1,0 +1,199 @@
+// Fleet board: the agent-fleet epic of the focused terminal's repo, beside the chat.
+// Reads `fleet status --json` (agent-fleet 0.33+) and draws it three ways:
+//   Board  every bead sorted by what needs you, with the step it is at in words
+//   Lanes  each bead's steps over time: parallel work, long steps, fix loops, waits
+//   Tree   the open beads in dependency order; the critical path and what unblocks most
+// It follows the focused terminal's repo and keeps the last repo with a run while you are elsewhere;
+// a block's props can pin it instead: { "repo": "/path/to/repo", "view": "lanes" }.
+// It re-reads when the run's state directory changes (watchFolder), and every minute anyway.
+// Keys (when focused), as in the git graph and the beads view: j k / ↑ ↓ move · ⏎ ⇥ l → details in, h ← x out ·
+// space act · t tail · b in the beads view · / filter · ? keys · 1 2 3 views · d done · [ ] zoom lanes · r refresh;
+// ⌘← ⌘→ (keys.json, mod:fleet-board) the previous / next run.
+// A bead that starts waiting for you posts a notification; while the docked pane is hidden it still looks every
+// 2 minutes (`fleet runs --json` when agent-fleet has it, else one `fleet status --json` of the last run shown).
+
+import { View, div } from "gpui-kit";
+import { v_flex, h_flex, Input, InputState, ScrollHandle } from "gpui-base";
+import { theme, settings, nextCommand, props, focused, run } from "herdr";
+import { VIEWS, SPANS, HIDDEN_CHECK, dur, shortener, graph, tipText } from "./model.js";
+
+export default class FleetBoard extends View {
+  init(_props, cx) {
+    this.view = props()?.view ?? (props()?.overlay ? "lanes" : "board");
+    this.selId = null; // the bead selected, the same in every view
+    this.order = []; this.ordered = new Set(); // the beads in the order the current view draws them (j k walk it)
+    this.drawn = new Map(); // bead -> its element in the body, to scroll the selected one into view
+    this.reveal = false; // scroll the selected bead into view on the next frame
+    this.scroll = ScrollHandle.new();
+    // "/" filters every view by id or title.
+    this.filter = ""; this.showFilter = false; this.filtering = false;
+    this.filterState = InputState.new({ placeholder: "id or title" });
+    this.filterState.on("change", (_e, cx) => { this.filter = this.filterState.value().trim().toLowerCase(); this.reveal = true; cx.notify(); });
+    this.filterState.on("focus", (_e, cx) => { this.filtering = true; cx.notify(); });
+    this.filterState.on("blur", (_e, cx) => { this.filtering = false; cx.notify(); });
+    // Who waited for you at the last look, to notify only about new waits: epic -> parked ids / parked count.
+    this.parkedIds = new Map(); this.parkedSeen = new Map();
+    // The tail panel at the bottom: the open (else selected) bead's last lines of `fleet tail`.
+    this.tailOn = false; this.tail = { id: null, lines: [], at: 0, error: null };
+    this.openId = null; // the one bead showing its details (they follow j k while open)
+    this.showDone = true; // open, so j k reach the done beads too (d folds it)
+    this.help = false; // ? shows the keys
+    this.confirm = null; // { title, detail, label, run, copy? }: a command that changes the run, asked about first
+    this.busy = null; // the command running now (its label)
+    this.span = "fit";
+    this.h = cx.focus_handle();
+    this.s = null; // the snapshot shown
+    this.problem = null; // why the focused folder shows nothing: { kind, message, cwd }
+    this.cwd = null; // the folder the shown snapshot came from
+    this.tried = new Map(); // folder -> when it last had no run, so focus there doesn't run fleet each tick
+    this.last = 0;
+    this.watching = null;
+    this.loading = false;
+    // Focus moves and the clock: cheap, no fleet call unless the repo changed or it's time.
+    cx.timer.every(2000, (cx) => this.tick(cx));
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = String(await nextCommand()).replace(/^fleet-board\./, "");
+        if (c === "focus") this.h.focus();
+        else if (VIEWS.some((v) => v.id === c)) this.view = c;
+        else if (c === "refresh") this.refresh(cx, true);
+        else if (c === "next-run" || c === "prev-run") this.stepRun(cx, c === "next-run" ? 1 : -1);
+        cx.notify();
+      }
+    });
+    this.runs = new Map(); // every run found: key -> summary (the strip of chips)
+    this.noRun = new Map(); // folder -> when it had no run (the scan skips it for a while)
+    this.pin = null; // { cwd, focus }: a chip chosen; holds until the focus moves to another folder
+    this.dirty = new Set(); // repositories (state directory names) whose run changed since the strip read it
+    this.hidden = false;
+    this.answers = new Map(); // bead -> { picks, area }: an answer being written in its details
+    this.typing = false; // an answer field has the keyboard: the pane's keys stay out of it
+    this.request = "force";
+    this.gen = 0; this.beat = Date.now();
+    this.snaps = new Map(); // folder -> the last snapshot read there, shown at once when you switch to it
+    this.scanQ = null; this.scanAt = 0; this.nextLook = Date.now() + HIDDEN_CHECK;
+    // One worker does every background job in turn (reads, the strip's scan, the tail, the hidden look):
+    // Herdr wakes only one of a mod's sleeping tasks reliably, so tasks sleeping side by side starve.
+    cx.spawn((cx) => this.worker(cx, this.gen));
+    // As a dialog (⌘⌥F), like the git graph and the file browser: the keyboard is on it at once.
+    if (props()?.overlay) { this.h.focus(); cx.timer.after(300, () => this.h.focus()); }
+  }
+
+  // ---------- acting
+
+  // ---------- answering a parked bead's questions in place
+
+  // ---------- keyboard
+
+  key(e, cx) {
+    if (this.filtering) { // the filter field has the keyboard: Esc clears it, ⏎ or ↓ goes back to the list
+      if (e.keystroke === "escape") { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; this.h.focus(); }
+      else if (e.keystroke === "enter" || e.keystroke === "down") this.h.focus();
+      else return;
+      cx.stop_propagation(); cx.notify(); return;
+    }
+    // An answer field has the keyboard, unless it went away while focused (answered elsewhere): blur may not come then.
+    if (this.typing && !this.s?.beads.some((x) => x.id === this.openId && this.answerable(x))) this.typing = false;
+    if (this.typing) return;
+    if (this.confirm && (e.keystroke === "enter" || e.keystroke === "escape")) { // the bar that asks has ⏎ and Esc
+      const c = this.confirm; this.confirm = null;
+      if (e.keystroke === "enter" && c.run) c.run(cx); // a copy-only question has nothing to run
+      cx.stop_propagation(); cx.notify(); return;
+    }
+    // The same keys as the git graph and the beads view: j k move, ⏎ ⇥ l → in, h ← x out, / filter, ? keys.
+    const k = e.keystroke, order = this.order, at = order.indexOf(this.selId);
+    const b = this.s?.beads.find((x) => x.id === this.selId);
+    const is = (...names) => names.includes(k);
+    const moveTo = (i) => {
+      this.selId = order[Math.max(0, Math.min(order.length - 1, i))] ?? this.selId;
+      this.reveal = true;
+      // While a row is open, its details follow the selection.
+      const next = this.openId && this.s?.beads.find((x) => x.id === this.selId);
+      if (next) this.openOnly(next);
+    };
+    if (this.help && !is("?", "shift-/")) this.help = false; // any key closes the key list
+    if (is("1", "2", "3")) { this.view = VIEWS[Number(k) - 1].id; this.reveal = true; }
+    else if (is("j", "down", "ctrl-n", "ctrl-j")) moveTo(at + 1);
+    else if (is("k", "up", "ctrl-p", "ctrl-k")) moveTo(at < 0 ? 0 : at - 1);
+    else if (is("ctrl-d", "pagedown")) moveTo(at + 10);
+    else if (is("ctrl-u", "pageup")) moveTo(at - 10);
+    else if (is("g", "home")) moveTo(0);
+    else if (is("shift-g", "end")) moveTo(order.length - 1);
+    // ⏎ and ⇥ toggle the details, as in beads and the git graph; l → open them, h ← x close them.
+    else if (is("enter", "tab") && b) this.toggle(b.id);
+    else if (is("l", "right") && b) { if (this.openId !== b.id) this.openOnly(b); }
+    else if (is("h", "left", "x") && this.openId) this.openId = null;
+    else if (is("space") && b) this.act(b, cx);
+    else if (is("/")) { this.showFilter = true; this.focusSoon(this.filterState, cx); }
+    else if (is("backspace") && this.filter) { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; }
+    else if (is("?", "shift-/")) this.help = !this.help;
+    else if (is("t")) this.tailOn = !this.tailOn;
+    else if (is("b") && b) this.inBeads(b);
+    else if (is("escape") && this.filter) { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; }
+    else if (is("escape") && this.openId) this.openId = null;
+    else if (is("d")) this.showDone = !this.showDone;
+    else if (is("[")) this.span = SPANS[Math.max(0, SPANS.indexOf(this.span) - 1)];
+    else if (is("]")) this.span = SPANS[Math.min(SPANS.length - 1, SPANS.indexOf(this.span) + 1)];
+    else if (is("r")) this.refresh(cx, true);
+    else return;
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  // ---------- pieces
+
+  // ---------- lanes: one bar per bead over time
+
+  // ---------- tree: open beads in dependency order, git-graph style gutter
+
+  // ---------- frame
+
+  render(_cx) {
+    const t = theme(), mono = settings().font_family ?? "JetBrains Mono", now = Date.now();
+    const root = v_flex().id("fleet-board").size_full().bg(t.background).text_color(t.foreground)
+      .on_size_change((size, cx) => { if (Math.abs((this.width ?? 0) - size.width) > 1) { this.width = size.width; cx.notify(); } })
+      .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx));
+    if (!this.s) { const strip = this.runStrip(t, now); return root.when(Boolean(strip), (el) => el.child(strip)).child(this.empty(t)); }
+    // The dependency graph once per snapshot (it walks every bead's dependents), not once per frame.
+    if (this.graphOf !== this.s) { this.graphOf = this.s; this.graphMemo = graph(this.s.beads); }
+    const g = this.graphMemo, short = shortener(this.s.epic.id);
+    this.order = []; this.ordered = new Set(); this.drawn = new Map();
+    // The id column fits the longest short id (monospace, ~7.5 px a character at this size), up to 11 characters:
+    // a longer id is cut with "…" (the open row's details show it whole), so the title keeps its room.
+    this.idW = Math.round(Math.min(6 + 7.5 * 11, Math.max(40, 6 + 7.5 * Math.max(0, ...this.s.beads.map((b) => short(b.id).length)))));
+    const body = this.help ? this.keyList(t) : this.view === "board" ? this.board(t, mono, g, short, now) : this.view === "lanes" ? this.lanes(t, mono, g, short, now) : this.tree(t, mono, g, short, now);
+    // The selected bead on screen after a move, a view switch or a new filter.
+    if (this.reveal) {
+      const at = body.indexOf(this.drawn.get(this.selId));
+      if (at >= 0) this.scroll.scroll_to_item(at);
+      this.reveal = false;
+    }
+    const elsewhere = this.problem && !this.sameRun(this.problem.cwd);
+    const repo = this.cwd.split("/").pop();
+    const strip = this.runStrip(t, now);
+    return root
+      .when(Boolean(strip), (el) => el.child(strip))
+      .child(this.header(t, mono, now))
+      .child(this.tabs(t))
+      .when(Boolean(this.confirm), (el) => el.child(this.confirmBar(t, mono)))
+      .when(this.showFilter || Boolean(this.filter), (el) => el.child(h_flex().px(10).py(4).gap(6).items_center().border_b_1().border_color(t.border)
+        .child(div().text_size(12).text_color(this.filtering ? t.accent : t.dim).child("/"))
+        .child(Input.new(this.filterState).flex_1().text_size(12))
+        .child(div().flex_none().text_size(11).text_color(t.dim).child(this.filter ? `${this.order.length} of ${this.s.beads.length}` : "esc clears"))))
+      .child(v_flex().id(`fb-${this.view}`).flex_1().min_h(0).pb(8).overflow_y_scrollbar().track_scroll(this.scroll).children(body))
+      .when(this.tailOn, (el) => el.child(this.tailPanel(t, mono, short, now)))
+      .child(h_flex().id("footer").px(10).py(5).border_t_1().border_color(t.border).gap(6).items_center()
+        .tooltip(tipText(elsewhere ? `The focused terminal's folder has no run (${this.problem.cwd}): ${this.problem.message}` : `${this.cwd}\nupdated ${new Date(this.last).toLocaleTimeString()}`))
+        .child(div().min_w(0).truncate().text_size(11).text_color(elsewhere ? t.ansi3 : t.dim).child(elsewhere ? `${repo} · focus has no run` : repo))
+        .child(div().flex_none().text_size(11).text_color(t.dim).child(`· ${dur(now - this.last)} ago`))
+        .child(div().flex_1())
+        .child(div().flex_none().text_size(11).text_color(t.dim).child("j k · ⏎ details · space act · / · ? keys")));
+  }
+}
+
+// The class's methods live in these modules by topic; `this` is the FleetBoard in all of them.
+import { SchedulerMethods } from "./scheduler.js";
+import { AlertsMethods } from "./alerts.js";
+import { ActionsMethods } from "./actions.js";
+import { ViewsMethods } from "./views.js";
+Object.assign(FleetBoard.prototype, SchedulerMethods, AlertsMethods, ActionsMethods, ViewsMethods);

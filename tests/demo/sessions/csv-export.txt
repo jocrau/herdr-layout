@@ -1,0 +1,9 @@
+> Export the cart as CSV, one line per item.
+* Write(src/csv.ts)
++ Wrote 18 lines to src/csv.ts
+* Bash(npm test -- csv)
++ 6 passed
+? Should prices in the export include VAT?
+  1. Yes, as shown in the cart (recommended)
+  2. No, net prices with a VAT column
+  3. Let me type something else

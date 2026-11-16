@@ -1,0 +1,10 @@
+> Move the payment step to the API: the browser only sends the cart id.
+* Read(src/cart.ts)
++ Read 14 lines
+* Grep("charge", app/)
++ Found 2 files
+* Update(src/checkout.ts)
++ Updated src/checkout.ts with 23 additions and 9 removals
+* Bash(npm test -- checkout)
++ 12 passed, 1 failed: "total survives a reload"
+~ Fixing the reload test

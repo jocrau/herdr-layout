@@ -1,0 +1,131 @@
+#!/usr/bin/python3 -I
+"""claude-resume: bring back the Claude Code sessions herdr terminals had before a reboot.
+
+herdr-core keeps every terminal through a reboot or logout, but gives it a fresh shell:
+the Claude session that ran there is gone. claude-statusline.py labels each terminal with
+its session (claude.session, claude.folder) while it runs, and drops the label when you
+quit Claude (its SessionEnd hook). So a terminal that is back at a shell and still has the
+label lost its session to the restart. This lists them and, once you say yes, runs
+`claude --resume <session>` in each, from the folder the session was started in.
+
+  claude-resume            list, ask, resume
+  claude-resume --yes      resume without asking
+  claude-resume --list     only list
+
+Sessions resume without Remote Control; run /remote-control in one to turn it back on.
+"""
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+
+SHELLS = {"zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh", "nu"}
+PROJECTS = os.path.expanduser("~/.claude/projects")
+
+
+def hc(*args):
+    r = subprocess.run(["hc", *args, "--json"], capture_output=True, text=True, timeout=10)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip() or f"hc {args[0]} failed")
+    return json.loads(r.stdout)
+
+
+def transcript(folder, session):
+    """Claude keeps a session under its start folder, every non-alphanumeric as '-'."""
+    return os.path.join(PROJECTS, re.sub(r"[^A-Za-z0-9]", "-", folder), f"{session}.jsonl")
+
+
+def title(path):
+    name = None
+    try:
+        with open(path, errors="ignore") as f:
+            for line in f:
+                if '"custom-title"' in line or '"summary"' in line:
+                    try:
+                        e = json.loads(line)
+                    except ValueError:
+                        continue
+                    name = e.get("customTitle") or e.get("summary") or name
+    except OSError:
+        pass
+    return name
+
+
+def foreground(info):
+    """What runs in the terminal now; one that hasn't reported it yet runs what it started with."""
+    return ((info.get("foreground") or {}).get("name") or os.path.basename((info.get("argv") or [""])[0])).lstrip("-")
+
+
+def lost():
+    me = os.environ.get("HC_TERMINAL_ID")
+    found, running = [], set()
+    for t in hc("ls")["terminals"]:
+        if t.get("address") == me or t.get("state") != "live":
+            continue
+        info = hc("get", t["address"])
+        labels = info.get("labels") or {}
+        session, folder = labels.get("claude.session"), labels.get("claude.folder")
+        program = foreground(info)
+        if session and program not in SHELLS:
+            running.add(session)  # resumed by hand elsewhere (its label survived the reboot here too)
+        if not session or not folder or program not in SHELLS:
+            continue
+        path = transcript(folder, session)
+        found.append({"terminal": t["address"], "where": labels.get("where") or t["address"], "shell": program,
+                      "session": session, "folder": folder, "here": os.path.exists(path), "title": title(path)})
+    # A session already running somewhere isn't started again, and one lost in two terminals comes back once.
+    seen, rows = set(), []
+    for r in found:
+        r["running"] = r["session"] in running or r["session"] in seen
+        seen.add(r["session"])
+        rows.append(r)
+    return rows
+
+
+def main():
+    args = set(sys.argv[1:])
+    if args - {"--yes", "-y", "--list"}:
+        print(__doc__.strip())
+        return 2
+    try:
+        rows = lost()
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
+        print(f"Can't read herdr's terminals: {e}")
+        return 1
+    if not rows:
+        print("No terminal lost its Claude session: nothing to resume.")
+        return 0
+    home = os.path.expanduser("~")
+    for r in rows:
+        mark = "  (running elsewhere: skipped)" if r["running"] else "" if r["here"] else "  (no transcript here: skipped)"
+        print(f"  {r['where']:<40} {r['title'] or r['session'][:8]:<34} {r['folder'].replace(home, '~')}{mark}")
+    ready = [r for r in rows if r["here"] and not r["running"]]
+    if "--list" in args or not ready:
+        return 0
+    if not args & {"--yes", "-y"}:
+        try:
+            answer = input(f"Resume {len(ready)} session{'s' if len(ready) != 1 else ''}? [y/N] ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            return 0
+    for r in ready:
+        # Still a shell there? Something may have started since the list (it would get the line as typing).
+        try:
+            now = foreground(hc("get", r["terminal"]))
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
+            now = None
+        if now not in SHELLS:
+            print(f"  skipped {r['where']}: {now or 'it'} runs there now")
+            continue
+        both = "; " if now == "nu" else " && "  # nu has no &&
+        line = f"cd {shlex.quote(r['folder'])}{both}claude --resume {shlex.quote(r['session'])}"
+        ok = subprocess.run(["hc", "send", r["terminal"], line], capture_output=True, timeout=30).returncode == 0
+        print(f"  {'resumed' if ok else 'COULD NOT SEND TO'} {r['where']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
