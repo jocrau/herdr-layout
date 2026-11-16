@@ -1,13 +1,13 @@
 // Fleet board: the agent-fleet epic of the focused terminal's repo, beside the chat.
-// Reads `fleet status --json` (agent-fleet 0.33+) and draws it three ways:
-//   Board  every bead sorted by what needs you, with the step it is at in words
+// Reads `fleet status --json` (agent-fleet 0.33+) and draws it two ways:
+//   Board  every bead sorted by what needs you, with the step it is at in words; what each unblocks (⇣N)
+//          and, when beads wait on each other, the critical path above the queued ones
 //   Lanes  each bead's steps over time: parallel work, long steps, fix loops, waits
-//   Tree   the open beads in dependency order; the critical path and what unblocks most
 // It follows the focused terminal's repo and keeps the last repo with a run while you are elsewhere;
 // a block's props can pin it instead: { "repo": "/path/to/repo", "view": "lanes" }.
 // It re-reads when the run's state directory changes (watchFolder), and every minute anyway.
 // Keys (when focused), as in the git graph and the beads view: j k / ↑ ↓ move · ⏎ ⇥ l → details in, h ← x out ·
-// space act · t tail · b in the beads view · / filter · ? keys · 1 2 3 views · d done · [ ] zoom lanes · r refresh;
+// space act · t tail · b in the beads view · / filter · ? keys · 1 2 views · d done · [ ] zoom lanes · r refresh;
 // ⌘← ⌘→ (keys.json, mod:fleet-board) the previous / next run.
 // A bead that starts waiting for you posts a notification; while the docked pane is hidden it still looks every
 // 2 minutes (`fleet runs --json` when agent-fleet has it, else one `fleet status --json` of the last run shown).
@@ -19,7 +19,9 @@ import { VIEWS, SPANS, HIDDEN_CHECK, dur, shortener, graph, tipText } from "./mo
 
 export default class FleetBoard extends View {
   init(_props, cx) {
-    this.view = props()?.view ?? (props()?.overlay ? "lanes" : "board");
+    // A view that no longer exists (a block pinned to "tree" before it went into Board) shows Board.
+    const asked = props()?.view;
+    this.view = VIEWS.some((v) => v.id === asked) ? asked : props()?.overlay ? "lanes" : "board";
     this.selId = null; // the bead selected, the same in every view
     this.order = []; this.ordered = new Set(); // the beads in the order the current view draws them (j k walk it)
     this.drawn = new Map(); // bead -> its element in the body, to scroll the selected one into view
@@ -112,7 +114,7 @@ export default class FleetBoard extends View {
       if (next) this.openOnly(next);
     };
     if (this.help && !is("?", "shift-/")) this.help = false; // any key closes the key list
-    if (is("1", "2", "3")) { this.view = VIEWS[Number(k) - 1].id; this.reveal = true; }
+    if (is("1", "2")) { this.view = VIEWS[Number(k) - 1].id; this.reveal = true; }
     else if (is("j", "down", "ctrl-n", "ctrl-j")) moveTo(at + 1);
     else if (is("k", "up", "ctrl-p", "ctrl-k")) moveTo(at < 0 ? 0 : at - 1);
     else if (is("ctrl-d", "pagedown")) moveTo(at + 10);
@@ -144,8 +146,6 @@ export default class FleetBoard extends View {
 
   // ---------- lanes: one bar per bead over time
 
-  // ---------- tree: open beads in dependency order, git-graph style gutter
-
   // ---------- frame
 
   render(_cx) {
@@ -161,7 +161,7 @@ export default class FleetBoard extends View {
     // The id column fits the longest short id (monospace, ~7.5 px a character at this size), up to 11 characters:
     // a longer id is cut with "…" (the open row's details show it whole), so the title keeps its room.
     this.idW = Math.round(Math.min(6 + 7.5 * 11, Math.max(40, 6 + 7.5 * Math.max(0, ...this.s.beads.map((b) => short(b.id).length)))));
-    const body = this.help ? this.keyList(t) : this.view === "board" ? this.board(t, mono, g, short, now) : this.view === "lanes" ? this.lanes(t, mono, g, short, now) : this.tree(t, mono, g, short, now);
+    const body = this.help ? this.keyList(t) : this.view === "board" ? this.board(t, mono, g, short, now) : this.lanes(t, mono, g, short, now);
     // The selected bead on screen after a move, a view switch or a new filter.
     if (this.reveal) {
       const at = body.indexOf(this.drawn.get(this.selId));

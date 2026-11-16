@@ -70,6 +70,10 @@ dialogs and the fleet pane.
   its commits are lost, and the spaces list no longer force-deletes a branch it didn't look at; a branch
   with no words keeps its name as a space name; a code folder of `~` is searched two levels down,
   without Desktop, Documents and the like. `lib/README.md` also lists the shared keys mods talk through.
+- Fleet board: Lanes show what each step does and whether an agent works in it (a full bar for
+  implement, fix and review, a thin line for a check or the merge; blue, violet, grey, green). Tree
+  is gone into Board: a row shows how many beads it unblocks (`⇣3`), and the critical path sits above
+  the queued beads. `1 2` switch views.
 - `preview-plus` (linziyanleo, MIT) as the ⌘⇧O side panel's file view, with Escape going back.
 - `sidebar-footer`: the sidebar's footer with Settings only; Add machine is in Settings >
   Machines.

@@ -68,18 +68,19 @@ It reads again when the run's state changes on disk, so it is live without polli
 how often a review passes first time, and, once agent-fleet reports gate history, how often and
 how long the fleet waited for you.
 
-**Three views of the same beads**, each bead drawn as the same one-line row (state, id, title,
+**Two views of the same beads**, each bead drawn as the same one-line row (state, id, title,
 what its section doesn't already say, fix rounds `↻2`, a small bar of its phases, time,
 cost), sharing one selection:
 
 - **Board** groups beads by what needs you: needs you, running, interrupted, waiting on
-  GitHub, queued, blocked, done. A finished epic opens with a recap: totals, agent time, the costliest,
-  longest and most-fixed beads.
-- **Lanes** draws every bead's steps over time, in three shades by phase (build: implement,
-  check, fix; review; land: merge and CI), red only where something was sent back or the fleet
-  waited for you, with the agents at work and wave boundaries underneath. It fits the whole run
-  to the width; `[ ]` zoom from 1 hour to 7 days.
-- **Tree** shows the open beads by dependency, with the critical path.
+  GitHub, queued, blocked, done. A bead others wait for shows how many it unblocks (`⇣3`), a blocked
+  one what it waits for, and when beads wait on each other the critical path (the longest chain,
+  which bounds when the epic can finish) sits above the queued ones, its ids in the accent colour. A
+  finished epic opens with a recap: totals, agent time, the costliest, longest and most-fixed beads.
+- **Lanes** draws every bead's steps over time: a full bar where an agent works (blue implement
+  and fix, violet review), a thin line for a check (grey) or the merge (green), red only where
+  something was sent back or the fleet waited for you, with the agents at work and wave boundaries
+  underneath. It fits the whole run to the width; `[ ]` zoom from 1 hour to 7 days.
 
 **A bead's details** (⏎ or click; one row is open at a time, and the details follow `j k`):
 

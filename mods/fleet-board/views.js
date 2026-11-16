@@ -1,4 +1,4 @@
-// Fleet board: drawing: the header, the strip, Board, Lanes, Tree, a bead's row and details, the tail.
+// Fleet board: drawing: the header, the strip, Board, Lanes, a bead's row and details, the tail.
 // Mixed into FleetBoard.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Textarea } from "gpui-base";
@@ -112,8 +112,8 @@ export const ViewsMethods = {
     this.answerOf(b); // its answer field, made now (in the click or key that opened it); a draft stays when it closes
   },
 
-  // One bead in any view: selecting and opening it work the same in Board, Lanes and Tree, and its details open
-  // right under it, so switching views keeps your place. A bead drawn twice (the tree's "(above)") opens once.
+  // One bead in any view: selecting and opening it work the same in Board and Lanes, and its details open
+  // right under it, so switching views keeps your place. A bead drawn twice opens once.
   item(t, b, g, now, key, line) {
     const first = !this.ordered.has(b.id); // a Set beside the list: includes() per row made a frame O(n²)
     if (first) { this.order.push(b.id); this.ordered.add(b.id); }
@@ -304,7 +304,9 @@ export const ViewsMethods = {
   // the room. The same widths in every row keep the columns lined up.
   columns(list, now) {
     const t = theme(), w = (texts) => Math.ceil(Math.max(0, ...texts.map((x) => x.length)) * 7);
+    const reach = (b) => this.graphMemo?.reach.get(b.id) ?? 0;
     this.cols = {
+      reach: list.some((b) => reach(b) > 1) ? 30 : 0,
       loops: list.some((b) => fixRounds(b) > 0) ? 24 : 0,
       bar: (this.width ?? 999) >= 480 && list.some((b) => b.history.length) ? 40 : 0,
       time: w(list.map((b) => this.timeOf(t, b, now)[0])),
@@ -312,12 +314,15 @@ export const ViewsMethods = {
     };
   },
 
-  // The right-hand columns: fix rounds, the phase bar, the time, the cost, in the widths columns() set.
+  // The right-hand columns: what it unblocks, fix rounds, the phase bar, the time, the cost, in the widths columns() set.
   meta(t, b, now) {
-    const c = this.cols ?? { loops: 24, bar: 40, time: 48, cost: 48 };
+    const c = this.cols ?? { reach: 0, loops: 24, bar: 40, time: 48, cost: 48 };
     const col = (w, el) => h_flex().w(w).flex_none().justify_end().items_center().when(Boolean(el), (x) => x.child(el));
-    const loops = fixRounds(b), [time, timeColor] = this.timeOf(t, b, now);
+    const loops = fixRounds(b), [time, timeColor] = this.timeOf(t, b, now), reach = this.graphMemo?.reach.get(b.id) ?? 0;
     return h_flex().flex_none().gap(6).items_center()
+      // What waits on it: worth knowing for a running or queued bead (more than one, or it's just noise).
+      .when(Boolean(c.reach), (el) => el.child(col(c.reach, reach > 1 ? div().id(`reach-${b.id}`).px(4).rounded(3).bg(t.border)
+        .text_size(10.5).text_color(t.foreground).tooltip(`Unblocks ${reach} open beads`).child(`⇣${reach}`) : null)))
       .when(c.loops > 0, (el) => el.child(col(c.loops, loops > 0 ? div().id(`loops-${b.id}`).text_size(ROW.small).text_color(t.ansi9 ?? t.ansi3)
         .tooltip(`${loops} fix round${loops === 1 ? "" : "s"}${fixSessions(b) > loops ? ` (${fixSessions(b)} sessions)` : ""}: a check, the review or CI sent it back`).child(`↻${loops}`) : null)))
       .when(c.bar > 0, (el) => el.child(this.mini(t, b, now)))
@@ -516,10 +521,13 @@ export const ViewsMethods = {
     }
     // The columns fit the rows drawn: every section's beads, Done only while unfolded.
     this.columns(SECTIONS.flatMap((sec) => (sec.fold && !this.showDone && !this.filter ? [] : this.sectionBeads(sec).filter((b) => this.match(b)))), now);
+    // The critical path, once, where the waiting starts: above Queued (else Blocked, else Done).
+    let pathShown = Boolean(this.filter) || !g.chain.length;
     for (const sec of SECTIONS) {
       const list = this.sectionBeads(sec).filter((b) => this.match(b));
       const dropped = sec.also ? list.filter((b) => b.state === sec.also).length : 0;
       if (!list.length) continue;
+      if (!pathShown && ["queued", "blocked", "done"].includes(sec.state)) { pathShown = true; out.push(this.criticalPath(t, mono, g, short)); }
       out.push(h_flex().id(`sec-${sec.state}`).px(10).pt(8).pb(2).gap(6).items_center()
         .when(Boolean(sec.fold), (el) => el.hover((x) => x.bg(t.hover)).on_click((_e, cx) => { this.showDone = !this.showDone; cx.notify(); }))
         .child(div().text_size(11).font_semibold().text_color(sec.state === "parked" ? t.ansi1 : t.dim).child(sec.label.toUpperCase()))
@@ -528,8 +536,22 @@ export const ViewsMethods = {
       if (sec.fold && !this.showDone && !this.filter) continue;
       for (const b of list) out.push(this.row(t, b, mono, g, short, now));
     }
+    if (!pathShown) out.push(this.criticalPath(t, mono, g, short));
     if (!out.length) out.push(div().p(10).text_size(12).text_color(t.dim).child(this.filter ? `No bead matches “${this.filter}”.` : "The run holds no beads yet."));
     return out;
+  },
+
+  // The longest chain of open beads each waiting for the one before: they merge one after another, so it bounds
+  // when the epic can finish. One dim line (its ids also show in the accent colour in every row).
+  criticalPath(t, mono, g, short) {
+    const mph = this.s.gauges.merged_per_hour.map((m) => m.merged).slice(-3);
+    const perHour = mph.length ? mph.reduce((a, b) => a + b, 0) / mph.length : 0;
+    const n = g.chain.length;
+    return h_flex().id("critical-path").px(10).pt(8).pb(2).gap(6).items_center()
+      .tooltip(`The longest chain of open beads, each waiting for the one before: ${n} merges in a row${perHour > 0 ? `, at least ~${dur((n / perHour) * 3600000)} at the current pace` : ""}`)
+      .child(div().flex_none().text_size(11).font_semibold().text_color(t.accent).child("CRITICAL PATH"))
+      .child(div().flex_1().min_w(0).truncate().font_family(mono).text_size(11).text_color(t.dim).child(g.chain.map(short).join(" → ")))
+      .when(perHour > 0, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(`~${dur((n / perHour) * 3600000)}`)));
   },
 
   lanes(t, mono, g, short, now) {
@@ -611,47 +633,6 @@ export const ViewsMethods = {
     return [axis, concRow, ...rows, legend];
   },
 
-  tree(t, mono, g, short, now) {
-    const s = this.s, out = [], seen = new Set();
-    const open = s.beads.filter((b) => g.isOpen(b.id));
-    if (!open.length) return [div().p(10).text_size(12).text_color(t.dim).child("No open beads: everything the run holds is done or dropped.")];
-    const crit = g.chain;
-    const mph = s.gauges.merged_per_hour.map((m) => m.merged).slice(-3);
-    const perHour = mph.length ? mph.reduce((a, b) => a + b, 0) / mph.length : 0;
-    if (crit.length) out.push(v_flex().mx(10).mt(8).mb(4).p(8).gap(2).rounded(6).bg(t.hover)
-      .child(h_flex().gap(6).items_center()
-        .child(div().text_size(11).font_semibold().text_color(t.accent).child("CRITICAL PATH"))
-        .child(div().text_size(11).text_color(t.dim).child(`${crit.length} beads, one after another`)))
-      .child(div().font_family(mono).text_size(12).text_color(t.foreground).child(crit.map(short).join(" → ")))
-      .when(perHour > 0, (el) => el.child(div().text_size(11).text_color(t.dim)
-        .child(`${crit.length} merges in a row: at least ~${dur((crit.length / perHour) * 3600000)} at the current pace`))));
-    else out.push(div().px(10).pt(8).pb(4).text_size(11.5).text_color(t.dim).child("No open bead waits for another: all can run in parallel."));
-    const walk = (b, prefix, last, depth) => {
-      const again = seen.has(b.id);
-      seen.add(b.id);
-      const branch = depth === 0 ? "" : last ? "└─ " : "├─ ";
-      const extra = b.blockers.filter((p) => p !== g.parentOf.get(b.id));
-      const onPath = g.critical.has(b.id);
-      if (this.match(b)) out.push(this.item(t, b, g, now, `tree-${b.id}-${out.length}`, h_flex().px(10).h(ROW.h).gap(6).items_center()
-        .when(depth > 0, (el) => el.child(div().flex_none().mr(-6).font_family(mono).text_size(ROW.id).text_color(onPath ? t.accent : t.border).child(prefix + branch)))
-        .child(this.glyph(t, b))
-        .child(this.idCell(t, b, g, short, mono).w(this.idW).flex_none())
-        .when(extra.length > 0, (el) => el.child(div().flex_none().text_size(ROW.small).text_color(t.dim).child(`+${extra.map(short).join(",")}`)))
-        .when(g.reach.get(b.id) > 1, (el) => el.child(div().id(`reach-${b.id}-${out.length}`).flex_none().px(4).rounded(3).bg(t.border).text_size(10.5).text_color(t.foreground)
-          .tooltip(`Unblocks ${g.reach.get(b.id)} open beads`).child(`⇣${g.reach.get(b.id)}`)))
-        .child(div().flex_1().min_w(0).truncate().text_size(ROW.text).text_color(again ? t.dim : this.titleColor(t, b)).child(again ? "(above)" : b.title))));
-      if (again) return;
-      const kids = (g.kids.get(b.id) ?? []).filter((k) => g.parentOf.get(k) === b.id && g.isOpen(k)).map((k) => g.byId.get(k));
-      kids.forEach((k, i) => walk(k, depth === 0 ? "" : prefix + (last ? "   " : "│  "), i === kids.length - 1, depth + 1));
-    };
-    // Roots: open beads that don't hang under an open bead.
-    const roots = open.filter((b) => !(g.parentOf.get(b.id) && g.isOpen(g.parentOf.get(b.id))));
-    const order = { parked: 0, running: 1, interrupted: 2, "waiting for CI": 3, queued: 4, blocked: 5 };
-    roots.sort((a, b) => (g.critical.has(b.id) - g.critical.has(a.id)) || (order[a.state] ?? 6) - (order[b.state] ?? 6));
-    for (const r of roots) walk(r, "", true, 0);
-    return out;
-  },
-
   // ? : every key, in the git graph's and the beads view's words.
   keyList(t) {
     const rows = [
@@ -662,7 +643,7 @@ export const ViewsMethods = {
       ["t", "its fleet tail at the bottom"],
       ["b", "it in the beads view"],
       ["/", "filter by id or title (backspace clears)"],
-      ["1 2 3", "Board, Lanes, Tree"],
+      ["1 2", "Board, Lanes"],
       ["⌘← ⌘→", "the previous / next fleet run"],
       ["d", "show or fold Done"],
       ["[ ]", "zoom Lanes"],

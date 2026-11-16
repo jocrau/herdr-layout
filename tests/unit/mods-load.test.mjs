@@ -22,7 +22,7 @@ for (const mod of readdirSync(MODS, { withFileTypes: true }).filter((d) => d.isD
 test("FleetBoard has its methods from every module", async () => {
   const { default: FleetBoard } = await import(pathToFileURL(path.join(MODS, "fleet-board/main.js")).href);
   for (const m of ["init", "key", "render", "worker", "readStep", "scanStep", "show", "alertParked", "ask", "runFleet",
-    "sendAnswer", "actions", "header", "board", "lanes", "tree", "details", "stepTable", "row", "tailPanel"]) {
+    "sendAnswer", "actions", "header", "board", "lanes", "details", "stepTable", "row", "tailPanel"]) {
     assert.equal(typeof FleetBoard.prototype[m], "function", m);
   }
 });

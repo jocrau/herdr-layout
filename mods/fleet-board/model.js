@@ -1,7 +1,7 @@
 // Fleet board: what the views compute from a snapshot, with no Herdr or UI imports (tests import it).
 
 export const STEPS = ["implement", "fix", "review", "check", "merge"];
-export const VIEWS = [{ id: "board", label: "Board" }, { id: "lanes", label: "Lanes" }, { id: "tree", label: "Tree" }];
+export const VIEWS = [{ id: "board", label: "Board" }, { id: "lanes", label: "Lanes" }];
 // Lanes' time window: "fit" spans the run from its first step to now (or its last activity), filling the width.
 export const SPANS = ["fit", ...[1, 4, 12, 48, 168].map((h) => h * 3600000)];
 export const IDLE_POLL = 60000; // the watch is the main signal; this catches what it misses
@@ -25,7 +25,7 @@ export const SECTIONS = [
   { state: "done", also: "dropped", label: "Done", fold: true },
 ];
 
-// One row size for every view (Board, Lanes, Tree), so a bead's row keeps its height and its id its place
+// One row size for every view (Board, Lanes), so a bead's row keeps its height and its id its place
 // when you switch: the row's height, the id's size, the title's, and the small print's.
 export const ROW = { h: 24, id: 12.5, text: 12, small: 11.5 };
 
@@ -134,12 +134,7 @@ export function graph(beads) {
   let chain = [];
   for (const b of beads) if (isOpen(b.id)) { const c = longest(b.id); if (c.length > chain.length) chain = c; }
   if (chain.length < 2) chain = [];
-  // In the tree each bead hangs under one blocker: the one on the critical path, else its first.
-  const parentOf = new Map(beads.map((b) => {
-    const ps = b.blockers.filter((p) => byId.has(p));
-    return [b.id, ps.find((p) => chain.includes(p)) ?? ps[0] ?? null];
-  }));
-  return { byId, kids, reach, chain, critical: new Set(chain), isOpen, parentOf };
+  return { byId, kids, reach, chain, critical: new Set(chain), isOpen };
 }
 
 // A gate's reason without the kind it starts with ("questions: How should…" -> "How should…").
