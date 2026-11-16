@@ -1,5 +1,5 @@
 // Fleet board: the agent-fleet epic of the focused terminal's repo, beside the chat.
-// Reads `fleet status --json` (agent-fleet 0.33+) and draws it two ways:
+// Reads `fleet status --json` (agent-fleet 0.37+) and draws it two ways:
 //   Board  every bead sorted by what needs you, with the step it is at in words; what each unblocks (⇣N)
 //          and, when beads wait on each other, the critical path above the queued ones
 //   Lanes  each bead's steps over time: parallel work, long steps, fix loops, waits
@@ -64,7 +64,6 @@ export default class FleetBoard extends View {
       }
     });
     this.runs = new Map(); // every run found: key -> summary (the strip of chips)
-    this.noRun = new Map(); // folder -> when it had no run (the scan skips it for a while)
     this.pin = null; // { cwd, focus }: a chip chosen; holds until the focus moves to another folder
     this.dirty = new Set(); // repositories (state directory names) whose run changed since the strip read it
     this.hidden = false;
@@ -73,7 +72,7 @@ export default class FleetBoard extends View {
     this.request = "force";
     this.gen = 0; this.beat = Date.now();
     this.snaps = new Map(); // folder -> the last snapshot read there, shown at once when you switch to it
-    this.scanQ = null; this.scanAt = 0; this.nextLook = Date.now() + HIDDEN_CHECK;
+    this.scanAt = 0; this.nextLook = Date.now() + HIDDEN_CHECK;
     // One worker does every background job in turn (reads, the strip's scan, the tail, the hidden look):
     // Herdr wakes only one of a mod's sleeping tasks reliably, so tasks sleeping side by side starve.
     cx.spawn((cx) => this.worker(cx, this.gen));
@@ -157,7 +156,7 @@ export default class FleetBoard extends View {
     // The dependency graph once per snapshot (it walks every bead's dependents), not once per frame.
     if (this.graphOf !== this.s) { this.graphOf = this.s; this.graphMemo = graph(this.s.beads); }
     const g = this.graphMemo, short = shortener(this.s.epic.id);
-    this.order = []; this.ordered = new Set(); this.drawn = new Map();
+    this.order = []; this.ordered = new Set(); this.drawn = new Map(); this.pinned = null;
     // The id column fits the longest short id (monospace, ~7.5 px a character at this size), up to 11 characters:
     // a longer id is cut with "…" (the open row's details show it whole), so the title keeps its room.
     this.idW = Math.round(Math.min(6 + 7.5 * 11, Math.max(40, 6 + 7.5 * Math.max(0, ...this.s.beads.map((b) => short(b.id).length)))));
@@ -180,6 +179,7 @@ export default class FleetBoard extends View {
         .child(div().text_size(12).text_color(this.filtering ? t.accent : t.dim).child("/"))
         .child(Input.new(this.filterState).flex_1().text_size(12))
         .child(div().flex_none().text_size(11).text_color(t.dim).child(this.filter ? `${this.order.length} of ${this.s.beads.length}` : "esc clears"))))
+      .when(Boolean(this.pinned) && !this.help, (el) => el.child(this.pinned))
       .child(v_flex().id(`fb-${this.view}`).flex_1().min_h(0).pb(8).overflow_y_scrollbar().track_scroll(this.scroll).children(body))
       .when(this.tailOn, (el) => el.child(this.tailPanel(t, mono, short, now)))
       .child(h_flex().id("footer").px(10).py(5).border_t_1().border_color(t.border).gap(6).items_center()

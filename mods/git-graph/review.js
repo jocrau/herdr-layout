@@ -85,6 +85,8 @@ export const ReviewMethods = {
       const r = await exec("git", [...READ, "rev-parse", "--verify", "-q", `${ask.head}^{commit}`], { cwd: this.root, on: this.on });
       const hash = r.code === 0 ? r.stdout.trim() : null;
       const commit = hash ? this.commits[this.index.get(hash)] : null;
+      // Local change: the PR view's head further back than the pages read: read on (up to five more pages).
+      if (!commit && hash && this.hasMore && (ask.tries ?? 0) < 5) { ask.tries = (ask.tries ?? 0) + 1; ask.done = false; this.loadMore(cx); return; }
       if (!commit) {
         notify({ title: ask.title ?? "Git", body: hash ? `${ask.head} (${hash.slice(0, 8)}) isn't in the loaded history.` : `No commit ${ask.head} in this repository.`, level: "warning", timeout: 6000 });
         return;
@@ -164,10 +166,12 @@ export const ReviewMethods = {
           const r = await exec("git", [...READ, ...args], { cwd: this.root, on: this.on });
           if (r.code !== 0) throw new Error(r.stderr.trim());
           rows = diffRows(r.stdout) ?? [{ kind: "", text: file.binary ? "Binary file changed" : "No text changes" }];
+          rows = this.prDiffRows(file.path, rows); // the PR view: findings under their lines
         }
       } catch (e) { rows = [{ kind: "", text: `Can't show this diff: ${e?.message ?? e}` }]; }
       if (this.selected === hash && this.details === details && this.diff?.path === file.path) {
         this.diff = { path: file.path, rows, width: Math.max(300, ...rows.map((r) => r.text.length * 6.6 + 60)) };
+        this.prJump(cx);
       }
       cx.notify();
     });
@@ -204,8 +208,9 @@ export const ReviewMethods = {
     }
     const meta = (k, v, color) => h_flex().gap(8).text_size(11.5).child(div().w(64).flex_none().text_color(t.dim).child(k)).child(div().min_w(0).truncate().text_color(color ?? t.muted).child(v));
     const lines = commit.uncommitted || !d?.message ? "" : d.message.split("\n").slice(1).join("\n").trim();
-    const info = v_flex().id("graph-details").flex_none().max_h(230).overflow_y_scrollbar().px(14).py(10).gap(4)
-      .when(since && Boolean(s?.base), (el) => el
+    // Local change: in the PR view the notes have the height the line under them was dragged to.
+    const info = v_flex().id("graph-details").flex_none().when(this.prReviewing(), (e) => e.h(this.notesHeight())).when(!this.prReviewing(), (e) => e.max_h(230)).overflow_y_scrollbar().px(14).py(10).gap(4)
+      .when(since && Boolean(s?.base) && !this.prReviewing(), (el) => el
         .child(meta("Base", s.base, t.accent))
         .child(meta("Branched", s.from?.slice(0, 8) ?? "").font_family(mono))
         .child(meta("Up to", commit.uncommitted ? "uncommitted changes" : commit.subject))
@@ -223,6 +228,7 @@ export const ReviewMethods = {
         .child(meta("Author", `${commit.author} <${commit.email}>`))
         .child(meta("Date", `${stamp(commit.time)} · ${ago(commit.time)}`)))
       .when(Boolean(d?.committer && d.committer !== d.author), (el) => el.child(meta("Committer", d.committer)))
+      .when(this.prReviewing(), (el) => el.child(this.prNotes(t, mono)))
       .when(Boolean(lines), (el) => el.child(v_flex().pt(6).children(lines.split("\n").map((line) => div().text_color(t.muted).child(line || " ")))))
       .when(Boolean(d?.error), (el) => el.child(div().text_color(t.ansi1).child(d.error)));
     const add = files.reduce((n, f) => n + f.add, 0), del = files.reduce((n, f) => n + f.del, 0);
@@ -232,6 +238,7 @@ export const ReviewMethods = {
       const sc = f.status === "A" ? t.ansi2 : f.status === "D" || f.status === "U" ? t.ansi1 : t.blocked;
       return h_flex().h(24).px(8).gap(8).items_center().rounded(6)
         .when(i === this.fileAt, (e) => e.bg(zone === "files" ? t.selected : t.hover))
+        .child(div().w(6).flex_none().child(this.prFileMark(f.path, t) ?? div()))
         .child(div().w(12).flex_none().text_size(11).text_color(sc).child(f.status))
         .child(h_flex().flex_1().min_w(0).child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().min_w(0).truncate().child(name)))
         .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`)))
@@ -242,12 +249,13 @@ export const ReviewMethods = {
     const left = v_flex().w(this.filesWidth()).flex_none().h_full().min_h(0)
       .child(h_flex().h(32).flex_none().px(10).gap(6).items_center().border_b(1).border_color(t.border).text_size(11.5)
         .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(title))
-        .when(!commit.uncommitted || Boolean(this.head), (e) => e.child(modes))
+        .when(!commit.uncommitted || Boolean(this.head), (e) => e.child(this.prReviewing() ? this.prModes(t) : modes))
         .when(Boolean(commit.uncommitted), (e) => e.child(div().id("graph-open-changes").px(6).py(1).rounded(4).text_color(t.accent).cursor_pointer().hover((s) => s.bg(t.hover))
           .on_click(() => showChanges()).child("Open Changes")))
         .child(close))
       .child(info)
-      .child(h_flex().h(26).flex_none().px(14).gap(8).items_center().text_size(11.5).border_t(1).border_color(t.border)
+      .when(this.prReviewing(), (e) => e.child(this.notesHandle(t)))
+      .child(h_flex().h(26).flex_none().px(14).gap(8).items_center().text_size(11.5).when(!this.prReviewing(), (e) => e.border_t(1).border_color(t.border))
         .child(div().text_color(zone === "files" ? t.accent : t.muted).when(zone === "files", (e) => e.font_semibold()).child(d ? count(files.length + (d.more ?? 0), "file") : "Loading files…"))
         .when(add > 0 || del > 0, (e) => e.child(div().text_color(t.ansi2).child(`+${add}`)).child(div().text_color(t.ansi1).child(`−${del}`))))
       .child(div().relative().flex_1().min_h(0).px(4).child(fileList).child(Scrollbar.vertical(filesId).viewport_from_layout().absolute().inset_0()));
@@ -429,7 +437,9 @@ export const ReviewMethods = {
     return true;
   },
 
-  diffRow({ kind, number, text }, t) {
+  diffRow(row, t) {
+    const { kind, number, text } = row;
+    if (kind === "F") return this.prDiffNote(row, t);
     if (kind === "@") return div().w_full().px(12).h(DIFF_ROW).flex_none().truncate().bg(t.raised).text_color(t.dim).child(text);
     // Local change: added and removed lines stand out: a stronger tint, a stronger band
     // behind the line number, and the number in the line's color.

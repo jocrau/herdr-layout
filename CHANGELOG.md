@@ -7,6 +7,12 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status`, `preview-plus` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- `pr-board` (⌘⇧R): pr-flow's queue of pull requests beside your agents, grouped by your next move,
+  each PR with what it is, who's in it and the next step; only the actions possible in its state.
+  The PR view (⌘⌥R, `d`) is the git graph on the PR's range with the queue beside it and pr-flow's
+  notes and findings on their lines; branches with a tracked PR show its stage. Agent actions go to
+  the PR's own Claude tab. The file browser opens at a line (`props.line`).
+
 - Safer destructive actions (from a code review): the git graph's file reset takes the name
   literally (`a[1].log` no longer also deletes `a1.log`); ⇧C keeps a partial staging; the main
   checkout is never offered for "Remove worktree". In the spaces list, Rebase and Merge refuse
@@ -73,12 +79,13 @@ dialogs and the fleet pane.
 - Fleet board: Lanes show what each step does and whether an agent works in it (a full bar for
   implement, fix and review, a thin line for a check or the merge; blue, violet, grey, green). Tree
   is gone into Board: a row shows how many beads it unblocks (`⇣3`), and the critical path sits above
-  the queued beads. `1 2` switch views.
+  the queued beads. `1 2` switch views. The Lanes time axis and busy row stay put while the lanes
+  scroll. It needs agent-fleet 0.37 now, and its support for older versions is gone.
 - `preview-plus` (linziyanleo, MIT) as the ⌘⇧O side panel's file view, with Escape going back.
 - `sidebar-footer`: the sidebar's footer with Settings only; Add machine is in Settings >
   Machines.
 - `fleet-board` (⌘⇧F; ⌘⌥F as a dialog): an agent-fleet epic beside your agents, read from
-  `fleet status --json` (agent-fleet 0.33+) and re-read when the run's state changes. Board
+  `fleet status --json` (agent-fleet 0.37+) and re-read when the run's state changes. Board
   (beads by what needs you, a recap for a finished epic), Lanes (every step over time) and Tree
   (open beads by dependency, the critical path) draw the same one-line row and share one
   selection; `/` filters. A bead's details show where its time went, its life to scale and every
@@ -91,6 +98,9 @@ dialogs and the fleet pane.
 - `space-agents`: each Claude Code agent's row shows its context used (a short bar and the
   percent, yellow from 60 %, red from 80 %), from the `claude.context` terminal label that
   `extras/claude-statusline.py` sets when the whole percent changes; `--session-end` clears it.
+  Contributed by Samuel Skinner.
+- `space-agents`: right-click an agent row to pin it or mark it unread. A marked idle agent shows
+  in Done until you go back to it after leaving it, or it starts working (`agents.unread`, shared).
   Contributed by Samuel Skinner.
 - `worktree-actions`/`worktree-support`: a left click on a worktree in the spaces panel only
   goes to a space or tab already open there. Its right-click menu offers "Open as space",

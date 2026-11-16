@@ -24,44 +24,16 @@ export function steps(history) {
   return out;
 }
 
-// Every time the fleet waited for the person on a bead: its gates[] (agent-fleet.flow.snapshotgates) with
-// epoch-ms times; without them, the open gate alone.
+// Every time the fleet waited for the person on a bead: its gates[], with epoch-ms times.
 export function gatesOf(b) {
-  if (Array.isArray(b.gates)) {
-    const starts = (b.history ?? []).map((h) => ms(h.start)).filter((t) => t !== null).sort((x, y) => x - y);
-    return b.gates.map((g) => ({ ...g, opened: ms(g.opened), resolved: ms(g.resolved) })).filter((g) => g.opened !== null).map((g) => {
-      // Open, but the bead isn't parked any more (it went on, or was dropped): the wait ended where its next
-      // step started; with none, it isn't counted.
-      if (g.resolved !== null || b.state === "parked") return g;
-      const next = starts.find((t) => t > g.opened);
-      return next === undefined ? null : { ...g, resolved: next, how: g.how ?? "went on" };
-    }).filter(Boolean);
-  }
-  const since = ms(b.gate?.since);
-  return since === null ? [] : [{ id: b.gate.id, kind: b.gate.kind, shown: b.gate.shown, reason: b.gate.reason, opened: since, resolved: null, how: null }];
-}
-
-// gauges.person_waits worked out from the gates, for an agent-fleet that gives gates[] but not the gauge.
-export function personWaits(beads) {
-  const all = beads.flatMap((b) => b.gates), now = Date.now();
-  const resolved = all.filter((g) => g.resolved !== null && g.how !== "withdrawn").map((g) => (g.resolved - g.opened) / 1000).sort((a, b) => a - b);
-  const by_kind = {};
-  for (const g of all) {
-    const k = (by_kind[g.kind] ??= { count: 0, total_seconds: 0 });
-    k.count += 1; k.total_seconds += ((g.resolved ?? now) - g.opened) / 1000;
-  }
-  // The clock time anything waited for the person (overlapping waits count once).
-  let wall = 0, end = -Infinity;
-  for (const g of [...all].sort((a, b) => a.opened - b.opened)) {
-    const to = g.resolved ?? now;
-    if (to <= end) continue;
-    wall += to - Math.max(g.opened, end); end = to;
-  }
-  return {
-    count: all.length, open: all.filter((g) => g.resolved === null).length, wall_seconds: wall / 1000,
-    total_seconds: all.reduce((n, g) => n + ((g.resolved ?? now) - g.opened) / 1000, 0),
-    median_seconds: resolved.length ? resolved[Math.floor(resolved.length / 2)] : null, by_kind,
-  };
+  const starts = (b.history ?? []).map((h) => ms(h.start)).filter((t) => t !== null).sort((x, y) => x - y);
+  return (b.gates ?? []).map((g) => ({ ...g, opened: ms(g.opened), resolved: ms(g.resolved) })).filter((g) => g.opened !== null).map((g) => {
+    // Open, but the bead isn't parked any more (it went on, or was dropped): the wait ended where its next
+    // step started; with none, it isn't counted.
+    if (g.resolved !== null || b.state === "parked") return g;
+    const next = starts.find((t) => t > g.opened);
+    return next === undefined ? null : { ...g, resolved: next, how: g.how ?? "went on" };
+  }).filter(Boolean);
 }
 
 // Epoch milliseconds for every time; a few derived fields the views share.
@@ -75,15 +47,13 @@ export function normalize(raw, cwd) {
     blockers: b.blockers ?? [],
     gates: gatesOf(b),
   }));
-  // Past waits for the person come with agent-fleet.flow.snapshotgates; before it, only the open gate is known.
-  const gateHistory = (raw.beads ?? []).some((b) => Array.isArray(b.gates));
   return {
     cwd,
     generated: ms(raw.generated),
     runDir: raw.run_dir,
     epic: {
       ...e,
-      // Defaults for what an older or partial snapshot leaves out, so the views never read through undefined.
+      // Defaults for what a partial snapshot leaves out, so the views never read through undefined.
       workers: { used: 0, max: null, ...(e.workers ?? {}) },
       beads: { total: 0, done: 0, dropped: 0, parked: 0, running: 0, ...(e.beads ?? {}) },
       wave: { running: false, ...e.wave, started: ms(e.wave?.started), last_ended: e.wave?.last_ended ? { ...e.wave.last_ended, at: ms(e.wave.last_ended.at) } : null },
@@ -94,9 +64,8 @@ export function normalize(raw, cwd) {
       ...raw.gauges,
       merged_per_hour: (raw.gauges?.merged_per_hour ?? []).map((m) => ({ from: ms(m.from), merged: m.merged })),
       parked_waits: (raw.gauges?.parked_waits ?? []).map((p) => ({ ...p, since: ms(p.since) })),
-      person_waits: raw.gauges?.person_waits ?? (gateHistory ? personWaits(beads) : null),
+      person_waits: raw.gauges?.person_waits ?? null,
     },
-    gateHistory,
   };
 }
 
@@ -139,11 +108,11 @@ export function changedRepos(root, paths) {
 }
 
 // What a failed `fleet status --json` means, from its exit code and error text:
-//   kind "none": no fleet here (no .fleet.toml, no run); "old": agent-fleet before 0.33;
+//   kind "none": no fleet here (no .fleet.toml, no run); "old": an agent-fleet without status --json;
 //   "missing": no fleet command; "error": anything else.
 export function failure(code, stderr, bin = "fleet") {
   const err = (stderr || "").trim();
-  if (/unrecognized arguments: --json/.test(err)) return { ok: false, kind: "old", message: "fleet status --json needs agent-fleet 0.33 or later." };
+  if (/unrecognized arguments: --json/.test(err)) return { ok: false, kind: "old", message: "The fleet board needs agent-fleet 0.37 or later." };
   if (/\.fleet\.toml is missing|no (fleet )?run|nothing has run|no epic/i.test(err)) return { ok: false, kind: "none", message: err.replace(/^fleet: /, "") };
   if (code === 127 || /command not found|No such file/.test(err)) return { ok: false, kind: "missing", message: `No ${bin} command: run \`fleet install-cli\`.` };
   return { ok: false, kind: "error", message: err.replace(/^fleet: /, "") || `fleet exited with ${code}` };

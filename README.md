@@ -16,6 +16,7 @@ agent-fleet runs.
 | ⌘B | **Beads** (dialog) | The [beads](https://github.com/steveyegge/beads) issues of the focused repository as a foldable tree, with details, editing and labels. |
 | ⌘N | **New space** (dialog) | Asks for a name and a folder: type to filter the git repositories under your code folder (`~/Code`, or `code_dir` in the [settings](#settings)), with the one you're in first, then recent ones; or Home, or Browse… for any folder. Opens a space there with that name, its first tab named the same, and Claude Code running there as the Remote Control session of that name (`claude --remote-control <name>`). All from the keyboard: Enter right after the name opens it in the repository you're in; Tab moves to the folder, ↑↓ pick, Enter opens. The + in the spaces list and a worktree's "Open as space" ask the same way. |
 | ⌘⇧O | Side panel | [Preview Plus](https://github.com/linziyanleo/herdr-mods) (the file tree with a rendered preview; Escape goes back) and Herdr's Changes panel. |
+| ⌘⇧R | **PR board** (pane on the right; ⌘⌥R opens the PR view) | Your [pr-flow](#pr-board) queue of pull requests, grouped by your next move: what each PR is, who's in it, and the next step; the PR view reviews one in the git graph with its findings. See [PR board](#pr-board). |
 | ⌘⇧F | **Fleet board** (pane on the right; ⌘⌥F as a large dialog) | An [agent-fleet](#fleet-board) run beside your agents: what needs you first, where every bead is, where its time went, and the gate's answer or resume right there. See [Fleet board](#fleet-board). |
 
 ![The git graph](docs/git-graph.png)
@@ -44,7 +45,8 @@ the worktree, deletes the branch and closes its space or tab.
 
 A repository space's own menu has pull, push and fetch as well.
 
-The agents list shows each agent with its space's avatar. The status bar can show your Claude
+The agents list shows each agent with its space's avatar. Right-click an agent to pin it to the top or
+mark it unread: an idle agent marked unread waits in Done until you go back to it. The status bar can show your Claude
 subscription usage (see below).
 
 All three dialogs and the fleet pane use the same keys, for vim and arrow users alike: `j k` or
@@ -126,11 +128,54 @@ pane is hidden (it then looks every 2 minutes); clicking it shows the pane.
 | ⌘← ⌘→ | previous or next run |
 | `?` | every key |
 
-**Setting it up.** It needs agent-fleet 0.33 or later (`fleet status --json`); later versions
-add the strip's `fleet runs --json`, gate history and whole tail lines, and the board uses
-each once it's there. The pane is hidden until ⌘⇧F. Another `fleet` than the one on your PATH
+**Setting it up.** It needs agent-fleet 0.37 or later (`fleet status --json`, `fleet runs --json`
+and `fleet tail --full`). The pane is hidden until ⌘⇧F. Another `fleet` than the one on your PATH
 (a checkout's `scripts/fleet`, say) goes in the [settings](#settings) as `fleet`. To pin a layout block to one repository instead of following the
 focused terminal, give it props `{"repo": "/path/to/repo"}`.
+
+## PR board
+
+For pull requests managed with pr-flow, a Claude Code plugin that keeps one queue of the PRs you
+review and the PRs you wrote, and does the review, fix and merge work through agents. pr-flow isn't
+public yet; without it the pane says so and the rest of the layout works as before.
+
+**The pane (⌘⇧R)** is grouped by your next move. **Your move** lists the PRs waiting on you, by
+what to do (decide, fix, post your comments, answer feedback, review, merge, get ready), each in
+three lines: what it is (number, title, repository), who's in it (author → reviewers, ✓ approved,
+✗ changes requested, dimmer: not reviewed yet, and when it was last pushed) and the next step in one
+sentence. **Waiting on others** is one line per PR: on whom, since when. Later and dormant PRs are
+folded. Red means a real problem: a review loop, failing CI, conflicts. ⏎ opens a PR's details and
+the actions possible in its state: the next step first, its alternatives, then the PR view, its
+Claude tab and GitHub.
+
+**The PR view** (`d`, ⌘⌥R) is the git graph as a dialog on the PR's range in your local clone (its
+branch fetched when needed), with the queue on the left (⌘↑ ⌘↓, or a click, switch PRs; its edge
+drags). Above the changed files, pr-flow's notes: why it's in the queue, the findings (a click opens
+one and goes to its line; `n` `N` step through them), where to spend your time, what it changes.
+Findings are marked in the file list and shown under their line in the diff. `c` switches between
+the whole PR and only what changed since your last review. In every graph, a branch with a tracked
+PR carries its stage, and `p` opens its PR view; a PR badge in the sidebar opens it too.
+
+**Acting.** Actions that need a model (review, fix, post, ready, merge…) go to the PR's own Claude
+tab, named after it (`api#506`) in the space set as `pr_space` (default "PR Reviews"): a new tab
+starts Claude Code in your clone, an existing one gets the command typed in, so each PR keeps one
+conversation. The others run through pr-flow directly; approve and hand back ask first.
+
+| Key | |
+|---|---|
+| `j k` | move |
+| ⏎ `l` `h` | open or close the details |
+| `space` | the next step |
+| `d` | the PR view |
+| `t` | its Claude tab |
+| `o` | the PR on GitHub |
+| `s` | sync with GitHub now |
+| `/` | filter |
+| `?` | every key |
+
+It reads pr-flow's queue (`queue --format json`) when pr-flow's state changes and every minute
+while shown, and syncs with GitHub every 10 minutes while shown. Each read saves pr-flow's last
+listing, which its shorthand (`all waiting`) and `queue --changed` refer to.
 
 ## Install
 
@@ -163,7 +208,8 @@ herdr-app do layout.switch '{"name":"workbench"}'
 | Everything | The [Herdr desktop app](https://herdr.dev) (macOS), `git` |
 | Pull requests in the sidebar and the worktree menu | [`gh`](https://cli.github.com), logged in |
 | ⌘B beads | [`bd`](https://github.com/steveyegge/beads), [`fzf`](https://github.com/junegunn/fzf) 0.59 or later, `python3` |
-| ⌘⇧F fleet board | agent-fleet's `fleet` 0.33 or later (not public yet; see [Fleet board](#fleet-board)) |
+| ⌘⇧F fleet board | agent-fleet's `fleet` 0.37 or later (not public yet; see [Fleet board](#fleet-board)) |
+| ⌘⇧R PR board | The pr-flow Claude Code plugin (not public yet; see [PR board](#pr-board)), Node 20+ and `gh` |
 | `o` and `d` in the git graph | Git's editor and diff tool, set in git so Herdr finds them however it was started: `git config --global core.editor "code --wait"` and `git config --global diff.tool vscode`. Without an editor, `o` uses the system's app for the file type |
 | `claude-resume` after a reboot | Optional: [`extras/claude-resume`](extras/claude-resume) and the status line below (see [Resuming Claude sessions](#resuming-claude-sessions-after-a-reboot)) |
 | Usage in the status bar | Optional: a Claude Code status line that writes `~/.local/state/claude-usage.json`, such as [`extras/claude-statusline.py`](extras/claude-statusline.py) (see [Status bar usage](#status-bar-usage)) |
@@ -177,9 +223,10 @@ their folders, which is how they get their data:
 
 - **Programs:** `git` (status, log, fetch, pull, push, worktree; fetch, pull and push reach
   your remotes), `gh` (pull requests, on GitHub), `bd` and `fzf` (the beads view), `python3`
-  (beads-view, the extras), `fleet` (the fleet board), `herdr-app` and `hc`, and your editor and
+  (beads-view, the extras), `fleet` (the fleet board), `node` with pr-flow's script (the PR board), `herdr-app` and `hc`, and your editor and
   diff tool when you ask for them.
 - **Files read:** your repositories; the layout's settings file (see [Settings](#settings)); agent-fleet's state under `~/.local/state/agent-fleet` (watched for changes);
+  pr-flow's state folder (watched; its PR records are read for branches, reviewers and findings);
   `~/.local/state/claude-usage.json` for the status bar; `~/.claude/projects` (only
   `claude-resume`, to find a session's transcript).
 - **Files written:** only by your actions (a commit, an edit in the file browser, a beads
@@ -190,7 +237,7 @@ their folders, which is how they get their data:
 
 ## Settings
 
-The layout works without settings. Two can be set in `~/.config/herdr-app/data/workbench.json`:
+The layout works without settings. These can be set in `~/.config/herdr-app/data/workbench.json`:
 
 ```json
 { "code_dir": "~/Projects", "fleet": "~/src/agent-fleet/scripts/fleet" }
@@ -200,6 +247,10 @@ The layout works without settings. Two can be set in `~/.config/herdr-app/data/w
   `~/Code`, searched 4 levels deep). A home folder (`"~"`) is searched only 2 levels deep, and its
   Desktop, Documents, Downloads, Library and media folders are skipped.
 - `fleet`: the `fleet` command the fleet board runs (default: `fleet` on your PATH).
+- `pr_space`: the space the PR board opens each PR's Claude tab in (default `"PR Reviews"`; without such a
+  space, the one shown).
+- `pr_flow`: the `pr-flow.mjs` the PR board runs (default: the newest installed pr-flow plugin);
+  `pr_flow_state`: another pr-flow state folder (the demo uses its own copy).
 
 ## Status bar usage
 

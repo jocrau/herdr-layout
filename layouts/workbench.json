@@ -63,7 +63,7 @@
       "size": {
         "px": 268
       },
-      "min": 44,
+      "min": 64,
       "max": 480,
       "background": "chrome",
       "resizable": false
@@ -171,6 +171,19 @@
       "type": "block",
       "content": {
         "mod": "fleet-board"
+      },
+      "size": {
+        "px": 400
+      },
+      "min": 320,
+      "max": 720,
+      "hidden": true
+    },
+    {
+      "id": "prs",
+      "type": "block",
+      "content": {
+        "mod": "pr-board"
       },
       "size": {
         "px": 400

@@ -10,7 +10,7 @@ const { MIN_GAP, SCAN_EVERY, DIRTY_EVERY, TAIL_EVERY } = await import("../../mod
 
 // A board that just finished its reads: nothing asked, the strip scanned, no tail panel.
 const board = (over = {}) => Object.assign(Object.create(SchedulerMethods), {
-  hidden: false, request: null, last: Date.now(), scanQ: null, scanAt: Date.now(), hasRunsList: true,
+  hidden: false, request: null, last: Date.now(), scanAt: Date.now(),
   dirty: new Set(), rescanAt: 0, tailOn: false, tail: { id: null, at: 0 }, s: null, nextLook: Date.now() + 60000, ...over,
 });
 
@@ -24,8 +24,7 @@ test("a read asked for is due: forced at once, a soft one after MIN_GAP", () => 
   assert.equal(board({ request: "soft", last: Date.now() - MIN_GAP - 1 }).due(), true);
 });
 
-test("the strip's scan is due when queued, when its time comes, or for a changed run", () => {
-  assert.equal(board({ scanQ: ["/a"] }).due(), true);
+test("the strip's scan is due when its time comes, or for a changed run", () => {
   assert.equal(board({ scanAt: Date.now() - SCAN_EVERY - 1 }).due(), true);
   assert.equal(board({ dirty: new Set(["*"]) }).due(), true);
   assert.equal(board({ dirty: new Set(["repo"]), rescanAt: Date.now() }).due(), false);
@@ -42,7 +41,7 @@ test("the tail is due for a new bead, and again every TAIL_EVERY while it works"
 });
 
 test("hidden, only the look for new waits is due, whatever else is asked", () => {
-  assert.equal(board({ hidden: true, request: "force", scanQ: ["/a"] }).due(), false);
+  assert.equal(board({ hidden: true, request: "force", scanAt: 0 }).due(), false);
   assert.equal(board({ hidden: true, nextLook: Date.now() - 1 }).due(), true);
 });
 

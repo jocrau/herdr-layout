@@ -6,10 +6,16 @@
     "cmd-n": "mod.open:new-space",
     "cmd-shift-o": "layout.toggle:panel",
     "cmd-shift-f": "layout.toggle:fleet",
-    "cmd-alt-f": "mod.open:fleet-board"
+    "cmd-alt-f": "mod.open:fleet-board",
+    "cmd-shift-r": "layout.toggle:prs",
+    "cmd-alt-r": "mod.open:pr-board"
   },
   "mod:fleet-board": {
     "cmd-left": "fleet-board.prev-run",
     "cmd-right": "fleet-board.next-run"
+  },
+  "mod:git-graph": {
+    "cmd-up": "git-graph.prev-pr",
+    "cmd-down": "git-graph.next-pr"
   }
 }

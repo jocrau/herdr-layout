@@ -3,8 +3,9 @@
 // commit) for the focused pane's repository, or `props.folder` when opened as
 // a pane. Labels take double-clicks (checkout; a remote label also fast-forwards its local
 // branch; a branch checked out in another worktree goes there) and right-clicks (menus).
-import { v_flex, VirtualListScrollHandle, InputState } from "gpui-base";
-import { spaces, exec, watchFolder, theme, settings, props, shared, setShared } from "herdr";
+import { div } from "gpui-kit";
+import { v_flex, h_flex, VirtualListScrollHandle, InputState } from "gpui-base";
+import { spaces, exec, watchFolder, theme, settings, props, shared, setShared, nextCommand, run } from "herdr";
 import { layoutLanes } from "./lanes.js";
 import { UNCOMMITTED, parseStatus, withUncommitted, labelsOf, READ, STATUS } from "./git.js";
 import { perform } from "./act.js";
@@ -48,6 +49,8 @@ export class Graph {
     // head (git diff base...head), for this copy only.
     this.ask = props()?.review?.head ? { ...props().review, done: false } : null;
     if (this.ask) this.sinceBase = true;
+    // Local change: props.pr = "owner/repo#n": the PR view (see pr.js), on that PR's repository and range.
+    this.prInit(cx);
     // `/` search over the loaded commits; `b` branch picker.
     this.search = { query: "", matches: [], typing: false };
     this.searchInput = InputState.new({ placeholder: "Search messages, authors, hashes, branches" });
@@ -69,6 +72,17 @@ export class Graph {
     this.reset();
     this.refresh(cx);
     cx.timer.after(1500, (cx) => this.warm(cx));
+    // Local change: keys.json's "mod:git-graph" section: ⌘↑ ⌘↓ step through the PRs in the PR view, and switch
+    // spaces as they do everywhere else in a plain graph.
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = String(await nextCommand()).replace(/^git-graph\./, "");
+        if (c === "prev-pr" || c === "next-pr") {
+          if (this.pr) this.prStep(c === "next-pr" ? 1 : -1, cx); else run(c === "next-pr" ? "space.next" : "space.prev");
+        }
+        cx.notify();
+      }
+    });
     // Remote spaces can't be watched: poll them gently. New folders get read ahead.
     // The Manygit list re-reads too: edits in a working tree don't touch .git.
     cx.timer.every(15000, (cx) => { if (!this.watching || this.state === "workspace") this.refresh(cx, true, true); this.warm(cx); });
@@ -108,11 +122,12 @@ export class Graph {
   // timer: the 15 s re-read, which doesn't search a folder again that held no repositories.
   // more: the next page, which reads the log alone (see loadMore).
   refresh(cx, full = true, timer = false, more = false) {
+    if (this.prWaiting()) return; // the PR view: its repository isn't known yet
     const { cwd, on } = location(this.folder), context = this.key();
     if (context !== this.context) { this.enter(context); full = true; }
     if (!cwd) { this.state = "nofolder"; return; }
     // A repository opened from the Manygit list loads in place of the folder.
-    const { all, remotes, limit } = this, opened = this.opened;
+    const { all, remotes, limit } = this, opened = this.opened, revs = this.prRevs ?? null;
     const loadKey = JSON.stringify([context, opened]);
     // A page asked for during a load waits for it, then reads everything: the load had the old limit.
     if (this.loading?.key === loadKey) { this.again = this.again === "full" || full || more ? "full" : "status"; return; }
@@ -124,12 +139,12 @@ export class Graph {
       try {
         if (more && this.root && this.state === "ready") {
           const { root, on: at, refSignature } = this;
-          const log = await readLog((args) => exec("git", [...READ, ...args], { cwd: root, on: at }), { all, remotes, limit }, JSON.stringify([opened ?? cwd, on]));
+          const log = await readLog((args) => exec("git", [...READ, ...args], { cwd: root, on: at }), { all, remotes, limit, revs }, JSON.stringify([opened ?? cwd, on]));
           if (stale()) return;
           if (log.error) throw new Error(log.error);
           Object.assign(this, { base: log.base, hasMore: log.hasMore, limit, signature: `${log.text}\0${refSignature}` });
         } else if (full || !this.root) {
-          const read = await readFolder(opened ?? cwd, on, { all, remotes, limit });
+          const read = await readFolder(opened ?? cwd, on, { all, remotes, limit, revs });
           if (stale()) return;
           if (read.state === "norepo") {
             if (opened) { this.state = "error"; this.error = `${tilde(opened, on)} isn't a git repository any more.`; return; }
@@ -139,7 +154,8 @@ export class Graph {
           if (!on) this.watch(read.root, context, cx);
           // A second look that finds nothing new leaves the table as it is.
           const shown = this.state === "ready" || this.state === "empty";
-          if (shown && read.signature === this.signature && read.scope === this.scope && sameFiles(read.files, this.files)) return;
+          // (A review asked for still opens: the PR view coming back to a PR whose history didn't change.)
+          if (shown && read.signature === this.signature && read.scope === this.scope && sameFiles(read.files, this.files)) return this.openAsked(cx);
           Object.assign(this, read);
         } else {
           const status = await exec("git", [...READ, ...STATUS], { cwd: this.root, on: this.on });
@@ -163,7 +179,8 @@ export class Graph {
   }
 
   build() {
-    const commits = withUncommitted(this.base, this.files.length, this.head);
+    // Local change: the PR view leaves your checkout's uncommitted changes out (they aren't the PR's).
+    const commits = withUncommitted(this.base, this.prRevs ? 0 : this.files.length, this.head);
     const { rows, width } = layoutLanes(commits);
     this.commits = commits; this.rows = rows; this.lanes = width;
     this.labels = new Map(commits.map((c) => [c.hash, labelsOf(c, this.remotes, this.worktrees)]));
@@ -215,7 +232,7 @@ export class Graph {
   }
 
   loadMore(cx) { this.limit += PAGE; this.refresh(cx, true, false, true); cx.notify(); }
-  setScope(all, cx) { if (this.all !== all) { this.all = all; this.limit = PAGE; this.refresh(cx); } cx.notify(); }
+  setScope(all, cx) { if (this.all !== all || this.prRevs) { this.all = all; this.prRevs = null; this.limit = PAGE; this.refresh(cx); } cx.notify(); }
   setRemotes(cx) { this.remotes = !this.remotes; this.refresh(cx); cx.notify(); }
 
   fetch(cx) {
@@ -251,11 +268,14 @@ export class Graph {
     this.returnFromViewer(cx);
     this.returnFromPopup(cx);
     const t = theme(), mono = settings().font_family ?? "JetBrains Mono", ready = this.state === "ready";
-    return v_flex().id("git-graph").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
+    this.prSlug(cx); // for the PR stage on branches
+    this.prFollow(cx); // the PR view: another PR asked for
+    const graph = v_flex().id("git-graph").size_full().min_h(0).when(!this.pr, (e) => e.rounded(10).border_1().border_color(t.border)).overflow_hidden().bg(t.background)
       .text_color(t.foreground).text_size(12.5).track_focus(this.handle)
       .on_mouse_move((e, cx) => this.moveDrag(e, cx))
       .on_mouse_up("left", (_e, cx) => this.endDrag(cx))
-      .on_hover((hovered, cx) => { if (!hovered) this.endDrag(cx); })
+      // A drag ends when the pointer leaves (a release outside never arrives); in the PR view, the whole frame.
+      .on_hover((hovered, cx) => { if (!hovered && !this.pr) this.endDrag(cx); })
       .on_key_down((e, cx) => {
         const k = e.keystroke;
         // The help panel: any key closes it.
@@ -290,12 +310,13 @@ export class Graph {
           else return;
           cx.stop_propagation(); cx.notify(); return;
         }
+        if (this.prKey(e, cx)) { cx.stop_propagation(); cx.notify(); return; }
         if (k === "shift-r" && !this.search.typing) { this.openRepos(cx); cx.stop_propagation(); return; }
         if (this.state === "ready" && !this.picking && this.zoneKey(e, cx)) { cx.stop_propagation(); return; }
         if (this.state === "ready" && !this.picking) {
           // Lowercase reads (fetch, refresh); a change to branches takes Shift.
           const act = { f: () => this.fetch(cx), "shift-f": () => this.syncAction("ff", cx), "shift-p": () => this.syncAction("push", cx),
-            "shift-c": () => this.syncAction("commit", cx), r: () => this.refresh(cx), "shift-b": () => this.newBranch(),
+            "shift-c": () => this.syncAction("commit", cx), r: () => this.refresh(cx), "shift-b": () => this.newBranch(), p: () => this.openCursorPr(),
             "?": () => { this.help = true; }, "shift-/": () => { this.help = true; } }[e.keystroke];
           if (act) { act(); cx.stop_propagation(); cx.notify(); return; }
           if (this.navKey(e, cx)) { cx.stop_propagation(); return; }
@@ -314,6 +335,7 @@ export class Graph {
         if (Math.abs(height - (this.height ?? 0)) > 1) { this.height = height; if (this.selected) this.keepCursorVisible(cx); cx.notify(); }
       })
       .child(this.header(t))
+      .when(Boolean(this.pr), (e) => e.child(this.prBar(t, mono)))
       .when(Boolean(this.rp), (e) => e.child(this.repoPanel(t)))
       .when(!this.rp && this.state === "workspace", (e) => e.child(this.workspaceList(t)))
       .when(Boolean(this.picking && this.workspace && this.opened), (e) => e.child(this.picker(t)))
@@ -322,6 +344,12 @@ export class Graph {
       .when(!this.rp && ready && !this.help && !this.bp, (e) => e.child(this.toolbar(t)).child(this.columns(t, this.graphWidth())).child(this.list(t, mono))
         .when(Boolean(this.selected), (el) => el.child(this.detailsPane(t, mono))))
       .when(!this.rp && !ready && this.state !== "workspace", (e) => e.child(this.empty(t)));
+    // The PR view: pr-board's queue beside the graph, one frame around both.
+    // Drags that start on its edges (the list's width) move over the list too: the frame passes them on.
+    return !this.pr ? graph : h_flex().id("git-graph-pr").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
+      .on_mouse_move((e, cx) => this.moveDrag(e, cx)).on_mouse_up("left", (_e, cx) => this.endDrag(cx))
+      .on_hover((hovered, cx) => { if (!hovered) this.endDrag(cx); })
+      .child(this.prRail(t, mono)).child(this.railHandle(t)).child(div().flex_1().min_w(0).h_full().child(graph));
   }
 }
 
@@ -330,4 +358,5 @@ import { ManygitMethods } from "./manygit.js";
 import { PickersMethods } from "./pickers.js";
 import { ReviewMethods } from "./review.js";
 import { TableMethods } from "./table.js";
-Object.assign(Graph.prototype, ManygitMethods, PickersMethods, ReviewMethods, TableMethods);
+import { PrMethods } from "./pr.js";
+Object.assign(Graph.prototype, ManygitMethods, PickersMethods, ReviewMethods, TableMethods, PrMethods);

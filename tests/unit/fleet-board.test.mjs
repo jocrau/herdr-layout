@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { dur, timeline, graph, shortener, natural, wordsOf, readOnly, shq, gateText, fixRounds, tipText } from "../../mods/fleet-board/model.js";
-import { normalize, summarize, runKey, parseRuns, parseSnapshot, failure, changedRepos, relevant, stateRoot } from "../../mods/fleet-board/snapshot.js";
+import { normalize, gatesOf, summarize, runKey, parseRuns, parseSnapshot, failure, changedRepos, relevant, stateRoot } from "../../mods/fleet-board/snapshot.js";
 
 const T = (min) => new Date(Date.UTC(2026, 10, 16, 10, min)).toISOString();
 const raw = (over = {}) => ({
@@ -43,6 +43,19 @@ test("a run has one key whether summarized from a snapshot or listed by fleet ru
   assert.equal(listed[0].key, sum.key);
   assert.equal(parseRuns("not json"), null);
   assert.equal(parseRuns(JSON.stringify({ schema: 2, runs: [] })), null);
+  // A run recorded before agent-fleet kept its repository's path has nowhere to read it from: no chip.
+  assert.deepEqual(parseRuns(JSON.stringify({ schema: 1, runs: [{ repo: null, repo_name: "old", epic: "old.ep" }] })), []);
+});
+
+test("waits for the person come from gates[]; an open one on a bead that went on ends at its next step", () => {
+  const g = (resolved) => ({ id: "g", kind: "questions", opened: T(1), resolved });
+  assert.deepEqual(gatesOf({ state: "running" }), []);
+  assert.equal(gatesOf({ state: "parked", gates: [g(null)] })[0].resolved, null, "still waiting");
+  const went = gatesOf({ state: "running", gates: [g(null)], history: [{ start: T(0) }, { start: T(5) }] })[0];
+  assert.equal(went.resolved, Date.parse(T(5)));
+  assert.equal(went.how, "went on");
+  assert.deepEqual(gatesOf({ state: "dropped", gates: [g(null)], history: [{ start: T(0) }] }), [], "never went on: not counted");
+  assert.equal(gatesOf({ state: "done", gates: [g(T(3))] })[0].resolved, Date.parse(T(3)));
 });
 
 test("parseSnapshot and failure say what went wrong", () => {

@@ -127,6 +127,13 @@ export default class Viewer extends View {
     const code = this.code = EditorState.new({ language: LANGUAGE[ext] || ext, readonly: !this.document, soft_wrap: this.wrap, value: this.text, ...style });
     code.on("change", (_event, cx) => this.editorChanged(code, cx));
     this.codeStyle = JSON.stringify(style);
+    // Local change: opened at a line (props.line): it is selected, which brings it into view.
+    if (this.goLine && this.goLine.file === this.selected.file && typeof this.text === "string") {
+      const lines = this.text.split("\n"), n = Math.min(this.goLine.line, lines.length) - 1;
+      const start = lines.slice(0, n).reduce((a, l) => a + l.length + 1, 0);
+      code.set_selected_range({ start, end: start + (lines[n]?.length ?? 0) });
+      this.goLine = null;
+    }
   }
 
   editorChanged(code, cx) {

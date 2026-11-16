@@ -18,10 +18,10 @@ export const folderState = () => ({
 
 // Everything the table shows for a folder, in one round of five git calls: each
 // answers from any subfolder, and status names paths from the repository root.
-export async function readFolder(cwd, on, { all, remotes, limit }) {
+export async function readFolder(cwd, on, { all, remotes, limit, revs = null }) {
   const git = (args) => exec("git", [...READ, ...args], { cwd, on });
   const [rev, log, branches, remoteNames, status] = await Promise.all([
-    git(REV_PARSE), readLog(git, { all, remotes, limit }, JSON.stringify([cwd, on])), git(BRANCHES), git(["remote"]), git(STATUS)]);
+    git(REV_PARSE), readLog(git, { all, remotes, limit, revs }, JSON.stringify([cwd, on])), git(BRANCHES), git(["remote"]), git(STATUS)]);
   const where = parseRevParse(rev.stdout);
   if (!where) return { state: "norepo", cwd, on };
   const { root, head } = where;
@@ -39,7 +39,7 @@ export async function readFolder(cwd, on, { all, remotes, limit }) {
     branches: parsed.names, tracking: parsed.tracking, worktrees: parsed.worktrees,
     remoteNames: remoteNames.stdout.split("\n").filter(Boolean),
     files: status.code === 0 ? parseStatus(status.stdout) : [],
-    refSignature, signature: `${log.text}\0${refSignature}`, scope: scopeOf({ all, remotes }),
+    refSignature, signature: `${log.text}\0${refSignature}`, scope: scopeOf({ all, remotes, revs }),
   };
 }
 
@@ -50,14 +50,14 @@ export async function readFolder(cwd, on, { all, remotes, limit }) {
 // A folder found that way asks for --date-order from then on (skewed: its folder keys, kept while Herdr runs).
 // One commit past the page says whether there are more, as Git Graph asks.
 const skewed = new Set();
-export async function readLog(git, { all, remotes, limit }, folder) {
-  let log = skewed.has(folder) ? null : await git(logArgs({ all, remotes, limit: 2 * limit + 1 }));
+export async function readLog(git, { all, remotes, limit, revs = null }, folder) {
+  let log = skewed.has(folder) ? null : await git(logArgs({ all, remotes, limit: 2 * limit + 1, revs }));
   if (log && log.code !== 0) return { base: [], hasMore: false, text: "", error: log.stderr.trim() };
   let base = log ? parseLog(log.stdout) : null;
   if (!base || childrenFirst(base) !== base) {
     if (skewed.size > 200) skewed.clear();
     skewed.add(folder);
-    log = await git(logArgs({ all, remotes, limit: limit + 1, dateOrder: true }));
+    log = await git(logArgs({ all, remotes, limit: limit + 1, dateOrder: true, revs }));
     if (log.code !== 0) return { base: [], hasMore: false, text: "", error: log.stderr.trim() };
     base = parseLog(log.stdout);
   }

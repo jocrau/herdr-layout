@@ -81,18 +81,11 @@ export const ActionsMethods = {
     return out;
   },
 
-  // What `fleet diff` shows, as the two ends the git graph reviews (base...head): once merged, what its merge
-  // commit brought in; before, its branch against the epic branch on the fleet remote. The snapshot's
-  // `review {base, head}` when agent-fleet gives it, else worked out from the epic branch's name
-  // (<prefix>integration/<epic>: the bead's branch is <prefix><bead>; the remote is "fleet").
+  // What `fleet diff` shows, as the two ends the git graph reviews (base...head): the snapshot's
+  // `review {base, head}` (once merged, what its merge commit brought in; before, its branch against the epic
+  // branch). None for a bead with nothing to show (dropped before it made a branch).
   diffRange(b) {
-    if (b.review?.base && b.review?.head) return { ...b.review, title: `${b.id}: ${b.merged_ref ? "what merged" : "what merges"}` };
-    if (b.merged_ref) return { head: b.merged_ref, base: `${b.merged_ref}^1`, baseName: "the epic branch before it", title: `${b.id}: what merged` };
-    if (!b.history.length) return null;
-    const integration = this.s.epic.integration ?? "";
-    const at = integration.indexOf("integration/");
-    if (at < 0) return null;
-    return { head: `refs/heads/${integration.slice(0, at)}${b.id}`, base: `refs/remotes/fleet/${integration}`, baseName: integration, title: `${b.id}: what merges` };
+    return b.review?.base && b.review?.head ? { ...b.review, title: `${b.id}: ${b.merged_ref ? "what merged" : "what merges"}` } : null;
   },
 
   // The beads view (⌘B) on this bead: its tree unfolded to it, its details open.

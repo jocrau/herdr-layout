@@ -630,7 +630,9 @@ export const ViewsMethods = {
       .child(h_flex().gap(4).items_center().h(12).child(div().w(2).h(12).rounded(1).bg(t.ansi1)).child(div().text_size(11).text_color(t.dim).child("sent back")))
       .child(h_flex().gap(4).items_center().h(12).child(div().w(14).h(2).bg(t.ansi1)).child(div().text_size(11).text_color(t.dim).child("waiting for you")));
     if (!rows.length) rows.push(div().px(10).py(6).text_size(12).text_color(t.dim).child(`Nothing ran in this ${dur(span)}: ] shows more.`));
-    return [axis, concRow, ...rows, legend];
+    // The time axis and the busy row stay put above the scrolling lanes (render() draws them).
+    this.pinned = v_flex().border_b_1().border_color(t.border).child(axis).child(concRow);
+    return [...rows, legend];
   },
 
   // ? : every key, in the git graph's and the beads view's words.

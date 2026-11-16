@@ -3,7 +3,7 @@
 import { props, panes, spaces, run, exec, watchFolder } from "herdr";
 import { readSnapshot, fleetBin, readRuns } from "./fleet.js";
 import { stateRoot, relevant, summarize, changedRepos, runKey } from "./snapshot.js";
-import { IDLE_POLL, SCAN_EVERY, NO_RUN_FOR, DIRTY_EVERY, HIDDEN_CHECK, MIN_GAP, TAIL_EVERY } from "./model.js";
+import { IDLE_POLL, SCAN_EVERY, DIRTY_EVERY, HIDDEN_CHECK, MIN_GAP, TAIL_EVERY } from "./model.js";
 import { shown, load, save, focusedFolder } from "./env.js";
 
 export const SchedulerMethods = {
@@ -84,7 +84,7 @@ export const SchedulerMethods = {
     if (this.hidden) return !props()?.overlay && now >= this.nextLook;
     if (this.request && (this.request === "force" || now - this.last >= MIN_GAP)) return true;
     if (this.tailDue()) return true;
-    return Boolean(this.scanQ) || now - this.scanAt > (this.hasRunsList ? SCAN_EVERY : NO_RUN_FOR) || this.dirty.has("*")
+    return now - this.scanAt > SCAN_EVERY || this.dirty.has("*")
       || (this.dirty.size > 0 && now - (this.rescanAt ?? 0) >= DIRTY_EVERY);
   },
 
@@ -191,13 +191,8 @@ export const SchedulerMethods = {
     if (!b) return false;
     const cwd = this.cwd;
     try {
-      // Whole lines (`--full`) where agent-fleet has it; before it, its own tail cuts each line at a fixed width.
-      const args = ["tail", b.id, "--repo", cwd];
-      let r = await exec(await fleetBin(), this.tailFull === false ? args : [...args, "--full"], { cwd, timeout: 15000 });
-      if (this.tailFull !== false && r.code !== 0 && /unrecognized arguments: --full/.test(r.stderr || "")) {
-        this.tailFull = false;
-        r = await exec(await fleetBin(), args, { cwd, timeout: 15000 });
-      } else if (r.code === 0) this.tailFull = true;
+      // Whole lines (`--full`): without it, fleet's tail cuts each line at a fixed width.
+      const r = await exec(await fleetBin(), ["tail", b.id, "--repo", cwd, "--full"], { cwd, timeout: 15000 });
       // eslint-disable-next-line no-control-regex
       const lines = (r.stdout || "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").split("\n").filter((l) => l.trim());
       this.tail = { id: b.id, lines: lines.slice(-200), at: Date.now(), error: r.code === 0 ? null : (r.stderr || "").trim().replace(/^fleet: /, "") || `fleet tail exited with ${r.code}` };
@@ -209,72 +204,35 @@ export const SchedulerMethods = {
   },
 
   // Hidden, the pane reads nothing for the views; this still notices a bead that starts waiting for you,
-  // every HIDDEN_CHECK: every run when agent-fleet lists them cheaply, else the last run shown.
-  async lookStep(cx) {
+  // every HIDDEN_CHECK, from `fleet runs --json` (one cheap call for every run).
+  async lookStep() {
     if (Date.now() < this.nextLook) return false;
     this.nextLook = Date.now() + HIDDEN_CHECK;
-    const listed = this.hasRunsList !== false ? await readRuns() : null;
+    const listed = await readRuns();
     if (listed) {
-      this.hasRunsList = true;
       for (const r of listed) this.runs.set(r.key, r);
       this.alertRuns(true);
-      return true;
     }
-    this.hasRunsList = false;
-    const cwd = this.cwd ?? load();
-    if (!cwd) return true;
-    const r = await this.timed(cx, cwd);
-    if (r.ok) { this.s = r.snap; this.cwd = cwd; this.remember(cwd, r.snap); this.last = Date.now(); this.alertParked(r.snap); }
     return true;
   },
 
-  // The other runs, for the strip, one step per worker pass (so a read you ask for never waits behind a whole
-  // scan). A full search now and then (every minute with `fleet runs --json`, else every 10 minutes over the
-  // spaces' and panes' folders, one folder a step); in between, only a run whose files changed is read again,
-  // as one watch on the whole state root reports it. True when it read something.
+  // The other runs, for the strip: `fleet runs --json` every SCAN_EVERY; in between, only a run whose files
+  // changed is read again, as one watch on the whole state root reports it. True when it read something.
+  // (A run recorded before agent-fleet kept its repository's path isn't listed; focusing its folder shows it.)
   async scanStep(cx) {
-    if (!this.scanQ) {
-      if (Date.now() - this.scanAt > (this.hasRunsList ? SCAN_EVERY : NO_RUN_FOR) || this.dirty.has("*")) {
-        this.dirty.clear();
-        const listed = await readRuns();
-        this.hasRunsList = Boolean(listed);
-        if (listed) {
-          this.runs = new Map(listed.map((r) => [r.key, r]));
-          this.scanAt = Date.now(); this.alertRuns(); this.watchRoot(cx); cx.notify();
-          return true;
-        }
-        const folders = new Set();
-        for (const sp of spaces()) if (sp.folder && !sp.machine) folders.add(sp.folder);
-        for (const p of panes()) if (p.cwd) folders.add(p.cwd);
-        this.scanQ = [...folders]; this.scanSeen = new Set(); this.scanFound = new Map(); this.scanGone = new Set();
-        return true;
-      }
-      if (!this.dirty.size || Date.now() - (this.rescanAt ?? 0) < DIRTY_EVERY) return false;
-      this.rescanAt = Date.now();
-      await this.rescan(cx);
-      this.alertRuns(); cx.notify();
+    if (Date.now() - this.scanAt > SCAN_EVERY || this.dirty.has("*")) {
+      this.dirty.clear();
+      this.scanAt = Date.now();
+      const listed = await readRuns();
+      // A failed listing keeps the chips there are; the next one comes SCAN_EVERY later.
+      if (listed) { this.runs = new Map(listed.map((r) => [r.key, r])); this.alertRuns(); }
+      this.watchRoot(cx); cx.notify();
       return true;
     }
-    while (this.scanQ.length) {
-      const f = this.scanQ.shift();
-      if (Date.now() - (this.noRun.get(f) ?? 0) < NO_RUN_FOR) continue;
-      // A folder inside a repository already read this scan (a worktree, a subfolder) is that run.
-      if ([...this.scanSeen].some((r) => f === r || f.startsWith(r + "/"))) continue;
-      const r = await this.timed(cx, f);
-      if (!r.ok) { this.noRun.set(f, Date.now()); if (r.kind === "none") this.scanGone.add(f); return true; }
-      this.remember(f, r.snap);
-      const sum = summarize(r.snap, f);
-      this.scanSeen.add(f);
-      if (!this.scanFound.has(sum.key)) this.scanFound.set(sum.key, sum);
-      return true;
-    }
-    // Done. The run on screen stays; so does a run found before whose folder couldn't be read this time
-    // (only a folder that now says it has no run drops its chip).
-    const found = this.scanFound;
-    if (this.s && this.cwd) { const cur = this.summary(this.s, this.cwd); if (!found.has(cur.key)) found.set(cur.key, cur); }
-    for (const [k, r] of this.runs) if (!found.has(k) && !this.scanGone.has(r.cwd)) found.set(k, r);
-    this.runs = found; this.scanQ = null; this.scanAt = Date.now();
-    this.alertRuns(); this.watchRoot(cx); cx.notify();
+    if (!this.dirty.size || Date.now() - (this.rescanAt ?? 0) < DIRTY_EVERY) return false;
+    this.rescanAt = Date.now();
+    await this.rescan(cx);
+    this.alertRuns(); cx.notify();
     return true;
   },
 

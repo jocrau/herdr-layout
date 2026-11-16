@@ -64,7 +64,7 @@ export const count = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 // r would do (unstage vs delete) and the commit dialog's default.
 export const sameFiles = (a, b) => a.length === b.length && a.every((f, i) => f.path === b[i].path && f.status === b[i].status
   && Boolean(f.staged) === Boolean(b[i].staged) && Boolean(f.untracked) === Boolean(b[i].untracked));
-export const scopeOf = ({ all, remotes }) => `${all} ${remotes}`;
+export const scopeOf = ({ all, remotes, revs }) => `${all} ${remotes}${revs?.length ? ` ${revs.join(" ")}` : ""}`;
 // Folders kept as they were last read, and commits' details (a commit never changes).
 export const SEEN = 24, DETAILS = 200;
 export const keep = (map, key, value, max) => { map.delete(key); map.set(key, value); if (map.size > max) map.delete(map.keys().next().value); };

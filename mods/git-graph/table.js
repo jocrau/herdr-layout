@@ -226,6 +226,10 @@ export const TableMethods = {
     if (sd) { this.split = sd.from - (e.position.y - sd.y) / this.unit(); sd.moved = true; cx.notify(); return; }
     const fd = this.filesDrag;
     if (fd) { this.filesSplit = fd.from + (e.position.x - fd.x) / this.unit(); fd.moved = true; cx.notify(); return; }
+    const rd = this.railDrag; // the PR view: the edge of the PR list on the left
+    if (rd) { this.railSplit = rd.from + (e.position.x - rd.x) / this.unit(); rd.moved = true; cx.notify(); return; }
+    const nd = this.notesDrag; // the PR view: the line between its notes and the file list
+    if (nd) { this.notesSplit = nd.from + (e.position.y - nd.y) / this.unit(); nd.moved = true; cx.notify(); return; }
     const d = this.drag;
     if (!d) return;
     const w = this.clampColumn(d.key, d.from + COLUMNS[d.key].side * (e.position.x - d.x) / this.unit());
@@ -237,6 +241,10 @@ export const TableMethods = {
     if (sd) { this.splitDrag = null; if (sd.moved) this.setSplit(this.detailsHeight(), cx); return; }
     const fd = this.filesDrag;
     if (fd) { this.filesDrag = null; if (fd.moved) this.setFilesWidth(this.filesWidth(), cx); return; }
+    const rd = this.railDrag;
+    if (rd) { this.railDrag = null; if (rd.moved) this.setRailWidth(this.railWidth(), cx); return; }
+    const nd = this.notesDrag;
+    if (nd) { this.notesDrag = null; if (nd.moved) this.setNotesHeight(this.notesHeight(), cx); return; }
     const d = this.drag;
     if (!d) return;
     this.drag = null;
@@ -387,6 +395,7 @@ export const TableMethods = {
       // Labels and description clip together, so many labels never push the fixed columns out.
       .child(h_flex().flex_1().min_w(0).h_full().gap(LABEL.GAP).items_center().overflow_hidden()
         .children(this.labels.get(commit.hash).map((l) => this.label(l, color, t, mono)))
+        .children(this.prChips(commit, t, mono))
         .child(div().flex_1().min_w(0).truncate().text_color(fg).when(commit.head, (e) => e.font_semibold()).child(commit.subject)))
       .child(div().w(this.cols.date).flex_none().text_right().truncate().text_color(t.dim).child(commit.uncommitted ? "*" : ago(commit.time)))
       .when(this.wide, (e) => e
@@ -403,14 +412,16 @@ export const TableMethods = {
 
   header(t) {
     const ready = this.state === "ready" || this.state === "empty", ws = this.workspace;
-    const where = this.current ?? (this.head ? `detached at ${this.head.slice(0, 8)}` : null);
+    // Local change: the PR view names the PR's branch, not the checkout's (prHeader in pr.js).
+    const prh = this.prHeader?.() ?? null;
+    const where = prh ? prh.branch : this.current ?? (this.head ? `detached at ${this.head.slice(0, 8)}` : null);
     // Opened from the Manygit list: "‹ Manygit" goes back to it, the repository's name
     // drops the same rows down over the graph to switch to another.
     const repo = ws && this.opened ? ws.repos.find((r) => r.path === this.opened) : null;
     const settingsShown = ready || this.state === "workspace" || (this.state === "norepo" && !this.skipped);
-    const tr = this.current ? this.tracking?.[this.current] : null;
-    const ffCount = this.ctx ? fastForwardable(this.ctx).length : 0;
-    const canPush = Boolean(this.current) && this.remoteNames?.length > 0 && (!tr || tr.gone || tr.ahead > 0);
+    const tr = this.current && !prh ? this.tracking?.[this.current] : null;
+    const ffCount = this.ctx && !prh ? fastForwardable(this.ctx).length : 0;
+    const canPush = !prh && Boolean(this.current) && this.remoteNames?.length > 0 && (!tr || tr.gone || tr.ahead > 0);
     return h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
       .when(!repo, (e) => e.child(div().text_size(13).font_semibold().child(ws ? "Manygit" : "Git")))
       // Local change: which repository, and a way to another one (as R).
@@ -429,7 +440,11 @@ export const TableMethods = {
           .bg(this.picking ? t.selected : t.raised).text_color(t.foreground).hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.togglePicker(cx))
           .child(svg(icon("folder")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(11.5).font_semibold().child(repo.name))))
       .when(ready && Boolean(where), (e) => e.child(h_flex().h(22).px(7).gap(5).min_w(0).items_center().rounded(6).bg(t.accent + "26").text_color(t.accent)
-        .child(svg(icon(this.current ? "branch" : "commit")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(11.5).font_semibold().child(where))))
+        .child(svg(icon(this.current || prh ? "branch" : "commit")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(11.5).font_semibold().child(where))))
+      .when(Boolean(prh?.ahead !== undefined), (e) => e.child(h_flex().gap(4).flex_none().items_center().text_size(11.5)
+        .tooltip("The PR's head against its base: commits it adds, commits the base has that it doesn't")
+        .when(prh.ahead > 0, (el) => el.child(div().text_color(t.ansi2).child(`\u2191${prh.ahead}`)))
+        .when(prh.behind > 0, (el) => el.child(div().text_color(t.ansi1).child(`\u2193${prh.behind} behind`)))))
       .when(this.state === "workspace", (e) => e.child(div().flex_none().text_size(11.5).text_color(t.dim).child(count(ws.repos.length, "repo"))))
       .when(ready && Boolean(tr), (e) => e.child(h_flex().gap(4).flex_none().items_center().text_size(11.5)
         .child(div().text_color(t.dim).child(tr.gone ? `${tr.short} (gone)` : tr.short))
@@ -457,8 +472,10 @@ export const TableMethods = {
       .hover((s) => s.text_color(t.foreground)).on_click(action).child(text);
     return h_flex().h(34).flex_none().px(10).gap(8).items_center().border_b(1).border_color(t.border)
       .child(h_flex().p(2).gap(2).rounded(7).bg(t.background).border_1().border_color(t.border)
-        .child(segment("graph-all", "All branches", this.all, (_e, cx) => this.setScope(true, cx)))
-        .child(segment("graph-current", "Current", !this.all, (_e, cx) => this.setScope(false, cx))))
+        // Local change: the PR view reads only the PR and its base ("This PR"); the others leave that.
+        .when(Boolean(this.pr), (e) => e.child(segment("graph-pr", "This PR", Boolean(this.prRevs), (_e, cx) => this.setPrScope(cx))))
+        .child(segment("graph-all", "All branches", this.all && !this.prRevs, (_e, cx) => this.setScope(true, cx)))
+        .child(segment("graph-current", "Current", !this.all && !this.prRevs, (_e, cx) => this.setScope(false, cx))))
       .child(h_flex().id("graph-remotes").h(24).px(6).gap(6).items_center().rounded(6).cursor_pointer().text_size(11.5).text_color(t.muted)
         .hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click((_e, cx) => this.setRemotes(cx))
         .child(div().size(13).rounded(3).border_1().border_color(this.remotes ? t.accent : t.input).when(this.remotes, (e) => e.bg(t.accent)).flex().items_center().justify_center()
@@ -522,6 +539,8 @@ export const TableMethods = {
       : s === "norepo" ? ["folder", "Not a git repository", `${where ?? "This folder"} isn't inside a git repository, and holds none within ${count(depthSetting(), "level")}. Focus a terminal in one, or search deeper in settings.`]
       : s === "empty" ? ["commit", "No commits yet", "Make the first commit and it shows up here."]
       : s === "error" ? ["graph", "Can't read the history", this.error]
+      : s === "prloading" ? ["graph", "Opening the PR…", "Its record, its branch in your checkout (fetched if it isn't there yet) and its findings."]
+      : s === "prerror" ? ["graph", "Can't open the PR", this.pr?.error ?? ""]
       : ["graph", "Loading history…", ""];
     return v_flex().flex_1().min_h(0).items_center().justify_center().gap(10).px(28).pb(40)
       .child(div().size(46).rounded(12).bg(t.raised).border_1().border_color(t.border).flex().items_center().justify_center()

@@ -24,7 +24,7 @@ const ROW = 26, MATCHES = 300, FILES = 20000, PREVIEW_DELAY = 120;
 // folder another mod opened it on (the git graph's `v`: props { folder, path, rev }).
 function start() {
   const p = props() ?? {};
-  if (typeof p.folder === "string" && p.folder) return { cwd: p.folder, on: null, spaceId: spaces().find((s) => s.active)?.id ?? null, path: p.path, rev: p.rev };
+  if (typeof p.folder === "string" && p.folder) return { cwd: p.folder, on: null, spaceId: spaces().find((s) => s.active)?.id ?? null, path: p.path, rev: p.rev, line: p.line };
   const f = focused();
   const pane = f?.pane ? panes().find((p) => p.pane === f.pane) : null;
   const space = spaces().find((s) => s.id === f?.space) || spaces().find((s) => s.active);
@@ -100,6 +100,8 @@ export default class FileBrowser extends Viewer {
       // Opened on a file: shown (at its commit, when given) with the keyboard on it.
       if (typeof s.path === "string" && s.path) {
         this.reveal(s.path, cx, true); this.atPath = s.path;
+        // Local change: props.line (the PR view's "where to spend your time"): that line, selected once shown.
+        if (Number(s.line) > 0) this.goLine = { file: join(this.root, s.path), line: Number(s.line) };
         this.show({ file: join(this.root, s.path), root: this.root, on: s.on, rev: s.rev }, cx);
         this.viewFocus.focus();
       }

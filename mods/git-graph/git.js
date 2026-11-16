@@ -25,12 +25,13 @@ function checkCommit(commit) {
   }
 }
 
-export function logArgs({ all, remotes, limit, dateOrder = false }) {
+export function logArgs({ all, remotes, limit, dateOrder = false, revs = null }) {
   // All branches walks local branches, tags, remote branches (with Remotes) and HEAD, as other Git tools do.
   // Not `--all`: it also walks the private refs of other tools, such as the per-turn checkpoints of
   // T3 Code (refs/t3/checkpoints/*), which have no label and show up as orphan commits.
   // `--ignore-missing` keeps a repository with no commits (no HEAD yet) an empty log.
-  const scope = all ? ["--branches", "--tags", ...(remotes ? ["--remotes"] : []), "--ignore-missing", "HEAD"] : ["HEAD"];
+  // Local change: `revs` (the PR view: the PR's head and its base branch) reads only those.
+  const scope = revs?.length ? ["--ignore-missing", ...revs] : all ? ["--branches", "--tags", ...(remotes ? ["--remotes"] : []), "--ignore-missing", "HEAD"] : ["HEAD"];
   // --date-order sorts the whole history before printing the first line (0.6 s on a repository of 78,000
   // commits without a commit-graph); git's own order prints at once and differs only where a clock was wrong.
   return ["log", "-z", ...scope, ...(dateOrder ? ["--date-order"] : []), "--decorate=full", `-n${limit}`, `--format=${FORMAT}`];

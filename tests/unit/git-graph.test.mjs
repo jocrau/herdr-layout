@@ -177,3 +177,11 @@ test("one rev-parse answers top level, common dir, HEAD and branch, also with a 
     assert.equal(parseRevParse(""), null, "not a repository");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("the PR view's log reads only the PR's head and its base", async () => {
+  const { logArgs } = await import("../../mods/git-graph/git.js");
+  const args = logArgs({ all: true, remotes: true, limit: 300, revs: ["abc123", "refs/remotes/origin/main"] });
+  assert.ok(args.includes("abc123") && args.includes("refs/remotes/origin/main"));
+  assert.ok(!args.includes("--branches") && !args.includes("--remotes"), "no other branches");
+  assert.ok(logArgs({ all: true, remotes: true, limit: 300 }).includes("--branches"), "without revs: all branches as before");
+});

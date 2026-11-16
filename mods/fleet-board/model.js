@@ -5,8 +5,7 @@ export const VIEWS = [{ id: "board", label: "Board" }, { id: "lanes", label: "La
 // Lanes' time window: "fit" spans the run from its first step to now (or its last activity), filling the width.
 export const SPANS = ["fit", ...[1, 4, 12, 48, 168].map((h) => h * 3600000)];
 export const IDLE_POLL = 60000; // the watch is the main signal; this catches what it misses
-export const SCAN_EVERY = 60000; // with `fleet runs --json` (cheap), the strip's runs are listed this often
-export const NO_RUN_FOR = 600000; // without it, the folders are searched again (and folders without a run retried) this often
+export const SCAN_EVERY = 60000; // the strip's runs are listed (`fleet runs --json`, cheap) this often
 export const DIRTY_EVERY = 15000; // another run whose files changed is read again at most this often
 export const HIDDEN_CHECK = 120000; // hidden, the pane still looks this often for new waits (one cheap read)
 export const MIN_GAP = 15000; // at most one `fleet status --json` per this many ms (a busy wave writes often)
@@ -101,7 +100,7 @@ export function timeline(b, now) {
 }
 
 // Each id as short as it reads: the epic's own beads without the epic (".12", ".snapshot"), others without
-// the repository's prefix (mm-data-platform-erd.8.16: "erd.8.16").
+// the repository's prefix (acme-web-erd.8.16: "erd.8.16").
 export function shortener(epic) {
   const dash = epic.lastIndexOf("-"), repo = dash > 0 ? epic.slice(0, dash + 1) : "";
   return (id) => (id.startsWith(epic + ".") ? id.slice(epic.length) : repo && id.startsWith(repo) ? id.slice(repo.length) : id);
@@ -157,20 +156,6 @@ export function natural(a, b) {
 }
 export const mergedAt = (b) => b.history.filter((h) => h.step === "merge" && h.end).at(-1)?.end ?? 0;
 
-// Text for a tooltip: wrapped at about `width` characters on word boundaries (a tooltip is one line per line, so an
-// agent's long reason ran off the window), at most `lines` lines, the rest as "…". Existing line breaks stay.
-export function tipText(text, width = 90, lines = 6) {
-  const out = [];
-  for (const para of String(text ?? "").split("\n")) {
-    let line = "";
-    for (const word of para.split(/\s+/).filter(Boolean)) {
-      for (let w = word; w.length; ) { // a word longer than a line is cut
-        const piece = w.slice(0, width); w = w.slice(width);
-        if (line && line.length + 1 + piece.length > width) { out.push(line); line = piece; }
-        else line = line ? `${line} ${piece}` : piece;
-      }
-    }
-    out.push(line);
-  }
-  return out.length > lines ? [...out.slice(0, lines - 1), `${out[lines - 1]} …`].join("\n") : out.join("\n");
-}
+// Text for a tooltip: wrapped on word boundaries, at most a few lines (shared: lib/tiptext.js).
+export { tipText } from "./lib/tiptext.js";
+

@@ -13,6 +13,7 @@
 // `git config herdr.worktreeRemove '<cmd>'` in a repo adds a remove action
 // that runs <cmd> ({path} and {branch} filled in, quoted) in a new tab.
 
+import { keyFromUrl, lastQueue, openPrView } from "./lib/prflow.js";
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, run, openOverlay, exec, hc, home, theme, shared, setShared, watchFolder, window, layout, notify } from "herdr";
@@ -30,6 +31,18 @@ function find(node, id) {
 
 // The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
 const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
+
+// Local change: the rail's expand button sits at the top of the spaces list, near where the expanded sidebar's
+// collapse button is (it was at the bottom of the agents list).
+// To the rail (on macOS wide enough for the traffic lights), or back to the width it had.
+function toggleSidebar() {
+  const width = find(layout(), "sidebar")?.size?.px;
+  if (!narrow()) setShared("sidebar.width", width);
+  // Mods edited before the rail went by width still read the flag.
+  setShared("sidebar.collapsed", !narrow());
+  // The rail is at least 64 wide (the layout's min): its header's » and + fit, and both lists line up.
+  run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 268) : window()?.platform === "macos" ? 76 : 64 });
+}
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 // `ps`: panes(), read once by the caller (each read copies every pane).
@@ -739,7 +752,8 @@ export default class Spaces extends View {
       ...(done ? [div().flex_none().text_color(t.dim).child(done)] : []),
       ...(pr ? [h_flex().id(`pr-${r.parent?.id ?? r.w.id}-${pr.number}`).flex_none().gap(2).text_color(color).cursor_pointer().hover((s) => s.underline())
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { cx.stop_propagation(); cx.open_url(pr.url); })
+        // A PR pr-flow tracks opens in the PR view (its diff and findings); any other on GitHub.
+        .on_click((_e, cx) => { cx.stop_propagation(); const key = keyFromUrl(pr.url); if (key && lastQueue()?.records?.[key]) openPrView(key); else cx.open_url(pr.url); })
         .child(`#${pr.number}`)
         .when(Boolean(check), (el) => el.child(div().text_color(check[1]).child(check[0])))] : []),
       ...(r.act ? [div().flex_none().text_color(t.dim).child(age(r.act))] : []),
@@ -879,18 +893,26 @@ export default class Spaces extends View {
       );
   }
 
+  // Local change: collapsed, a space is its avatar (as the expanded list draws it) and its status, its name in a
+  // tooltip; a position number said nothing about which space it was.
   compact({ w, i }, t) {
+    const color = (shared("space.colors") ?? {})[w.id] ?? "ansi6";
+    const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color]);
     return h_flex()
       .id(`space-${w.id}`)
-      .h(26)
+      .h(30)
+      .mx(6)
       .flex_none()
       .justify_center()
-      .gap(4)
-      .when(w.active, (el) => el.bg(t.raised))
+      .items_center()
+      .gap(5)
+      .rounded(8)
+      .when(w.active, (el) => el.bg(t.selected))
       .hover((s) => s.bg(t.hover))
+      .tooltip(`${w.name}${i < 9 ? `  ⌃${i + 1}` : ""}`)
       .on_click(() => run("space.select", { id: w.id }))
-      .child(div().text_color(w.active ? t.foreground : t.muted).child(String(i + 1)))
-      .child(div().text_color(tone(t, w.status)).child(glyph(w.status)));
+      .child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?"))
+      .child(div().w(8).text_color(tone(t, w.status)).child(glyph(w.status)));
   }
 
   render() {
@@ -908,12 +930,17 @@ export default class Spaces extends View {
       changed = true;
     }
     if (changed) setShared("space.colors", kept);
+    // Collapsed, the scrollbar shows only while scrolling (always shown, it ran through the narrow column).
+    const list = v_flex().flex_1().min_h(0).px(collapsed ? 0 : 8).pb(14).overflow_y_scrollbar();
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
+      .child(h_flex().h(31).pl(collapsed ? 6 : 16).pr(collapsed ? 6 : 10).items_center().justify_between().text_size(11.5).text_color(t.dim)
         .when(!collapsed, el => el.child("Spaces"))
-        .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
+        .when(collapsed, el => el.child(div().id("sidebar-expand").size(24).flex_none().flex().items_center().justify_center().rounded(6)
+          .text_size(13).hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip("Expand the sidebar").on_click(toggleSidebar).child("»")))
+        .child(div().id("space-new").size(collapsed ? 24 : 26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click(() => newSpace()).child(svg("mods/workspace-chrome/plus.svg").size(14))))
-      .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar().mode("always")
+      // Collapsed, no side padding: the avatars line up with the agents list's below.
+      .child((collapsed ? list : list.mode("always"))
         .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
         .children(this.grouped(t, collapsed)));
   }

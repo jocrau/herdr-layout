@@ -1,6 +1,8 @@
 // Modified by Jochen Rau, 2026-11, from Herdr's agents mod: see NOTICE.md in this folder.
 // Agents in grouped or priority views; parents take their most urgent sub-agent's place.
 // A viewed done agent stays in Done until left.
+// Right-click a row to mark it unread (or pin it). A marked idle agent shows as Done
+// until you open it again (after leaving it) or it starts working.
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -18,14 +20,6 @@ function find(node, id) {
 // The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
 const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
 
-// To the rail (on macOS wide enough for the traffic lights), or back to the width it had.
-function toggleSidebar() {
-  const width = find(layout(), "sidebar")?.size?.px;
-  if (!narrow()) setShared("sidebar.width", width);
-  // Mods edited before the rail went by width still read the flag.
-  setShared("sidebar.collapsed", !narrow());
-  run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 268) : window()?.platform === "macos" ? 76 : 44 });
-}
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
 
@@ -58,6 +52,18 @@ const SORTS = [
   { id: "grouped", label: "Grouped by space", icon: "layers" },
 ];
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
+
+// Unread marks: { address: { left } }, shared so the row menu (another copy) can set them.
+// left: the agent has been out of focus since it was marked, so focusing it now reads it.
+const marks = () => shared("agents.unread") ?? {};
+function markUnread(address, focusedNow) {
+  setShared("agents.unread", { ...marks(), [address]: { left: !focusedNow } });
+}
+function markRead(address) {
+  const m = { ...marks() };
+  delete m[address];
+  setShared("agents.unread", m);
+}
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 
@@ -105,7 +111,7 @@ function icon(p, size, color) {
 
 export default class Agents extends View {
   init(_props, cx) {
-    if (props()?.sortMenu) return;
+    if (props()?.sortMenu || props()?.rowMenu) return;
     this.folded = new Set();
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
@@ -196,6 +202,61 @@ export default class Agents extends View {
         .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
   }
 
+  // Right-click menu for one agent row (an overlay copy of this mod).
+  rowMenu(t) {
+    const { rowMenu: m, overlay } = props();
+    const item = (id, label, iconName, act) => h_flex()
+      .id(id)
+      .h(31)
+      .px(8)
+      .gap(9)
+      .rounded(7)
+      .items_center()
+      .text_color(t.foreground)
+      .hover((el) => el.bg(t.hover))
+      .on_click(() => {
+        closeOverlay(overlay);
+        act();
+      })
+      .child(svg(`mods/workspace-chrome/${iconName}.svg`).size(14).flex_none().text_color(t.muted))
+      .child(div().flex_1().child(label));
+    const items = [];
+    if (m.unread) items.push(item("m-read", "Mark as read", "check", () => markRead(m.address)));
+    else if (m.status === "idle") items.push(item("m-unread", "Mark as unread", "clock", () => markUnread(m.address, m.focused)));
+    items.push(item("m-pin", m.pinned ? "Unpin" : "Pin to the top", m.pinned ? "pin-off" : "pin",
+      () => run("terminal.pin", { terminal: m.address, pinned: !m.pinned })));
+    return v_flex().w_full().p(5).bg(t.popover).text_size(12.8).children(items);
+  }
+
+  // Applies unread marks: a marked idle agent reads as done. Clears a mark once its
+  // agent is focused after being left, or does anything but sit idle.
+  unread(list) {
+    const m = marks();
+    const next = { ...m };
+    let dirty = false;
+    const live = new Set(terminals().filter((k) => k.state === "live").map((k) => k.address));
+    for (const [addr, mk] of Object.entries(m)) {
+      const a = list.find((x) => x.address === addr);
+      if (!a) {
+        if (live.size && !live.has(addr)) { delete next[addr]; dirty = true; }
+        continue;
+      }
+      if (a.status !== "idle" || (a.focused && mk.left)) { delete next[addr]; dirty = true; }
+      else if (!a.focused && !mk.left) { next[addr] = { left: true }; dirty = true; }
+    }
+    if (dirty) setShared("agents.unread", next);
+    return list.map((a) => (next[a.address] && a.status === "idle" ? { ...a, status: "done", unread: true } : a));
+  }
+
+  menuFor(a) {
+    return (_e, cx) => {
+      cx.stop_propagation();
+      const n = a.unread || a.status === "idle" ? 2 : 1;
+      openOverlay({ mod: "space-agents", kind: "popup", at: "pointer", width: 200, height: 10 + 31 * n,
+        props: { rowMenu: { address: a.address, status: a.status, unread: !!a.unread, pinned: !!a.pinned, focused: !!a.focused } } });
+    };
+  }
+
   peek(addr) {
     run("terminal.peek", { terminal: addr });
   }
@@ -252,9 +313,10 @@ export default class Agents extends View {
   render(cx) {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
+    if (props()?.rowMenu) return this.rowMenu(t);
     const collapsed = narrow();
     const sort = sortOf();
-    let list = agents();
+    let list = this.unread(agents());
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
     const byAddress = new Map(all.map((k) => [k.address, k]));
@@ -335,17 +397,25 @@ export default class Agents extends View {
       const more = detail.get(a.address);
       // An agent on another machine (`vps/t7`) says which.
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
+      // Local change: collapsed, an agent is its space's avatar and its status, named in a tooltip (tab · space),
+      // as the expanded list shows it; a position number said nothing about which agent it was.
       if (collapsed) {
+        const tip = [more ?? label(a), a.space_name].filter((x, k, xs) => x && xs.indexOf(x) === k).join(" · ");
         return h_flex()
           .id(`ag-${a.address}`)
-          .h(26)
-          .px(8)
+          .h(30)
+          .mx(6)
           .flex_none()
+          .justify_center()
           .items_center()
-          .gap(4)
+          .gap(5)
+          .rounded(8)
+          .when(a.focused, (el) => el.bg(t.selected))
           .hover((s) => s.bg(t.hover))
+          .tooltip(tip || a.address)
           .on_click(() => run("pane.focus", { pane: a.pane }))
-          .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
+          .on_mouse_down("right", this.menuFor(a))
+          .child(pic ?? div().size(18))
           .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
       }
       const when = this.since(a);
@@ -370,9 +440,12 @@ export default class Agents extends View {
         })
         .child(svg(`mods/workspace-chrome/${isPinned ? "pin-off" : "pin"}.svg`).size(13));
       // Under a space header the space goes without saying; an automatic tab number says nothing.
-      // Without a space header above (priority, pinned) the row names its space.
+      // Without a space header above (priority, pinned) the row names its space too. Local change: the tab
+      // first (it tells rows apart: several agents in one space, say one per PR), the space after it, dimmer
+      // (the avatar shows it already); just one when they read the same.
       const full = byPriority || isPinned;
-      const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
+      const space = full && more && more !== a.space_name ? a.space_name : null;
+      const name = full ? more || a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
@@ -390,6 +463,7 @@ export default class Agents extends View {
           cx.notify();
         })
         .on_click(() => run("pane.focus", { pane: a.pane }))
+        .on_mouse_down("right", this.menuFor(a))
         .when(Boolean(pic), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
@@ -397,8 +471,8 @@ export default class Agents extends View {
             cx.notify();
           })).child(pic)))
         .child(h_flex().flex_1().min_w(0).gap(5).items_center()
-          .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
-          .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
+          .child(div().min_w(0).max_w(space ? 150 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
+          .when(Boolean(space), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${space}`))))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(ctx != null, el => el.child(contextMeter(t, ctx).id(`ctx-${a.address}`)))
@@ -447,6 +521,7 @@ export default class Agents extends View {
           .when(!byPriority && top && top !== "idle", (el) => el.child(this.status(t, { status: top }, true)))
           .child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim)));
     };
+    const agList = v_flex().id("ag-list").flex_1().min_h(0).px(collapsed ? 0 : 8).overflow_y_scrollbar();
     const rows = collapsed
       ? list.flatMap(withKids)
       : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : g.members.flatMap(withKids))]);
@@ -484,23 +559,7 @@ export default class Agents extends View {
       .when(list.length === 0 && !collapsed, (el) =>
         el.child(div().px(12).text_size(12).text_color(t.dim).child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
       )
-      .child(v_flex().id("ag-list").flex_1().min_h(0).px(collapsed ? 0 : 8).overflow_y_scrollbar().mode("always").children(rows))
-      .when(collapsed, (el) =>
-        el.child(
-          h_flex()
-            .h(28)
-            .items_center()
-            .justify_center()
-            .child(
-              div()
-                .id("collapse")
-                .text_size(13)
-                .text_color(t.dim)
-                .hover((s) => s.text_color(t.foreground))
-                .on_click(toggleSidebar)
-                .child("»"),
-            ),
-        ),
-      );
+      // Collapsed, the bar shows only while scrolling: always shown, it ran through the narrow column.
+      .child((collapsed ? agList : agList.mode("always")).children(rows));
   }
 }

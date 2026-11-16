@@ -21,6 +21,7 @@ export default class GitGraph extends View {
   }
 
   async close() {
+    this.part.prClose?.();
     if (this.popup) setShared(POPUPS, Math.max(0, (shared(POPUPS) ?? 1) - 1));
   }
 

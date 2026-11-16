@@ -6,6 +6,8 @@
 #   sh tests/demo/make-demo.sh build    # the repositories, their beads and a fleet dry run (no agents, no cost)
 #   sh tests/demo/make-demo.sh up       # the demo window with the layout and one space per repository
 #   sh tests/demo/make-demo.sh fleet    # the fleet's next wave (fake agents), to move the run along
+#   sh tests/demo/make-demo.sh prs      # pr-board on a copy of YOUR pr-flow queue (not neutral: for trying it, not
+#                                       # screenshots), with shared clones of the repos in PR_DEMO_REPOS (folders in ~/Code)
 #   sh tests/demo/make-demo.sh shot F   # save the demo window's frame as F
 #   sh tests/demo/make-demo.sh down     # quit the demo window and stop its herdr-core session
 #   sh tests/demo/make-demo.sh clean    # down, then delete /tmp/herdr-demo
@@ -221,11 +223,17 @@ home() { # the demo's Herdr home: this repository's layout, mods and keys
   for m in "$LAYOUT"/mods/*/; do ln -sfn "${m%/}" "$HERDR_APP_HOME/mods/$(basename "$m")"; done
   cp "$LAYOUT/layouts/workbench.json" "$HERDR_APP_HOME/layouts/workbench.json"
   cp "$LAYOUT/keys.json" "$HERDR_APP_HOME/keys.json"
-  printf '{ "code_dir": "%s", "fleet": "%s" }\n' "$D/code" "$D/bin/fleet" > "$HERDR_APP_HOME/data/workbench.json"
+  # The demo's settings; keys set since (prs: pr_flow_state, pr_space) stay.
+  python3 -I -c 'import json,os,sys; p=sys.argv[1]; s=json.load(open(p)) if os.path.exists(p) else {}; s.update(code_dir=sys.argv[2], fleet=sys.argv[3]); json.dump(s,open(p,"w"))' "$HERDR_APP_HOME/data/workbench.json" "$D/code" "$D/bin/fleet"
   # Your look (theme, fonts), read from your own Herdr home: settings.json and themes/ only.
   own=${HERDR_LOOK_FROM:-$HOME/.config/herdr-app}
   [ -f "$own/settings.json" ] && python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); s["telemetry"]=False; s.pop("machines",None); json.dump(s,open(sys.argv[2],"w"),indent=2)' "$own/settings.json" "$HERDR_APP_HOME/settings.json"
   [ -d "$own/themes" ] && mkdir -p "$HERDR_APP_HOME/themes" && cp "$own"/themes/*.json "$HERDR_APP_HOME/themes/" 2>/dev/null || true
+  # Welcomed already: a fresh home otherwise opens Herdr's welcome screen over everything (and over dialogs).
+  python3 -I -c 'import json,os,sys; p=sys.argv[1]; s=json.load(open(p)) if os.path.exists(p) else {}; "frame.welcomed" in s or json.dump({**s, "frame.welcomed": "skipped"}, open(p, "w"))' "$HERDR_APP_HOME/shared.json"
+  # And on your version already, so no "Updated to …" toast: the version from your own home.
+  [ -f "$HERDR_APP_HOME/update-notes.json" ] || [ ! -f "$own/update-notes.json" ] \
+    || python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])).get("last_run"); v and json.dump({"last_run": v, "presented": []}, open(sys.argv[2], "w"))' "$own/update-notes.json" "$HERDR_APP_HOME/update-notes.json"
 }
 
 do_() { "$APP" do "$@" >/dev/null; }
@@ -287,6 +295,17 @@ PY
     echo "up: HERDR_APP_HOME=$HERDR_APP_HOME" ;;
   fleet)
     (cd "$D/code/forklift/forklift-demo" && "$D/bin/fleet" run forklift --dry-run --beads-file "$D/code/forklift/beads.json" --fake-scripts "$D/code/forklift/scripts" --poll 1) ;;
+  prs) # a copy of your pr-flow state (its syncs and actions change only the copy) and --shared clones of a few
+    # of your repositories (a PR's branch is fetched into the clone, never into your checkout)
+    src=$(python3 -I -c 'import json,os; p=os.path.expanduser("~/.claude/pr-flow/settings.json"); s=json.load(open(p)) if os.path.exists(p) else {}; print(os.path.expanduser(s.get("state_dir") or "~/.claude/pr-flow/state"))')
+    rm -rf "$D/prflow-state" && cp -R "$src" "$D/prflow-state"
+    for r in ${PR_DEMO_REPOS:?"name repositories in ~/Code to clone, e.g. PR_DEMO_REPOS=\"api web\""}; do
+      [ -d "$D/code/$r" ] && continue
+      git clone -q --shared --no-checkout "$HOME/Code/$r" "$D/code/$r"
+      git -C "$D/code/$r" remote set-url origin "$(git -C "$HOME/Code/$r" remote get-url origin)"
+    done
+    python3 -I -c 'import json,sys; p=sys.argv[1]; s=json.load(open(p)); s.update(pr_flow_state=sys.argv[2], pr_space="Handbook"); json.dump(s,open(p,"w"))' "$HERDR_APP_HOME/data/workbench.json" "$D/prflow-state"
+    echo "prs: pr-flow state $D/prflow-state; clones: $PR_DEMO_REPOS" ;;
   shot)
     "$APP" shot "${2:?file}" ;;
   down) # only the demo's window, wave and terminals; never anything of yours
