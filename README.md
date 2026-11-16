@@ -44,7 +44,8 @@ the worktree, deletes the branch and closes its space or tab.
 
 A repository space's own menu has pull, push and fetch as well.
 
-The agents list shows each agent with its space's avatar. The status bar can show your Claude
+The agents list shows each agent with its space's avatar. Right-click an agent to pin it to the top or
+mark it unread: an idle agent marked unread waits in Done until you go back to it. The status bar can show your Claude
 subscription usage (see below).
 
 All three dialogs and the fleet pane use the same keys, for vim and arrow users alike: `j k` or

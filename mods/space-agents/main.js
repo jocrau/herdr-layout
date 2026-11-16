@@ -1,6 +1,8 @@
 // Modified by Jochen Rau, 2026-11, from Herdr's agents mod: see NOTICE.md in this folder.
 // Agents in grouped or priority views; parents take their most urgent sub-agent's place.
 // A viewed done agent stays in Done until left.
+// Right-click a row to mark it unread (or pin it). A marked idle agent shows as Done
+// until you open it again (after leaving it) or it starts working.
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -58,6 +60,18 @@ const SORTS = [
   { id: "grouped", label: "Grouped by space", icon: "layers" },
 ];
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
+
+// Unread marks: { address: { left } }, shared so the row menu (another copy) can set them.
+// left: the agent has been out of focus since it was marked, so focusing it now reads it.
+const marks = () => shared("agents.unread") ?? {};
+function markUnread(address, focusedNow) {
+  setShared("agents.unread", { ...marks(), [address]: { left: !focusedNow } });
+}
+function markRead(address) {
+  const m = { ...marks() };
+  delete m[address];
+  setShared("agents.unread", m);
+}
 const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
 const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 
@@ -105,7 +119,7 @@ function icon(p, size, color) {
 
 export default class Agents extends View {
   init(_props, cx) {
-    if (props()?.sortMenu) return;
+    if (props()?.sortMenu || props()?.rowMenu) return;
     this.folded = new Set();
     // Each agent's last state and when it changed (ms), kept across restarts.
     this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
@@ -196,6 +210,61 @@ export default class Agents extends View {
         .when(s.id === on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(14).flex_none().text_color(t.foreground)))));
   }
 
+  // Right-click menu for one agent row (an overlay copy of this mod).
+  rowMenu(t) {
+    const { rowMenu: m, overlay } = props();
+    const item = (id, label, iconName, act) => h_flex()
+      .id(id)
+      .h(31)
+      .px(8)
+      .gap(9)
+      .rounded(7)
+      .items_center()
+      .text_color(t.foreground)
+      .hover((el) => el.bg(t.hover))
+      .on_click(() => {
+        closeOverlay(overlay);
+        act();
+      })
+      .child(svg(`mods/workspace-chrome/${iconName}.svg`).size(14).flex_none().text_color(t.muted))
+      .child(div().flex_1().child(label));
+    const items = [];
+    if (m.unread) items.push(item("m-read", "Mark as read", "check", () => markRead(m.address)));
+    else if (m.status === "idle") items.push(item("m-unread", "Mark as unread", "clock", () => markUnread(m.address, m.focused)));
+    items.push(item("m-pin", m.pinned ? "Unpin" : "Pin to the top", m.pinned ? "pin-off" : "pin",
+      () => run("terminal.pin", { terminal: m.address, pinned: !m.pinned })));
+    return v_flex().w_full().p(5).bg(t.popover).text_size(12.8).children(items);
+  }
+
+  // Applies unread marks: a marked idle agent reads as done. Clears a mark once its
+  // agent is focused after being left, or does anything but sit idle.
+  unread(list) {
+    const m = marks();
+    const next = { ...m };
+    let dirty = false;
+    const live = new Set(terminals().filter((k) => k.state === "live").map((k) => k.address));
+    for (const [addr, mk] of Object.entries(m)) {
+      const a = list.find((x) => x.address === addr);
+      if (!a) {
+        if (live.size && !live.has(addr)) { delete next[addr]; dirty = true; }
+        continue;
+      }
+      if (a.status !== "idle" || (a.focused && mk.left)) { delete next[addr]; dirty = true; }
+      else if (!a.focused && !mk.left) { next[addr] = { left: true }; dirty = true; }
+    }
+    if (dirty) setShared("agents.unread", next);
+    return list.map((a) => (next[a.address] && a.status === "idle" ? { ...a, status: "done", unread: true } : a));
+  }
+
+  menuFor(a) {
+    return (_e, cx) => {
+      cx.stop_propagation();
+      const n = a.unread || a.status === "idle" ? 2 : 1;
+      openOverlay({ mod: "space-agents", kind: "popup", at: "pointer", width: 200, height: 10 + 31 * n,
+        props: { rowMenu: { address: a.address, status: a.status, unread: !!a.unread, pinned: !!a.pinned, focused: !!a.focused } } });
+    };
+  }
+
   peek(addr) {
     run("terminal.peek", { terminal: addr });
   }
@@ -252,9 +321,10 @@ export default class Agents extends View {
   render(cx) {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
+    if (props()?.rowMenu) return this.rowMenu(t);
     const collapsed = narrow();
     const sort = sortOf();
-    let list = agents();
+    let list = this.unread(agents());
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
     const byAddress = new Map(all.map((k) => [k.address, k]));
@@ -345,6 +415,7 @@ export default class Agents extends View {
           .gap(4)
           .hover((s) => s.bg(t.hover))
           .on_click(() => run("pane.focus", { pane: a.pane }))
+          .on_mouse_down("right", this.menuFor(a))
           .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
           .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
       }
@@ -390,6 +461,7 @@ export default class Agents extends View {
           cx.notify();
         })
         .on_click(() => run("pane.focus", { pane: a.pane }))
+        .on_mouse_down("right", this.menuFor(a))
         .when(Boolean(pic), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();

@@ -92,6 +92,9 @@ dialogs and the fleet pane.
   percent, yellow from 60 %, red from 80 %), from the `claude.context` terminal label that
   `extras/claude-statusline.py` sets when the whole percent changes; `--session-end` clears it.
   Contributed by Samuel Skinner.
+- `space-agents`: right-click an agent row to pin it or mark it unread. A marked idle agent shows
+  in Done until you go back to it after leaving it, or it starts working (`agents.unread`, shared).
+  Contributed by Samuel Skinner.
 - `worktree-actions`/`worktree-support`: a left click on a worktree in the spaces panel only
   goes to a space or tab already open there. Its right-click menu offers "Open as space",
   "Open as tab" and the git a worktree needs: pull, push, fetch, rebase onto or merge the main
