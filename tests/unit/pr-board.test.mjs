@@ -56,3 +56,62 @@ test("a PR offers only what's possible now: no post, copy or approve before your
   assert.equal(actionsFor(row("MY_MERGE", { role: "author" })).main, "merge");
   assert.equal(actionsFor(row("MY_BUSY", { role: "author" })).main, null, "an agent is at it");
 });
+
+// herdr-prboard.facts: the queue from pr-flow's listing facts (0.30.0) or, before, from its records.
+import { register } from "node:module";
+register("./stub-hooks.mjs", import.meta.url);
+const { queueArgs, fromListing, recordOf } = await import("../../lib/prflow.js");
+
+const FACTS = {
+  head_ref: "login-form", base_ref: "main", head_sha: "abc123", ci: "FAILURE", review_decision: "CHANGES_REQUESTED",
+  draft: false, conflicts: true, threads: { unresolved: 2, awaiting_reviewer: 1, awaiting_author: 1 }, reviewed_sha: "def456",
+  open_findings: { high: 1, low: 2 }, pr_author: "vic", requested: ["ann", "team:qa"], reviews: [{ who: "bob", state: "APPROVED" }],
+  last_push_at: "2026-11-16T09:00:00Z", updated_at: "2026-11-16T10:00:00Z", rounds: 2, summary: "Adds a login form.", reasons: ["new commits"], files: 7,
+};
+
+test("with facts and --no-save, the board reads the queue quietly and takes each PR's facts from it", () => {
+  assert.deepEqual(queueArgs(new Set(["nosave", "facts"])).args, ["queue", "--format", "json", "--no-save"]);
+  assert.deepEqual(queueArgs(new Set(["nosave", "facts"]), { sync: true, maxAge: "5m" }).args, ["sync", "--max-age", "5m", "--format", "json", "--no-save"]);
+  const got = fromListing({ login: "me", warnings: ["a", "b", "c", "d"], sections: [{ items: [{ key: "o/r#1", facts: FACTS }, { key: "o/r#2", facts: null }] }] });
+  assert.equal(got.me, "me");
+  assert.deepEqual(got.warnings, ["b", "c", "d"]);
+  assert.deepEqual(Object.keys(got.records), ["o/r#1"], "unknown facts: no record");
+  assert.deepEqual(got.records["o/r#1"], {
+    headRef: "login-form", baseRef: "main", headSha: "abc123", ci: "FAILURE", decision: "CHANGES_REQUESTED", draft: false, conflicts: true,
+    threads: { unresolved: 2, awaitingReviewer: 1, awaitingAuthor: 1 }, reviewedSha: "def456", open: { high: 1, low: 2 }, reasons: ["new commits"],
+    author: "vic", requested: ["ann", "qa"], reviewers: [{ who: "bob", state: "APPROVED" }], lastPush: "2026-11-16T09:00:00Z",
+    updated: "2026-11-16T10:00:00Z", rounds: 2, about: "Adds a login form.", files: 7,
+  });
+  assert.deepEqual(recordOf({ draft: null, threads: null }), {
+    headRef: null, baseRef: null, headSha: null, ci: null, decision: null, draft: false, conflicts: false, threads: null, reviewedSha: null,
+    open: {}, reasons: [], author: null, requested: [], reviewers: [], lastPush: null, updated: null, rounds: 0, about: null, files: null,
+  }, "nulls where pr-flow doesn't know");
+  assert.deepEqual(fromListing({ sections: [] }), { records: {}, me: null, warnings: [] }, "an empty queue needs no records either");
+});
+
+test("with an older pr-flow, the board reads as before: no --no-save, records from its state folder", () => {
+  for (const caps of [new Set(), new Set(["nosave"]), new Set(["facts"])]) {
+    assert.deepEqual(queueArgs(caps), { facts: false, args: ["queue", "--format", "json"] });
+  }
+  assert.equal(fromListing({ sections: [{ items: [{ key: "o/r#1" }] }] }), null, "items without facts: read the records");
+});
+
+test("later from the board hides a PR until the next working day's morning; other verbs go as typed", async () => {
+  const { shorthandFor } = await import("../../lib/prflow.js");
+  const day = (d) => new Date(2026, 10, d, 15, 0); // Nov 2026: the 16th is a Monday
+  assert.equal(shorthandFor("later", "acme-api#506", day(16)), "later acme-api#506 tomorrow");
+  assert.equal(shorthandFor("later", "acme-api#506", day(19)), "later acme-api#506 tomorrow", "Thursday: Friday");
+  assert.equal(shorthandFor("later", "acme-api#506", day(20)), "later acme-api#506 mon", "Friday: Monday");
+  assert.equal(shorthandFor("later", "acme-api#506", day(21)), "later acme-api#506 mon", "Saturday: Monday");
+  assert.equal(shorthandFor("later", "acme-api#506", day(22)), "later acme-api#506 tomorrow", "Sunday: Monday");
+  assert.equal(shorthandFor("ignore", "acme-api#506"), "ignore acme-api#506");
+});
+
+test("a new PR tab starts from pr-flow's prompt when there is one, else from the typed shorthand", async () => {
+  const { newTab } = await import("../../lib/prflow.js");
+  const prompt = "You are picking up one pull request…\nTask (fix): …";
+  assert.deepEqual(newTab("acme/api#7", { space: "s1", folder: "/c/api", text: "/pr-flow:inbox fix api#7", start: prompt }),
+    { name: "api#7", space: "s1", folder: "/c/api", argv: ["claude", prompt], focus: true });
+  assert.deepEqual(newTab("acme/api#7", { space: null, folder: null, text: "/pr-flow:inbox fix api#7", start: null }),
+    { name: "api#7", argv: ["claude"], task: "/pr-flow:inbox fix api#7", focus: true });
+});

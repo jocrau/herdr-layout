@@ -22,6 +22,7 @@ const LINE = 20, GAP = 6; // a row's first line, and the gap between its columns
 const textAt = (numW) => 8 + 2 + 8 + GAP + numW + GAP;
 const SYNC_EVERY = 600000; // with GitHub (only what changed), while shown
 const READ_EVERY = 60000; // pr-flow's stored queue (no GitHub), while shown
+const STUCK_AFTER = 240000; // a read still going after this is taken as lost (a sync gives up after 180 s)
 const hhmm = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 const syncedAgo = (ms) => (ms < 60000 ? "just now" : ms < 3600000 ? `${Math.round(ms / 60000)}m ago` : `${Math.round(ms / 3600000)}h ago`);
 
@@ -76,10 +77,16 @@ export default class PrBoard extends View {
 
   // The queue: pr-flow's stored one, or (`sync`) after asking GitHub what changed ("force": even if it synced
   // in the last 10 minutes).
+  // One read at a time. A read that never comes back (cut off by a layout reload, say) mustn't stop the pane
+  // reading for good: after STUCK_AFTER the next read goes ahead, and the stale one's answer is dropped.
   async read(cx, sync = null) {
-    if (this.loading) return;
-    this.loading = sync ? "sync" : "read"; cx.notify();
-    const q = await readQueue({ sync: Boolean(sync), maxAge: sync === "force" ? "1m" : "10m" });
+    if (this.loading && Date.now() - this.loadingAt < STUCK_AFTER) return;
+    const mine = (this.reads = (this.reads ?? 0) + 1);
+    this.loading = sync ? "sync" : "read"; this.loadingAt = Date.now(); cx.notify();
+    let q;
+    try { q = await readQueue({ sync: Boolean(sync), maxAge: sync === "force" ? "1m" : "10m" }); }
+    catch (e) { q = { error: `reading pr-flow's queue failed: ${e?.message ?? e}` }; }
+    if (mine !== this.reads) return;
     this.loading = null; this.readAt = Date.now();
     if (q.error) this.err = q.error;
     else { this.q = q; this.err = null; if (sync) this.lastSync = Date.now(); }
@@ -277,43 +284,39 @@ export default class PrBoard extends View {
   // text; every line of a row, and its details, start in the text column. The number stays on the first line.
   cols(t, mono, r, numW, text, { sel, problem, h, color }) {
     const k = parseKey(r.key);
-    return h_flex().id(`pr-row-${r.key}`).pl(8).pr(10).py(h ? 0 : 5).when(Boolean(h), (e) => e.h(h)).gap(GAP).when(!h, (e) => e.items_start()).when(Boolean(h), (e) => e.items_center()).cursor_pointer()
+    return h_flex().id(`pr-row-${r.key}`).pl(8).pr(10).py(h ? 0 : 7).when(Boolean(h), (e) => e.h(h)).gap(GAP).when(!h, (e) => e.items_start()).when(Boolean(h), (e) => e.items_center()).cursor_pointer()
       .border_l_2().border_color(problem ? t.ansi1 : sel ? t.accent : alpha(t.border, "00"))
       .when(sel, (e) => e.bg(t.hover)).hover((e) => e.bg(t.hover))
       .child(h_flex().w(8).h(LINE).flex_none().items_center().child(tabDot(t, r.key)))
-      .child(div().w(numW).h(LINE).flex_none().flex().items_center().justify_end().font_family(mono).text_size(12).text_color(color ?? t.foreground).child(`#${k?.n ?? "?"}`))
+      .child(div().w(numW).h(LINE).flex_none().flex().items_center().justify_end().font_family(mono).text_size(11.5).text_color(color ?? t.dim).child(`#${k?.n ?? "?"}`))
       .child(text);
   }
 
-  // A PR whose move is yours: what it is, who's in it, and the next step.
+  // A PR whose move is yours, in order of weight: what it is (the title), what to do (the next step: accent,
+  // red when something's wrong), then one quiet line of context (repo · author → reviewers · pushed · size).
   card(t, mono, r, me, now, numW) {
     const k = parseKey(r.key), { tag, title } = splitTitle(r.title), p = people(r, me), step = nextStep(r);
-    const rec = r.rec ?? {}, sel = this.sel === r.key, open = this.openKey === r.key;
-    const pushed = rec.lastPush ? `pushed ${ago(now - Date.parse(rec.lastPush))} ago` : "";
+    const rec = r.rec ?? {}, open = this.openKey === r.key;
+    const pushed = rec.lastPush ? ago(now - Date.parse(rec.lastPush)) : "";
     const mark = (m) => (m === "✓" ? t.ansi2 : m === "✗" ? t.ansi1 : t.dim);
-    const text = v_flex().flex_1().min_w(0).gap(2)
-      // What: the title (its [tag] apart), the repo.
-      .child(h_flex().min_h(LINE).gap(6).items_start()
+    const sep = () => div().flex_none().text_color(t.dim).child("·");
+    const text = v_flex().flex_1().min_w(0).gap(1)
+      .child(h_flex().min_h(LINE).gap(6).items_center()
         .child(div().flex_1().min_w(0).when(!open, (e) => e.truncate()).text_size(12.5).font_semibold().text_color(t.foreground).child(title))
-        .when(Boolean(tag), (e) => e.child(h_flex().h(LINE).flex_none().items_center().child(div().px(4).rounded(3).bg(alpha(t.muted, "22")).text_size(10).text_color(t.muted).child(tag))))
-        .child(h_flex().h(LINE).flex_none().items_center().child(div().max_w(140).truncate().text_size(11).text_color(t.dim).child(k?.repo ?? ""))))
-      // Who: author → reviewers (✓ approved, ✗ changes; dimmer: not reviewed yet); when it was last pushed.
-      .child(h_flex().gap(4).items_center().text_size(11.5)
-        .child(div().flex_none().text_color(p.author === "you" ? t.accent : t.muted).child(p.author))
-        .when(p.others.length > 0, (e) => e.child(div().flex_none().text_color(t.dim).child("→"))
-          .children(p.others.slice(0, 4).map((o, i) => h_flex().flex_none()
-            .child(div().text_color(o.who === "you" ? t.accent : o.pending ? t.dim : t.muted).child(o.who))
+        .when(Boolean(tag), (e) => e.child(div().flex_none().px(4).rounded(3).bg(alpha(t.muted, "1a")).text_size(10).text_color(t.dim).child(tag))))
+      .child(div().min_w(0).when(!open, (e) => e.truncate()).text_size(12).text_color(step.problem ? t.ansi1 : t.accent).child(step.text))
+      .child(h_flex().min_w(0).gap(4).items_center().overflow_hidden().text_size(11).text_color(t.dim)
+        .child(div().flex_none().max_w(130).truncate().child(k?.repo ?? "")).child(sep())
+        .child(div().flex_none().text_color(p.author === "you" ? t.muted : t.dim).child(p.author))
+        .when(p.others.length > 0, (e) => e.child(div().flex_none().child("→"))
+          .children(p.others.slice(0, 3).map((o, i) => h_flex().flex_none()
+            .child(div().text_color(o.who === "you" ? t.muted : t.dim).child(o.who))
             .when(Boolean(o.mark), (x) => x.child(div().text_color(mark(o.mark)).child(o.mark)))
-            .when(i < Math.min(4, p.others.length) - 1, (x) => x.child(div().text_color(t.dim).child(","))))))
-        .when(p.others.length > 4, (e) => e.child(div().text_color(t.dim).child(`+${p.others.length - 4}`)))
-        .child(div().flex_1())
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(pushed)))
-      // Next: the step (space does it), red when something's wrong; the size.
-      .child(h_flex().gap(6).items_start()
-        .child(div().flex_none().text_size(11.5).text_color(step.problem ? t.ansi1 : t.accent).child(step.problem ? "⚠" : "▶"))
-        .child(div().flex_1().min_w(0).when(!open, (e) => e.truncate()).text_size(11.5).text_color(step.problem ? t.ansi1 : t.foreground).child(step.text))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(r.size ?? "")));
-    return this.cols(t, mono, r, numW, text, { sel, problem: step.problem })
+            .when(i < Math.min(3, p.others.length) - 1, (x) => x.child(div().child(","))))))
+        .when(p.others.length > 3, (e) => e.child(div().flex_none().child(`+${p.others.length - 3}`)))
+        .when(Boolean(pushed), (e) => e.child(sep()).child(div().flex_none().child(pushed)))
+        .when(Boolean(r.size), (e) => e.child(sep()).child(div().flex_none().child(r.size))));
+    return this.cols(t, mono, r, numW, text, { sel: this.sel === r.key, problem: step.problem })
       .on_click((_e, cx) => { this.sel = r.key; this.h.focus(); this.openKey = open ? null : r.key; this.moreOpen = false; cx.notify(); });
   }
 
@@ -322,9 +325,9 @@ export default class PrBoard extends View {
     const { title } = splitTitle(r.title), w = waitingOn(r, me, now), sel = this.sel === r.key;
     const text = h_flex().flex_1().min_w(0).h(LINE).gap(6).items_center()
       .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(title))
-      .child(div().flex_none().max_w(150).truncate().text_size(11).text_color(t.dim).child(w.who))
+      .child(div().flex_none().max_w(130).truncate().text_size(11).text_color(t.dim).child(w.who))
       .child(div().flex_none().w(28).text_right().text_size(11).text_color(t.dim).child(w.since));
-    return this.cols(t, mono, r, numW, text, { sel, h: 26, color: t.muted })
+    return this.cols(t, mono, r, numW, text, { sel, h: 24 })
       .tooltip(tipText(`${r.short} · ${r.title}\n${r.detail ?? ""}`))
       .on_click((_e, cx) => { this.sel = r.key; this.h.focus(); this.openKey = this.openKey === r.key ? null : r.key; this.moreOpen = false; cx.notify(); });
   }
@@ -342,9 +345,9 @@ export default class PrBoard extends View {
       if (!rows.length) continue;
       const open = isOpen(g);
       // The group's heading (Your move · 5); in Your move, each action's too (Review · 2).
-      out.push(h_flex().id(`pr-grp-${g}`).px(10).pt(12).pb(4).gap(6).items_center().cursor_pointer()
+      out.push(h_flex().id(`pr-grp-${g}`).px(10).pt(out.length ? 18 : 10).pb(2).gap(6).items_center().cursor_pointer()
         .on_click((_e, cx) => { this.fold.set(g, !open); cx.notify(); })
-        .child(div().text_size(11).font_semibold().text_color(g === "you" ? t.foreground : t.muted).child(label.toUpperCase()))
+        .child(div().text_size(10.5).font_semibold().text_color(t.muted).child(label.toUpperCase()))
         .child(div().text_size(11).text_color(t.dim).child(String(rows.length)))
         .child(div().flex_1()).child(div().text_size(10).text_color(t.dim).child(open ? "▾" : "▸")));
       if (!open) {
@@ -352,7 +355,7 @@ export default class PrBoard extends View {
         continue;
       }
       for (const blk of mine) {
-        if (g === "you") out.push(div().px(10).pt(6).pb(1).text_size(10.5).text_color(t.muted).child(`${blk.label} · ${blk.rows.length}`));
+        if (g === "you") out.push(h_flex().px(10).pl(8 + 2 + 8 + GAP + numW + GAP).pt(8).pb(1).gap(5).text_size(11).text_color(t.dim).child(blk.label).child(div().child(String(blk.rows.length))));
         for (const r of blk.rows) {
           this.order.push(r.key);
           this.drawn.set(r.key, out.length);

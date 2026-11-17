@@ -69,14 +69,20 @@ move, not by pr-flow's stage (mods/pr-board/model.js maps one to the other):
 ## Acting on a PR
 
 - **Actions pr-flow runs itself** (`later`, `ignore`, `open`, `discard`, `handback`, `show`) run directly
-  through `pr-flow act "<verb> <pr>" --json`. The pane then reads the queue again.
+  through `pr-flow act "<verb> <pr>" --json`. The pane then reads the queue again. `later` goes as
+  `later <pr> tomorrow` (`mon` on Fridays and Saturdays): the PR comes back at the next working day's
+  first sweep, in the morning.
 - **Outward actions** (`approve`, `merge`, `close`) ask first, in the confirm bar the fleet board uses. pr-flow
   still runs its own readiness checks.
 - **Actions that need a model** (`review`, `fix`, `post`, `copy`, `ready`, `ping`, `nudge`, `split`, and
   `merge`'s checklist) go to **the PR's own Claude tab**:
   - The tab is named after the PR (`acme-api#506`). It lives in the "PR Reviews" space, set by `pr_space` in
     the settings, and opens in your local checkout of the repository when there is one.
-  - For a new tab, pr-board runs `tab.new {argv: ["claude"], task: "/pr-flow:inbox review 506"}`.
+  - A new tab starts from pr-flow's own opening message for a fresh session (`pr-flow prompt <pr> <verb>
+    --json`, pr-flow 0.31.0, the `prompt` capability): `tab.new {argv: ["claude", "<prompt>"]}`. The prompt
+    is self-contained: the PR, the task and its skill, the claim under the session's own name, and how to
+    close out. For a verb pr-flow has no prompt for, or with an older pr-flow, the tab starts as before:
+    `tab.new {argv: ["claude"], task: "/pr-flow:inbox review 506"}`.
   - If the PR already has a tab, pr-board brings that tab forward and types the command into it with
     `hc send`, so each PR keeps one conversation.
   - When a PR is merged, closed or approved, pr-board offers to close its tab.
@@ -107,20 +113,18 @@ pr-board uses only pr-flow's published interface (ENGINE.md, schema 1):
 - **The queue:** `queue --format json` reads it without calling GitHub (under 100 ms). pr-board runs it on
   start, after each action, and whenever `events.jsonl` or `listing.json` in the state folder changes (one
   watch). It runs `sync --max-age 10m` every 10 minutes while the pane is shown.
+- **Each PR's facts** (branches, head, CI, review state, reviewers, requested, open findings, last push,
+  rounds, the summary) and your login come with the listing, in each item's `facts`. pr-board passes
+  `--no-save`, so its reads leave `listing.json` alone (the listing that shorthand like `all waiting` and
+  `queue --changed` refer to). Both need pr-flow 0.30.0: pr-board asks `version --json` for the `nosave` and
+  `facts` capabilities once per pr-flow it finds. With an older pr-flow it reads as before: the plain queue,
+  and the facts from the records in `<state>/prs/*.json`.
 - **One PR:** `show <pr>` gives the branches, head commit and CI; `findings <pr> --json` gives the findings.
   Both are read when a PR is opened.
 - **Actions:** `act "<shorthand>" --json`.
 - **Shared with the git graph:** lib/prflow.js holds this code and is copied into pr-board, git-graph and
   worktree-support. The last queue read is kept in shared state (`pr-board.queue`), so the git graph's labels
   and the badges cost nothing extra.
-
-Asks for pr-flow (not needed for the prototype):
-- A read that leaves `listing.json` alone (`queue --format json --no-save`, say). Each `queue` read saves the
-  listing that shorthand like `all waiting` and `queue --changed` refer to, so pr-board's reads move your
-  agent sessions' "changed since" baseline.
-- `queue --format json` could carry each PR's `headRef`,
-`headSha` and `baseRef`, so the git graph's labels wouldn't need one `show` per PR. The launcher setup
-writes should find the installed copy (`MARKET` is null in ours, so it falls back to a deleted worktree).
 
 ## Prototype scope (this branch)
 

@@ -28,6 +28,12 @@ dialogs and the fleet pane.
   The PR view (⌘⌥R, `d`) is the git graph on the PR's range with the queue beside it and pr-flow's
   notes and findings on their lines; branches with a tracked PR show its stage. Agent actions go to
   the PR's own Claude tab. The file browser opens at a line (`props.line`).
+- `pr-board` with a newer pr-flow: from 0.30.0 it takes each PR's facts from pr-flow's listing and
+  reads it with `--no-save`, so its polls no longer move your last listing; from 0.31.0 a new PR
+  tab starts from pr-flow's own prompt for the task instead of typed shorthand. Older pr-flow
+  versions work as before. `later` hides a PR until the next working day's morning. Cards read
+  title, next step, then one quiet line (repo · people · age · size). A queue read that never comes
+  back no longer stops the pane reading.
 
 - Safer destructive actions (from a code review): the git graph's file reset takes the name
   literally (`a[1].log` no longer also deletes `a1.log`); ⇧C keeps a partial staging; the main
