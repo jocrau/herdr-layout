@@ -61,7 +61,8 @@ For repositories that run [beads](https://github.com/steveyegge/beads) epics wit
 agent-fleet, the coordinator that hands beads to Claude Code agents in waves (implement,
 check, review, fix, merge) and stops at gates when it needs a person. agent-fleet isn't public
 yet; without it the board stays hidden and does nothing. The board shows one
-epic, read from `fleet status --json`, and follows the repository of the focused terminal.
+epic, read from `fleet status --json`: the run you pick from the run list behind its title (or
+⌘← ⌘→), kept until you pick another. Focusing a terminal elsewhere doesn't switch it.
 It reads again when the run's state changes on disk, so it is live without polling.
 
 **The header** says which epic, whether a wave runs (the wave pill: wave 7 · 2h45), progress
@@ -109,9 +110,11 @@ while it runs. Lines stay on one line; hover shows a line whole, a click wraps i
 wraps them all. (agent-fleet itself shortens long lines unless it has `fleet tail --full`,
 which the board uses when it's there.)
 
-**Several runs.** When fleets run in more than one repository, a strip of chips above the
-board lists each run of the last week: a dot while its wave runs, a red count of beads waiting
-for you, finished runs dimmed. Click one, or ⌘← ⌘→, to show it until you focus another folder.
+**Runs.** Click the board's title (the epic), or press `e`, for every run, each epic of each repository:
+"Active" (a wave running, beads waiting for you, or unfinished with activity in the last two
+weeks), then "Finished this week". A row has a dot while its wave runs, a red count of beads
+waiting for you and the last activity. Click one or ⏎ to show it (esc or a click outside closes the list), or step
+through them with ⌘← ⌘→; it stays until you pick another.
 
 **Notifications.** A bead that starts waiting for you posts a notification, also while the
 pane is hidden (it then looks every 2 minutes); clicking it shows the pane.

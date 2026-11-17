@@ -10,6 +10,7 @@ import { markdownView } from "./markdown-view.js";
 import { structuredPreview } from "./structured.js";
 import { structuredView } from "./structured-view.js";
 import { Tree } from "./tree.js";
+import { closeSide } from "./lib/sidecolumn.js";
 
 const TEXT_LIMIT = 400000;
 const LANGUAGE = { md: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
@@ -207,6 +208,8 @@ export default class PreviewPlus extends View {
     if (event.keystroke === saveKey && this.document) { cx.stop_propagation(); this.save(cx); }
     // Escape works like the ← button (only shown in panel mode); it leaves the zoom field alone.
     else if (event.keystroke === "escape" && this.selected && this.owner.mode !== "pane" && !this.zoomEditing) { cx.stop_propagation(); this.back(cx); }
+    // Local change: with nothing left to go back from, Escape closes the side panel, as in the other side columns.
+    else if (event.keystroke === "escape" && this.owner.mode !== "pane" && !this.zoomEditing && closeSide("preview-plus")) cx.stop_propagation();
   }
 
   remember() {

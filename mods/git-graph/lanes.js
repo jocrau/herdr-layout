@@ -28,6 +28,8 @@ export function layoutLanes(commits) {
     for (const parent of rest) {
       let k = lanes.indexOf(parent);
       if (k < 0) { k = free(); lanes[k] = parent; dashed[k] = Boolean(commit.dashed); }
+      // A real commit joining the uncommitted changes' lane: from here down it's a real line.
+      else if (!commit.dashed) dashed[k] = false;
       segments.push([lane, 0.5, k, 1, k, dashed[k]]);
     }
     width = Math.max(width, before.length, lanes.length);

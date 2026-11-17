@@ -65,12 +65,32 @@ class BeadsView(unittest.TestCase):
         self.assertIn(self.bv.DIM, out, "colour codes stay")
         self.assertEqual(len(self.bv.safe(evil)), len(evil), "one for one, so the editor's columns hold")
 
+    def test_coloured_runs_keep_their_colours(self):
+        # The editor's status, priority and parent cells come coloured: their codes
+        # must reach the terminal, not show as stand-ins (�[0m).
+        out = self.bv.join_runs([(0, self.bv.status_text("open"), ""), (10, self.bv.priority_text(2), "")])
+        self.assertNotIn("�", out)
+        self.assertIn(self.bv.RESET, out)
+        self.assertEqual(self.bv.visible_len(out), 12)
+
     def test_wide_characters_take_two_columns(self):
         t = "日本語のテキスト 👍 ok"
         self.assertEqual(self.bv.cols(t), 22)
         for s, e in self.bv.wrap_segments(t, 10):
             self.assertLessEqual(self.bv.cols(t[s:e]), 10)
         self.assertEqual(self.bv.visible_len(self.bv.clip(t, 9)), 9)
+
+    def test_detail_text_is_wrapped_to_the_pane_so_it_scrolls_row_by_row(self):
+        bv = self.bv
+        line = f"  - a list item {bv.ACCENT}whose coloured text runs{bv.RESET} past the edge 日本語のテキスト ok"
+        rows = bv.wrap_ansi(line, 20)
+        self.assertGreater(len(rows), 2)
+        for row in rows:
+            self.assertLessEqual(bv.visible_len(row), 20)
+        self.assertTrue(all(r.startswith("    ") for r in rows[1:]), "hanging indent under the item")
+        self.assertIn(bv.ACCENT, rows[2], "a colour carries on to the next row")
+        self.assertEqual(" ".join(bv.ANSI.sub("", r).strip() for r in rows), bv.ANSI.sub("", line).strip())
+        self.assertEqual(bv.wrap_ansi("short", 20), ["short"])
 
     def test_select_of_a_missing_bead_leaves_the_view_alone(self):
         st = self.state()

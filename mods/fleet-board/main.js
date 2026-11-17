@@ -16,6 +16,9 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle } from "gpui-base";
 import { theme, settings, nextCommand, props, focused, run } from "herdr";
 import { VIEWS, SPANS, HIDDEN_CHECK, dur, shortener, graph, tipText } from "./model.js";
+import { closeSide } from "./lib/sidecolumn.js";
+import { splitTarget } from "./env.js";
+import { boardHeader, boardTop } from "./lib/boardheader.js";
 
 export default class FleetBoard extends View {
   init(_props, cx) {
@@ -47,6 +50,8 @@ export default class FleetBoard extends View {
     this.s = null; // the snapshot shown
     this.problem = null; // why the focused folder shows nothing: { kind, message, cwd }
     this.cwd = null; // the folder the shown snapshot came from
+    this.target = null; // what was read for it: the folder, or the folder and its epic (env.js targetOf)
+    this.picking = false; this.pickAt = 0; // the run list (the title's ▾): open, and the row selected
     this.tried = new Map(); // folder -> when it last had no run, so focus there doesn't run fleet each tick
     this.last = 0;
     this.watching = null;
@@ -63,9 +68,9 @@ export default class FleetBoard extends View {
         cx.notify();
       }
     });
-    this.runs = new Map(); // every run found: key -> summary (the strip of chips)
-    this.pin = null; // { cwd, focus }: a chip chosen; holds until the focus moves to another folder
-    this.dirty = new Set(); // repositories (state directory names) whose run changed since the strip read it
+    this.runs = new Map(); // every run found: key -> summary (the run list)
+    this.pin = null; // { target }: the run chosen (the run list, ⌘← ⌘→); focusing another terminal doesn't move it
+    this.dirty = new Set(); // repositories (state directory names) whose run changed since the run list read it
     this.hidden = false;
     this.answers = new Map(); // bead -> { picks, area }: an answer being written in its details
     this.typing = false; // an answer field has the keyboard: the pane's keys stay out of it
@@ -101,6 +106,16 @@ export default class FleetBoard extends View {
       if (e.keystroke === "enter" && c.run) c.run(cx); // a copy-only question has nothing to run
       cx.stop_propagation(); cx.notify(); return;
     }
+    // The run list has the keys while it's open: j k move, ⏎ shows the run, esc closes it.
+    if (this.picking) {
+      const k = e.keystroke, list = this.runList(Date.now()).flat;
+      if (["j", "down", "ctrl-n"].includes(k)) this.pickAt = Math.min(list.length - 1, this.pickAt + 1);
+      else if (["k", "up", "ctrl-p"].includes(k)) this.pickAt = Math.max(0, this.pickAt - 1);
+      else if (k === "enter" && list[this.pickAt]) { this.picking = false; this.choose(cx, list[this.pickAt]); }
+      else if (k === "escape" || k === "q" || k === "e") this.picking = false;
+      else return;
+      cx.stop_propagation(); cx.notify(); return;
+    }
     // The same keys as the git graph and the beads view: j k move, ⏎ ⇥ l → in, h ← x out, / filter, ? keys.
     const k = e.keystroke, order = this.order, at = order.indexOf(this.selId);
     const b = this.s?.beads.find((x) => x.id === this.selId);
@@ -113,7 +128,8 @@ export default class FleetBoard extends View {
       if (next) this.openOnly(next);
     };
     if (this.help && !is("?", "shift-/")) this.help = false; // any key closes the key list
-    if (is("1", "2")) { this.view = VIEWS[Number(k) - 1].id; this.reveal = true; }
+    if (is("e")) this.togglePicker(); // every run, in the dropdown under the title
+    else if (is("1", "2")) { this.view = VIEWS[Number(k) - 1].id; this.reveal = true; }
     else if (is("j", "down", "ctrl-n", "ctrl-j")) moveTo(at + 1);
     else if (is("k", "up", "ctrl-p", "ctrl-k")) moveTo(at < 0 ? 0 : at - 1);
     else if (is("ctrl-d", "pagedown")) moveTo(at + 10);
@@ -132,6 +148,8 @@ export default class FleetBoard extends View {
     else if (is("b") && b) this.inBeads(b);
     else if (is("escape") && this.filter) { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; }
     else if (is("escape") && this.openId) this.openId = null;
+    // Esc undoes one thing at a time (the filter, then the open bead); with nothing left, it closes the column.
+    else if (is("escape")) closeSide("fleet-board");
     else if (is("d")) this.showDone = !this.showDone;
     else if (is("[")) this.span = SPANS[Math.max(0, SPANS.indexOf(this.span) - 1)];
     else if (is("]")) this.span = SPANS[Math.min(SPANS.length - 1, SPANS.indexOf(this.span) + 1)];
@@ -152,7 +170,12 @@ export default class FleetBoard extends View {
     const root = v_flex().id("fleet-board").size_full().bg(t.background).text_color(t.foreground)
       .on_size_change((size, cx) => { if (Math.abs((this.width ?? 0) - size.width) > 1) { this.width = size.width; cx.notify(); } })
       .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx));
-    if (!this.s) { const strip = this.runStrip(t, now); return root.when(Boolean(strip), (el) => el.child(strip)).child(this.empty(t)); }
+    // No run shown yet: the same header (the run list behind its title), then what's missing.
+    if (!this.s) {
+      const head = boardHeader(t, { mod: "fleet-board", title: "Fleet", open: this.picking, onTitle: (cx) => { this.togglePicker(); cx.notify(); }, onClose: (cx) => { this.closePicker(); cx.notify(); },
+        menu: this.picking ? this.runPicker(t, now) : null, titleTip: "Every run (click or e)" });
+      return root.child(boardTop(t, head)).child(this.empty(t));
+    }
     // The dependency graph once per snapshot (it walks every bead's dependents), not once per frame.
     if (this.graphOf !== this.s) { this.graphOf = this.s; this.graphMemo = graph(this.s.beads); }
     const g = this.graphMemo, short = shortener(this.s.epic.id);
@@ -168,10 +191,9 @@ export default class FleetBoard extends View {
       this.reveal = false;
     }
     const elsewhere = this.problem && !this.sameRun(this.problem.cwd);
+    const missed = elsewhere ? [splitTarget(this.problem.cwd).cwd, splitTarget(this.problem.cwd).epic].filter(Boolean).join(" · ") : "";
     const repo = this.cwd.split("/").pop();
-    const strip = this.runStrip(t, now);
     return root
-      .when(Boolean(strip), (el) => el.child(strip))
       .child(this.header(t, mono, now))
       .child(this.tabs(t))
       .when(Boolean(this.confirm), (el) => el.child(this.confirmBar(t, mono)))
@@ -183,8 +205,8 @@ export default class FleetBoard extends View {
       .child(v_flex().id(`fb-${this.view}`).flex_1().min_h(0).pb(8).overflow_y_scrollbar().track_scroll(this.scroll).children(body))
       .when(this.tailOn, (el) => el.child(this.tailPanel(t, mono, short, now)))
       .child(h_flex().id("footer").px(10).py(5).border_t_1().border_color(t.border).gap(6).items_center()
-        .tooltip(tipText(elsewhere ? `The focused terminal's folder has no run (${this.problem.cwd}): ${this.problem.message}` : `${this.cwd}\nupdated ${new Date(this.last).toLocaleTimeString()}`))
-        .child(div().min_w(0).truncate().text_size(11).text_color(elsewhere ? t.ansi3 : t.dim).child(elsewhere ? `${repo} · focus has no run` : repo))
+        .tooltip(tipText(elsewhere ? `No run could be read in ${missed}: ${this.problem.message}` : `${this.cwd}\nupdated ${new Date(this.last).toLocaleTimeString()}`))
+        .child(div().min_w(0).truncate().text_size(11).text_color(elsewhere ? t.ansi3 : t.dim).child(elsewhere ? `${repo} · ${missed.split("/").pop()} has no run` : repo))
         .child(div().flex_none().text_size(11).text_color(t.dim).child(`· ${dur(now - this.last)} ago`))
         .child(div().flex_1())
         .child(div().flex_none().text_size(11).text_color(t.dim).child("j k · ⏎ details · space act · / · ? keys")));

@@ -45,6 +45,13 @@ test("a run has one key whether summarized from a snapshot or listed by fleet ru
   assert.equal(parseRuns(JSON.stringify({ schema: 2, runs: [] })), null);
   // A run recorded before agent-fleet kept its repository's path has nowhere to read it from: no chip.
   assert.deepEqual(parseRuns(JSON.stringify({ schema: 1, runs: [{ repo: null, repo_name: "old", epic: "old.ep" }] })), []);
+  // Every epic, not only a repository's current one; a run without its folder is looked for in the code folder.
+  const all = parseRuns(JSON.stringify({ schema: 1, runs: [
+    { repo: null, repo_name: "old", epic: "old.ep", finished: true },
+    { repo: "/code/web", repo_name: "web", epic: "web.a", current: "web.b" },
+    { repo: "/code/web", repo_name: "web", epic: "web.b", current: "web.b" },
+  ] }), "/code");
+  assert.deepEqual(all.map((r) => [r.cwd, r.epic, r.finished]), [["/code/old", "old.ep", true], ["/code/web", "web.a", false], ["/code/web", "web.b", false]]);
 });
 
 test("waits for the person come from gates[]; an open one on a bead that went on ends at its next step", () => {

@@ -14,6 +14,8 @@ import { readQueue, lastQueue, queueRows, stateDir, verbsFor, doVerb, ASK_FIRST,
 import { tabDot, alpha, numWidth } from "./lib/prrows.js";
 import { GROUPS, arrange, moveOf, nextStep, people, waitingOn, splitTitle, ago, actionsFor } from "./model.js";
 import { tipText } from "./lib/tiptext.js";
+import { closeSide } from "./lib/sidecolumn.js";
+import { boardHeader, boardTop } from "./lib/boardheader.js";
 
 const LINE = 20, GAP = 6; // a row's first line, and the gap between its columns
 // Where a row's text column starts: the row's padding and border, the dot, the number column.
@@ -170,6 +172,9 @@ export default class PrBoard extends View {
     else if (is("r")) this.read(cx);
     else if (is("/")) cx.timer.after(0, () => this.filterState.focus());
     else if (is("backspace") && this.filter) { this.filterState.set_value(""); this.filter = ""; }
+    // Esc undoes one thing at a time (the filter, then the open PR, above); with nothing left, it closes the column.
+    else if (is("escape") && this.filter) { this.filterState.set_value(""); this.filter = ""; }
+    else if (is("escape")) closeSide("pr-board");
     else if (is("?", "shift-/")) this.help = !this.help;
     else return;
     cx.stop_propagation(); cx.notify();
@@ -187,21 +192,20 @@ export default class PrBoard extends View {
     const syncedAt = this.q?.data?.lastSync ? Date.parse(this.q.data.lastSync) : 0;
     const synced = syncedAt ? syncedAgo(Date.now() - syncedAt) : "not yet", stale = !syncedAt || Date.now() - syncedAt > 1800000;
     const warnings = this.q?.warnings ?? [];
-    return v_flex().px(10).pt(8).pb(6).gap(3).border_b_1().border_color(t.border)
-      .child(h_flex().gap(8).items_center()
-        .child(div().text_size(13).font_semibold().child("PRs"))
-        .child(div().text_size(11.5).text_color(needs.length ? t.ansi1 : t.dim).child(needs.length ? `${needs.length} need you` : "nothing needs you"))
-        .child(div().flex_1())
-        .child(div().id("pr-synced").text_size(11).text_color(stale ? t.ansi3 : t.dim)
-          .tooltip(stale ? "pr-flow hasn't synced with GitHub for a while: s syncs now" : "When pr-flow last asked GitHub")
-          .child(`${this.q?.data?.tracked ?? 0} tracked · synced ${synced}`))
-        .child(div().id("pr-sync").px(5).rounded(4).text_size(12).text_color(this.loading ? t.accent : t.dim).cursor_pointer()
-          .hover((e) => e.bg(t.hover).text_color(t.foreground)).tooltip(tipText("Sync with GitHub now (s)"))
-          .when(Boolean(this.loading), (e) => e.loop("opacity", { from: 0.35, to: 1, period: 900 }))
-          .on_click((_e, cx) => this.read(cx, "force")).child("↻")))
-      .when(Boolean(this.busy), (e) => e.child(div().text_size(11).text_color(t.accent).loop("opacity", { from: 0.4, to: 1, period: 900 }).child(`${this.busy}…`)))
-      .when(Boolean(this.err), (e) => e.child(div().w_full().text_size(11.5).text_color(t.ansi1).child(this.err)))
-      .children(warnings.map((w) => div().w_full().text_size(11).text_color(t.ansi3).child(w)));
+    return boardTop(t,
+      boardHeader(t, {
+        mod: "pr-board", title: "PRs",
+        facts: [
+          { id: "pr-needs", text: needs.length ? `${needs.length} need you` : "nothing needs you", color: needs.length ? t.ansi1 : t.dim },
+          { id: "pr-synced", text: `${this.q?.data?.tracked ?? 0} tracked · synced ${synced}`, color: stale ? t.ansi3 : t.dim,
+            tip: stale ? "pr-flow hasn't synced with GitHub for a while: s syncs now" : "When pr-flow last asked GitHub" },
+        ],
+        buttons: [{ id: "pr-sync", label: "↻", tip: tipText("Sync with GitHub now (s)"), color: this.loading ? t.accent : null,
+          pulse: Boolean(this.loading), onClick: (cx) => this.read(cx, "force") }],
+      }),
+      this.busy ? div().text_size(11).text_color(t.accent).loop("opacity", { from: 0.4, to: 1, period: 900 }).child(`${this.busy}…`) : null,
+      this.err ? div().w_full().text_size(11.5).text_color(t.ansi1).child(this.err) : null,
+      ...warnings.map((w) => div().w_full().text_size(11).text_color(t.ansi3).child(w)));
   }
 
   confirmBar(t) {

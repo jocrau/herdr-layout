@@ -2,7 +2,8 @@
 """beads-view: `bd list --watch`, made interactive with fzf.
 
 Shows the current repo's beads as bd's own tree (open beads by default); Enter
-shows or hides a detail pane for the selected bead. Keys (arrows and digits
+(or a double-click) shows or hides a detail pane for the selected bead. A click
+selects a bead, a click on the selected one focuses it. Keys (arrows and digits
 while the filter is empty): Right focuses a bead (its subtree becomes the
 view), or on a bead without children shows its details; Left moves to the
 parent, and on a top row of a focused view goes back up (as does Backspace),
@@ -104,7 +105,9 @@ STATE_FILE = os.path.join(
 # detail panes are cached here, and the watcher keeps them fresh.
 CACHE_DIR = os.path.join(
     os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "beads-view", REPO_KEY)
-DETAIL_DIR = os.path.join(CACHE_DIR, "details")
+CLICK_FILE = os.path.join(CACHE_DIR, "click")  # the last click's token, see view()
+CLICK_WAIT = 0.6  # fzf takes two clicks within 500 ms as a double-click
+DETAIL_DIR = os.path.join(CACHE_DIR, "details-2")  # -2: panes wrapped to the width (older ones were not)
 CONFIG_FILE = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "beads-view", "config.json")
 
@@ -668,7 +671,56 @@ def detail(bead_id, width=80):
                 when = (c.get("created_at") or "").replace("T", " ")[:16]
                 lines += [""] if i else []
                 lines += [f"{DIM}{c.get('author', '')} · {when}{RESET}", reflow(c.get("text", ""))]
-    return "\n".join(lines) + "\n"
+    # Wrapped here, one screen row per line: fzf scrolls the pane by line, so a
+    # paragraph it wrapped itself would jump past all its rows at once.
+    return "\n".join(row for line in "\n".join(lines).split("\n") for row in wrap_ansi(line, width)) + "\n"
+
+
+LIST_LEAD = re.compile(r"\s*(?:[-*+]\s+|\d+[.)]\s+|>\s*)?")  # a continuation row lines up after it
+
+
+def wrap_ansi(line, width):
+    """`line` (with SGR codes) as rows of at most `width` columns: words wrap,
+    a word longer than a row breaks; list items and quotes get a hanging indent.
+    Each row starts with the colours active where it starts and ends reset."""
+    plain = ANSI.sub("", line)
+    if width < 2 or cols(plain) <= width:
+        return [line]
+    codes, p, pos = [], 0, 0  # (index in plain, code)
+    for m in ANSI.finditer(line):
+        p += m.start() - pos
+        codes.append((p, m.group()))
+        pos = m.end()
+    lead = LIST_LEAD.match(plain).end()
+    indent = cols(plain[:lead]) if cols(plain[:lead]) <= width // 2 else 0
+    spans, s, n, room = [], 0, len(plain), width
+    while cols(plain[s:n]) > room:
+        lim = max(index_at(plain, s, n, room), s + 1)
+        cut = plain.rfind(" ", s + (lead if s == 0 else 0), lim + 1)  # a space right at the limit still fits
+        if cut <= s:
+            cut = nxt = lim
+        else:
+            nxt = cut
+            while nxt < n and plain[nxt] == " ":
+                nxt += 1
+        spans.append((s, plain[s:cut].rstrip(" ")))
+        s, room = nxt, width - indent
+    spans.append((s, plain[s:]))
+    rows, active, k = [], [], 0
+    for i, (start, text) in enumerate(spans):
+        while k < len(codes) and codes[k][0] <= start:  # codes before this row: carry what is still on
+            active = [] if codes[k][1] in (RESET, "\x1b[m") else active + [codes[k][1]]
+            k += 1
+        last = i + 1 == len(spans)
+        row, at = (" " * indent if i else "") + "".join(active), 0
+        while k < len(codes) and (last or codes[k][0] < start + len(text)):
+            q, code = codes[k]
+            row += text[at:q - start] + code
+            at = q - start
+            active = [] if code in (RESET, "\x1b[m") else active + [code]
+            k += 1
+        rows.append(row + text[at:] + (RESET if active and not last else ""))
+    return rows
 
 
 def cached_detail(bead_id, bead_stamp=""):
@@ -881,7 +933,9 @@ def join_runs(runs):
     for x, text, sgr in sorted(runs, key=lambda run: run[0]):
         if x > col:
             line, col = line + " " * (x - col), x
-        line += f"{sgr}{safe(text)}{RESET}" if sgr else safe(text)
+        # Colour codes (status, priority, related beads come coloured) kept, the rest made safe.
+        shown = "".join(safe(part) if i % 2 == 0 else part for i, part in enumerate(re.split(f"({ANSI.pattern})", text)))
+        line += f"{sgr}{shown}{RESET}" if sgr or ANSI.search(text) else shown
         col += visible_len(text)
     return line
 
@@ -1571,6 +1625,26 @@ def reveal(bead_id, state):
     return pos
 
 
+def click(bead_id, token):
+    """A click on the selected bead (see view): once a double-click can no longer
+    follow, and if neither one nor a move came since, focus the bead."""
+    import urllib.request
+    time.sleep(CLICK_WAIT)
+    try:
+        with open(CLICK_FILE, encoding="utf-8") as f:
+            if f.read() != token:
+                return
+    except OSError:
+        return
+    reload = f"transform-header({RUN} header)+reload({RUN} render)"
+    action = f"execute-silent({RUN} focus {bead_id})+{reload}+first"
+    try:
+        urllib.request.urlopen(urllib.request.Request(
+            f"http://127.0.0.1:{os.environ['FZF_PORT']}", data=action.encode(), method="POST"), timeout=2)
+    except Exception:
+        pass
+
+
 def goto(pos):
     """Once fzf has its rows (it listens on FZF_PORT), select row `pos` and show its details."""
     import urllib.request
@@ -1591,6 +1665,8 @@ def view(select=None):
     # Edit in the detail pane: shown first (Ctrl-E with it hidden), so fzf
     # passes its place to the editor.
     edit = f"show-preview+execute({RUN} edit {{1}})+reload({RUN} render)"
+    click = shlex.quote(CLICK_FILE)
+    os.makedirs(CACHE_DIR, exist_ok=True)
     args = [
         FZF, "--with-shell=sh -c", "--ansi", "--layout=reverse", "--no-sort", "--track",
         # Exact words, not fuzzy: scattered letters matched nearly every bead.
@@ -1615,7 +1691,12 @@ def view(select=None):
         # After every reload (asynchronous): the pane for the row now there, as
         # --track keeps a bead whose stamp (and so its pane) may have changed.
         "--bind=load:refresh-preview",
-        f"--bind=double-click:execute-silent({RUN} focus {{1}})+{reload}+first",
+        # A click selects a bead; a click on the selected one opens its subtree, once
+        # fzf's double-click window has passed (a double-click starts with two clicks):
+        # the click leaves a token, which a focus change or a double-click clears.
+        f"--bind=left-click:execute-silent([ {{4}} = 0 ] || {{ printf %s $$ > {click}; {RUN} click {{1}} $$ >/dev/null 2>&1 & }})",
+        f"--bind=focus:execute-silent(: > {click})",
+        f"--bind=double-click:execute-silent(: > {click})+toggle-preview",  # like ⏎
         f"--bind=backward-eof:execute-silent({RUN} up)+{reload}",
         f"--bind=ctrl-a:execute-silent({RUN} all)+{reload}",
         f"--bind=ctrl-l:execute({RUN} labels {{1}})+reload({RUN} render)",
@@ -1725,6 +1806,8 @@ def main(argv):
     elif cmd in ("labels", "edit"):
         if rest and rest[0]:  # empty while fzf's list (re)loads: nothing to edit
             (edit_labels if cmd == "labels" else edit)(rest[0], state)
+    elif cmd == "click" and len(rest) == 2 and rest[0]:
+        click(rest[0], rest[1])
     elif cmd == "watch":
         watch()
     else:

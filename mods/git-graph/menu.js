@@ -39,6 +39,10 @@ export class Menu {
     } else if (a.type === "showChanges") {
       closeOverlay(overlay);
       showChanges();
+    } else if (a.type === "removeWorktree") {
+      // Its dialog reads the repository's config first: this popup stays until it's open.
+      this.busy = i;
+      cx.spawn(async (cx) => { await openDialog(a, ctx); closeOverlay(overlay); cx.notify(); });
     } else if (openDialog(a, ctx)) {
       closeOverlay(overlay);
     } else {

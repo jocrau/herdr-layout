@@ -5,7 +5,7 @@ export const VIEWS = [{ id: "board", label: "Board" }, { id: "lanes", label: "La
 // Lanes' time window: "fit" spans the run from its first step to now (or its last activity), filling the width.
 export const SPANS = ["fit", ...[1, 4, 12, 48, 168].map((h) => h * 3600000)];
 export const IDLE_POLL = 60000; // the watch is the main signal; this catches what it misses
-export const SCAN_EVERY = 60000; // the strip's runs are listed (`fleet runs --json`, cheap) this often
+export const SCAN_EVERY = 60000; // the run list is read (`fleet runs --json`, cheap) this often
 export const DIRTY_EVERY = 15000; // another run whose files changed is read again at most this often
 export const HIDDEN_CHECK = 120000; // hidden, the pane still looks this often for new waits (one cheap read)
 export const MIN_GAP = 15000; // at most one `fleet status --json` per this many ms (a busy wave writes often)

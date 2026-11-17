@@ -4,19 +4,21 @@ import { props, panes, spaces, run, exec, watchFolder } from "herdr";
 import { readSnapshot, fleetBin, readRuns } from "./fleet.js";
 import { stateRoot, relevant, summarize, changedRepos, runKey } from "./snapshot.js";
 import { IDLE_POLL, SCAN_EVERY, DIRTY_EVERY, HIDDEN_CHECK, MIN_GAP, TAIL_EVERY } from "./model.js";
-import { shown, load, save, focusedFolder } from "./env.js";
+import { shown, load, save, focusedFolder, targetOf, splitTarget } from "./env.js";
 
 export const SchedulerMethods = {
-  // The folder to read: the focused terminal's, unless it had no run a moment ago.
+  // What to read (a target: a folder, or a folder and one of its epics): the run you chose (the run list,
+  // ⌘← ⌘→), else the one on screen. Focusing a terminal elsewhere doesn't switch runs. Only with none shown
+  // yet: the run shown last (kept across restarts), else the focused terminal's folder, unless it had no run
+  // a moment ago.
   wanted() {
     if (props()?.repo) return props().repo; // a layout block pinned to one repository
-    const cwd = focusedFolder();
-    if (this.pin && this.pin.focus === cwd) return this.pin.cwd; // a chip chosen, focus unmoved
-    this.pin = null;
-    if (!cwd) return this.cwd;
-    const at = this.tried.get(cwd);
-    if (at && Date.now() - at < 60000) return this.cwd;
-    return cwd;
+    if (this.pin) return this.pin.target;
+    if (this.target) return this.target;
+    const first = load() ?? focusedFolder();
+    if (!first) return null;
+    const at = this.tried.get(first);
+    return at && Date.now() - at < 60000 ? null : first;
   },
 
   tick(cx) {
@@ -29,7 +31,7 @@ export const SchedulerMethods = {
     if (!shown()) { this.hidden = true; return; }
     if (this.hidden) { this.hidden = false; this.dirty.add("*"); this.refresh(cx, true); return; }
     const want = this.wanted();
-    if (want && !this.sameRun(want)) { // focus moved to another repository: its last snapshot now, a fresh one next
+    if (want && !this.sameRun(want)) { // another run chosen: its last snapshot now, a fresh one next
       const cached = this.snaps.get(want);
       if (cached) this.show(cx, cached, want, true);
       this.refresh(cx, true);
@@ -40,9 +42,13 @@ export const SchedulerMethods = {
     else if (Date.now() - (this.clockAt ?? 0) >= 10000) { this.clockAt = Date.now(); cx.notify(); }
   },
 
-  // A worktree or subfolder of the repo shown is the same run.
-  sameRun(cwd) {
-    return Boolean(this.cwd && (cwd === this.cwd || cwd.startsWith(this.cwd + "/") || this.cwd.startsWith(cwd + "/")));
+  // The run on screen? A worktree or subfolder of its repository is the same folder; a folder without an epic
+  // means the repository's current one (the epic on screen, once shown).
+  sameRun(target) {
+    if (!this.target || !target) return false;
+    const a = splitTarget(target), b = splitTarget(this.target), shownEpic = this.s?.epic.id ?? null;
+    const sameFolder = a.cwd === b.cwd || a.cwd.startsWith(b.cwd + "/") || b.cwd.startsWith(a.cwd + "/");
+    return sameFolder && (a.epic ?? shownEpic) === (b.epic ?? shownEpic);
   },
 
   // Asks for a read; the reader task does it (every await there uses that task's own context).
@@ -52,8 +58,9 @@ export const SchedulerMethods = {
   },
 
   // One `fleet status --json` (exec's own timeout ends a slow one; a lost one is the watchdog's).
-  timed(_cx, cwd) {
-    return readSnapshot(cwd);
+  timed(_cx, target) {
+    const { cwd, epic } = splitTarget(target);
+    return readSnapshot(cwd, epic);
   },
 
   // The worker: started in init, so its context outlives every await. Each pass sleeps once, then does the
@@ -115,11 +122,10 @@ export const SchedulerMethods = {
         // Nothing shown yet (a fresh start somewhere without a run): the repo shown last time,
         // else the first of the spaces' folders with a run, one with a wave running first.
         if (!this.s) {
-          const focus = focusedFolder(), pin = this.pin;
+          const pin = this.pin;
           const found = await this.findElsewhere(cx, cwd);
-          // Only if nothing changed meanwhile: a newer worker, another folder focused, a chip picked.
-          // (Not wanted(): after a failed read it names the last run's folder for a minute, by design.)
-          if (found && gen === this.gen && focusedFolder() === focus && this.pin === pin && !this.s) this.show(cx, found.snap, found.cwd);
+          // Only if nothing changed meanwhile: a newer worker, a chip picked.
+          if (found && gen === this.gen && this.pin === pin && !this.s) this.show(cx, found.snap, found.cwd);
         }
       }
     } catch (e) {
@@ -150,23 +156,25 @@ export const SchedulerMethods = {
     return found.find((x) => x?.snap.epic.wave.running) ?? found.find(Boolean) ?? null;
   },
 
-  // Shows a snapshot. `cached`: one kept from earlier (a chip, a focus change), shown while a fresh one is read.
-  show(cx, snap, cwd, cached = false) {
+  // Shows a snapshot of `target` (a folder, or a folder and an epic). `cached`: one kept from earlier (a run
+  // picked), shown while a fresh one is read. this.cwd is the folder: fleet's commands run there.
+  show(cx, snap, target, cached = false) {
     this.s = snap;
-    this.cwd = cwd;
+    this.target = target;
+    this.cwd = splitTarget(target).cwd;
     if (this.confirm && this.confirm.key !== this.runKey()) this.confirm = null; // asked about another run
-    this.remember(cwd, snap);
-    const sum = this.summary(snap, cwd);
+    this.remember(target, snap);
+    const sum = this.summary(snap, this.cwd);
     this.runs.set(sum.key, sum);
     if (!cached) this.alertParked(snap);
-    save(cwd);
+    save(target);
     this.watch(cx, stateRoot(snap.runDir));
   },
 
-  // The last snapshot per folder, for instant switching: the 24 used most recently (each holds a whole run).
-  remember(cwd, snap) {
-    this.snaps.delete(cwd);
-    this.snaps.set(cwd, snap);
+  // The last snapshot per target, for instant switching: the 24 used most recently (each holds a whole run).
+  remember(target, snap) {
+    this.snaps.delete(target);
+    this.snaps.set(target, snap);
     while (this.snaps.size > 24) this.snaps.delete(this.snaps.keys().next().value);
   },
 
@@ -243,8 +251,8 @@ export const SchedulerMethods = {
     const current = this.s ? this.summary(this.s, this.cwd).key : null;
     for (const run of [...this.runs.values()]) {
       if (run.key === current || !changed.has(run.repoName)) continue;
-      const r = await this.timed(cx, run.cwd);
-      if (r.ok) { this.remember(run.cwd, r.snap); const sum = summarize(r.snap, run.cwd); this.runs.delete(run.key); this.runs.set(sum.key, sum); }
+      const target = targetOf(run.cwd, run.epic), r = await this.timed(cx, target);
+      if (r.ok) { this.remember(target, r.snap); const sum = summarize(r.snap, run.cwd); this.runs.delete(run.key); this.runs.set(sum.key, sum); }
     }
   },
 
@@ -262,32 +270,50 @@ export const SchedulerMethods = {
     });
   },
 
-  // Chips: every run with a wave running, beads waiting for you or still open, or activity in the last week
-  // (a finished one is dimmed, so you can still go back to it).
-  chips(now) {
-    return [...this.runs.values()]
-      .filter((r) => r.running || r.parked || r.open > 0 || (r.last && now - r.last < 7 * 86400000))
-      // A fixed order (repository, then epic), so chips don't move under the pointer and ⌘← ⌘→ always step
-      // the same way; the red count and the breathing dot say which run needs you or is busy.
-      .sort((a, b) => `${a.repoName}\0${a.epic}`.localeCompare(`${b.repoName}\0${b.epic}`));
+  // The run list (the title's ▾, ⌘← ⌘→): runs at work or unfinished from the last two weeks ("Active"), then
+  // runs finished in the last week; the one on screen always. Each part in a fixed order (repository, then
+  // epic), so rows don't move under the pointer and ⌘← ⌘→ always step the same way.
+  runList(now) {
+    const current = this.runKey(), day = 86400000, recent = (r, days) => r.last && now - r.last < days * day;
+    const finished = (r) => (r.finished ?? r.open <= 0) && !r.running && !r.parked;
+    const order = (a, b) => `${a.repoName}\0${a.epic}`.localeCompare(`${b.repoName}\0${b.epic}`);
+    const all = [...this.runs.values()];
+    const active = all.filter((r) => !finished(r) && (r.running || r.parked || recent(r, 14) || r.key === current)).sort(order);
+    const done = all.filter((r) => finished(r) && (recent(r, 7) || r.key === current)).sort(order);
+    return { active, done, flat: [...active, ...done] };
   },
 
-  // ⌘← ⌘→ (keys.json, while the pane has focus): the run before or after the one shown, in the strip's order.
+  // ⌘← ⌘→ (keys.json, while the pane has focus): the run before or after the one shown, in the list's order.
   stepRun(cx, dir) {
-    const list = this.chips(Date.now());
+    const list = this.runList(Date.now()).flat;
     if (!list.length) return;
-    const current = this.s ? this.summary(this.s, this.cwd).key : null;
-    const at = list.findIndex((r) => r.key === current);
-    // Not on the strip: → goes to the first chip, ← to the last.
+    const at = list.findIndex((r) => r.key === this.runKey());
+    // Not in the list: → goes to the first run, ← to the last.
     this.choose(cx, list[at < 0 ? (dir > 0 ? 0 : list.length - 1) : (at + dir + list.length) % list.length]);
   },
 
+  // A press outside the open run list closes it.
+  closePicker() {
+    if (!this.picking) return;
+    this.picking = false;
+    this.pickClosedAt = Date.now();
+  },
+
+  // Opens or closes the run list, its selection on the run shown.
+  togglePicker() {
+    // The press that closed the list from outside was on the title: its click doesn't open it again.
+    if (!this.picking && Date.now() - (this.pickClosedAt ?? 0) < 400) return;
+    this.picking = !this.picking;
+    if (this.picking) this.pickAt = Math.max(0, this.runList(Date.now()).flat.findIndex((r) => r.key === this.runKey()));
+  },
+
   choose(cx, run) {
-    this.pin = { cwd: run.cwd, focus: focusedFolder() };
-    this.tried.delete(run.cwd);
+    const target = targetOf(run.cwd, run.epic);
+    this.pin = { target };
+    this.tried.delete(target);
     // At once from the last snapshot of that run; the fresh read replaces it a moment later.
-    const cached = this.snaps.get(run.cwd);
-    if (cached) { this.show(cx, cached, run.cwd, true); this.reveal = true; }
+    const cached = this.snaps.get(target);
+    if (cached) { this.show(cx, cached, target, true); this.reveal = true; }
     this.request = "force";
     cx.notify();
   },

@@ -1,8 +1,8 @@
 # workbench
 
 A keyboard-first Herdr layout for agents working across many git repositories. Herdr's `main`
-layout with a worktree-aware spaces list, an agents list with space avatars, a tab bar whose
-side-panel toggles are mod commands, a status bar with Claude usage, three full-size
+layout with a worktree-aware spaces list, an agents list with space avatars, a tab bar with
+icon links to these mods (Files, Git, Beads; PRs, Fleet), a status bar with Claude usage, three full-size
 dialogs on ⌘O, ⌘G and ⌘B (a file browser, a git graph and a beads issue tree), and on ⌘⇧F a
 fleet board for agent-fleet runs, all driven by one set of keys.
 
@@ -38,14 +38,21 @@ Left to right:
      merged or closed, or its upstream gone: status has `branch.upstream` but no `branch.ab`)
      is drawn at 55 % opacity with "merged", "PR closed" or "remote gone" before the PR.
    - An agents row shows the agent's space avatar instead of the program logo.
-2. **Work column**: the **tab bar** (`tabs-graph`, 42 px); the terminal area; on the right a
-   hidden **side panel** (368 px, 280–900) stacking `preview-plus` (linziyanleo, MIT) and Herdr's `changes`; the
+2. **Work column**: the **tab bar** (`tabs-graph`, 42 px: the tabs with + right after them, then icon links that
+   open the file browser, git graph and beads and show or hide the PR and fleet columns); the terminal area; on the right a
+   hidden **side panel** (368 px, 280–900; ⌘⇧O or the `tabs-graph.files` / `.changes` commands; a `side-header`
+   header with Preview · Changes tabs and a ×) stacking `preview-plus` (linziyanleo, MIT) and Herdr's `changes`; the
    **status bar** (`usage-status`, 28 px) with Claude usage on the right when available.
+Side columns (the side panel, the PR column, the fleet column) are open one at a time: opening one closes the
+other. They close the same three ways: the × at the right of
+their header (its tooltip names the key), Esc once nothing in them is left to clear (a filter, a question, an open
+item), and their key (⌘⇧O, ⌘⇧R, ⌘⇧F), which opens them too, as the PR and fleet columns' links in the tab bar do
+(highlighted while open). `lib/sidecolumn.js` holds the ×, and which key goes with which column.
+
 3. **Fleet column** (`fleet`, 400 px, hidden until ⌘⇧F): `fleet-board`, full height. Top to
-   bottom: a strip of run chips (only when runs exist in more than one repository: repository ·
-   epic, a dot while its wave runs, a red count of beads waiting, finished ones dimmed and ✓,
-   the shown one outlined in the accent colour); the header (the epic id in 15 px, the wave
-   pill on the right: "wave 7 · 2h45" with a green dot, or "finished · 2d ago"); a progress bar
+   bottom: the header (`lib/boardheader.js`, as the PR board's: the epic with a chevron that opens
+   the run list as a dropdown over the board, the repository and mode, ↻ and ×); the wave pill ("wave 7 ·
+   2h45" with a green dot, or "finished · 2d ago") beside a progress bar
    (merged in `ansi2`, dropped in grey) with "13/18 −1 $29"; a gauge row in 11.5 px (agents:
    one 7 px square per worker, blue when busy; a merged-per-hour sparkline; "1.3/h", "ETA
    ~2h15", "1st-pass 80%", and "you: N waits · ~Xm" with gate history); tabs Board · Lanes ·
@@ -166,14 +173,17 @@ search `/`, clear `⌫`; switch pane `⇥`; help `?` (any key closes it). Esc cl
   `git worktree remove`, `--force` only when the dialog said changes are lost), deletes the
   branch (`-D`: a squash merge leaves its commits unmerged; already gone is fine), and closes
   only the space or tab the dialog named.
-- **Fleet board.** Follows the focused terminal's repository (props `{repo}` pin it), reads
+- **Fleet board.** Shows the run chosen in its run list (`fleet runs --json`: every epic of every
+  repository, read with `fleet status --repo <folder> --epic <epic>`; a run without its folder is
+  looked for as `<code_dir>/<repo>`; ⌘← ⌘→ step through it), kept in shared state across restarts; the focused terminal's repository only picks the
+  first one when none was ever shown (props `{repo}` pin it to one), reads
   `fleet status --json --repo <folder>` and re-reads when anything relevant changes under the
   run's state directory (`watchFolder` on `<state>/<repo>`: events.jsonl, wave.json, run.json,
   state.json, run.lock, gates/*.json, merge.json), with a 60 s read as backstop. Keys: `j k ↑ ↓
   ⌃N ⌃P` move, `⌃D ⌃U` page, `g G` ends, `⏎ ⇥` toggle the details, `l →` open, `h ← x` close,
   `space` the first action, `/` filter (`⌫` clears), `t` tail, `b` the bead in the beads view
   (`openOverlay` beads with `{select, folder}`), `d` folds Done (open at start), `[ ]` zoom the
-  lanes (1 h … 7 d, fit), `r` read again, `?` keys, ⌘← ⌘→ (`fleet-board.prev-run/next-run`, the
+  lanes (1 h … 7 d, fit), `r` read again, `e` the run list (again or esc closes it), `?` keys, ⌘← ⌘→ (`fleet-board.prev-run/next-run`, the
   `mod:fleet-board` keys section) the previous or next run. One row is open at a time and
   the details follow the selection. A parked bead with questions shows each with the agent's
   options as radio rows (its default preselected, marked "proposed"), a textarea and **Send
@@ -187,8 +197,8 @@ search `/`, clear `⌫`; switch pane `⇥`; help `?` (any key closes it). Esc cl
   --no-wait`) or starts the next (`fleet run <epic>` in a terminal), after the same bar. **diff**
   opens `git-graph` with `{review: {base, head}}`. Every 2 minutes while hidden, one read per
   run checks for newly parked beads; each new wait posts one warning notification (deduped
-  across copies via `shared("fleet-board.alerted")`) whose click shows the pane. The strip
-  lists runs from `fleet runs --json` once a minute, else by trying `fleet status` in the
+  across copies via `shared("fleet-board.alerted")`) whose click shows the pane. The run
+  list reads `fleet runs --json` once a minute, else by trying `fleet status` in the
   spaces' folders one folder per pass.
 - **Status bar usage.** When `~/.local/state/claude-usage.json` exists it shows the 5-hour
   and 7-day windows: used share, pace and projection at reset (yellow from 90 %, red from
@@ -216,7 +226,9 @@ root row
 Mods: `worktree-support` and `worktree-actions` (natelandau, MIT; worktree rows, the right-click
 popups), `new-space` (Herdr's `prompt`; ⌘N and the spaces list's +: asks a name, then `space.new`
 with that name for the space and its tab and `claude --remote-control <name>`), `space-agents` (Herdr's `agents`), `tabs-graph` (Herdr's `tabs`; commands
-`tabs-graph.files`, `tabs-graph.changes`), `usage-status` (Herdr's `workspace-status`),
+`tabs-graph.files`, `tabs-graph.changes`; its links as icons: the dialogs, then the side columns;
+one side column at a time; the wheel switches tabs one per notch, a sideways swipe scrolls them),
+`side-header` (the side panel's header: its views as tabs and a ×), `usage-status` (Herdr's `workspace-status`),
 `file-browser` (its own `main.js` subclassing preview-plus's viewer as `viewer.js`),
 `git-graph` (rabeeh-ta, MIT; `mod.json` overlay dialog; `graph.js` holds the Graph's lifecycle, its methods are
 mixed in from `table.js`, `review.js`, `pickers.js` and `manygit.js`, with `reads.js`, `tools.js` and
@@ -281,7 +293,7 @@ Screenshots: `tests/demo/make-demo.sh` (a second window: `HERDR_APP_HOME`, `HC_S
 - **Pull request numbers** come from `gh pr list --state all --limit 50`: older PRs of busy
   repositories don't show.
 - **A mod's sleeping tasks: only one is woken reliably.** The fleet board runs every background
-  job (reads, the strip's scan, the tail, the hidden check) in one worker loop with a single
+  job (reads, the run list's scan, the tail, the hidden check) in one worker loop with a single
   `cx.sleep` per pass; a second loop sleeping at the same time (or `Promise.race` with
   `cx.sleep`) can stay asleep for good.
 - **A docked mod's props change restarts it**: the quickest way to load an edited docked mod
@@ -313,8 +325,8 @@ Screenshots: `tests/demo/make-demo.sh` (a second window: `HERDR_APP_HOME`, `HC_S
 - ⌘B opens the beads tree in a repository with `.beads`; `j`/`k` move, `l` unfolds,
   `h` folds, `/` filters, `?` lists the keys; outside one it says "No beads here".
 - `?` in each dialog lists its keys.
-- ⌘⇧F in a repository with an agent-fleet run shows the epic, its wave pill and progress;
-  `j k` move, ⏎ opens a bead with its summary line, timeline and step table; `t` shows its tail.
-  In a folder without a run it says so. Focusing a terminal in another repository with a run
-  switches the board; ⌘→ moves to the next chip.
+- ⌘⇧F shows the run picked last (the first time: the focused repository's), its wave pill and
+  progress; `j k` move, ⏎ opens a bead with its summary line, timeline and step table; `t` shows
+  its tail. Focusing a terminal in another repository leaves the board where it is; the run list or ⌘→
+  moves to another run.
 - A bead that parks posts one notification, also with the pane hidden (within 2 minutes).

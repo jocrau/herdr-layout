@@ -106,7 +106,7 @@ Then open a space in `~/Code/wt-sandbox` (⌘N) and press **⌘G** there.
       changes: they are lost" and "Its space closes". Confirm: the space closes and the
       worktree and branch are gone.
 - [ ] **Merged and closed pull requests** can't be faked in the sandbox. In a GitHub repo with a
-      merged PR whose worktree still exists (mm-data-platform likely has some), the row is
+      merged PR whose worktree still exists (one of your busier repositories likely has some), the row is
       dimmed with "merged" before the purple `#number`, and Clean up mentions "a squash merge
       leaves them like that" for the leftover commits.
 - [ ] If the repo sets `git config herdr.worktreeRemove '<cmd>'`, Clean up runs that command
@@ -114,8 +114,8 @@ Then open a space in `~/Code/wt-sandbox` (⌘N) and press **⌘G** there.
 
 ## 5. On a real repo
 
-- [ ] Open ⌘G in `~/Code/mm-data-platform`. `worktree-nats-multiplexer-passthrough` and the
-      `.claude/worktrees/*` branches have folder icons, and double-clicking one goes to that
+- [ ] Open ⌘G in one of your repositories with worktrees. Their branches (and any
+      `.claude/worktrees/*` ones) have folder icons, and double-clicking one goes to that
       worktree instead of failing.
 
 ## Cleaning up afterwards

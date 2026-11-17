@@ -7,6 +7,22 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status`, `preview-plus` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- Side columns (the PR board, the fleet board, the side panel) open one at a time: opening one
+  closes the other. Each closes the same three ways: the × at the right of its header, Esc once
+  nothing in it is left to clear, and its key (⌘⇧R, ⌘⇧F, ⌘⇧O). Every board has the same 40 px
+  header (title, facts, small buttons, ×), its own lines below it; the side panel's has Preview and
+  Changes as tabs.
+- Tab bar: + right after the last tab; icon links to the file browser, git graph and beads, and to
+  the PR and fleet columns (highlighted while open); the wheel switches one tab per notch or short
+  swipe, a sideways swipe scrolls the tabs; dragging a tab shows where it lands.
+- `fleet-board`: click its title, or press `e`, for every run (each epic of each repository,
+  finished ones too) in a dropdown: "Active", then "Finished this week". The run you pick stays
+  until you pick another (⌘← ⌘→ step); focusing a terminal elsewhere no longer switches it.
+- beads-view: a click selects a bead, a click on the selected one focuses it, a double-click shows
+  or hides its details; the detail pane wraps to its width and scrolls row by row; the in-place
+  editor shows status and priority in colour instead of escape codes.
+- Git graph: removing a worktree from a right-click menu opens its dialog again; a branch that
+  merged HEAD in no longer draws the line to HEAD dashed.
 - `pr-board` (⌘⇧R): pr-flow's queue of pull requests beside your agents, grouped by your next move,
   each PR with what it is, who's in it and the next step; only the actions possible in its state.
   The PR view (⌘⌥R, `d`) is the git graph on the PR's range with the queue beside it and pr-flow's
@@ -92,8 +108,8 @@ dialogs and the fleet pane.
   step under its round with the result in words. Questions are answered in place; a stuck bead
   offers resume; commands that change the run, and starting or stopping a wave from the header,
   ask in a confirm bar first. `t` follows the bead's `fleet tail` at the bottom of the pane, `b`
-  opens it in the beads view, **diff** in the git graph. A strip of chips lists the runs in other
-  repositories (⌘← ⌘→ switch); a bead that starts waiting for you posts a notification, also
+  opens it in the beads view, **diff** in the git graph. Every run is a click on the title away (⌘← ⌘→
+  step); a bead that starts waiting for you posts a notification, also
   while the pane is hidden. Keys as in the git graph and the beads view.
 - `space-agents`: each Claude Code agent's row shows its context used (a short bar and the
   percent, yellow from 60 %, red from 80 %), from the `claude.context` terminal label that

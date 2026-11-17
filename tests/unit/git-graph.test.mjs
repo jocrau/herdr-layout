@@ -185,3 +185,18 @@ test("the PR view's log reads only the PR's head and its base", async () => {
   assert.ok(!args.includes("--branches") && !args.includes("--remotes"), "no other branches");
   assert.ok(logArgs({ all: true, remotes: true, limit: 300 }).includes("--branches"), "without revs: all branches as before");
 });
+
+test("a merge of HEAD below the uncommitted changes draws a solid line to HEAD, not the dashed one", async () => {
+  const { layoutLanes } = await import("../../mods/git-graph/lanes.js");
+  // Uncommitted → main (dashed); development merges main in, so it joins that lane.
+  const { rows } = layoutLanes([
+    { hash: "U", parents: ["M"], dashed: true },
+    { hash: "D", parents: ["D0", "M"] },
+    { hash: "M", parents: ["M0"] },
+  ]);
+  const merge = rows[1].segments.find(([a, ya, b]) => a === rows[1].lane && ya === 0.5 && b === 0);
+  assert.equal(merge[5], false, "the merge line is solid");
+  const intoM = rows[2].segments.find(([a, ya, b, yb]) => a === 0 && ya === 0 && yb === 0.5);
+  assert.equal(intoM[5], false, "the line into HEAD is solid below the merge");
+  assert.equal(rows[1].segments.find(([a, ya, b, yb]) => a === 0 && b === 0 && ya === 0 && yb === 1)[5], true, "above it stays dashed");
+});

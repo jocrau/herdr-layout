@@ -26,21 +26,25 @@ export async function perform(action, values, ctx, { toast = true } = {}) {
   }
 }
 
-// Opens the action's dialog; false when it has none and should run at once.
+// Opens the action's dialog; false when it has none and should run at once (a promise of
+// true when it first reads something).
 export function openDialog(action, ctx) {
   // Removing a worktree: the dialog says when it's open somewhere, and uses the repository's
   // own remove command when it sets one (read first, then the dialog opens).
+  // The caller awaits it before closing a popup: a closed popup's pending work never finishes.
   if (action.type === "removeWorktree" && !("custom" in action)) {
-    const at = openAt(action.path, ctx.on);
-    exec("git", ["config", "--get", "herdr.worktreeRemove"], { cwd: ctx.root, on: ctx.on })
-      .catch(() => null)
-      .then((r) => openDialog({ ...action, open: Boolean(at.space || at.pane), custom: r?.code === 0 ? r.stdout.trim() || null : null }, ctx));
-    return true;
+    return prepareRemove(action, ctx).then((a) => openDialog(a, ctx));
   }
   const spec = dialogFor(action, ctx);
   if (!spec) return false;
   openOverlay({ mod: "git-graph", kind: "dialog", width: DIALOG_WIDTH, height: dialogHeight(spec), props: { role: "dialog", action, ctx } });
   return true;
+}
+
+async function prepareRemove(action, ctx) {
+  const at = openAt(action.path, ctx.on);
+  const r = await exec("git", ["config", "--get", "herdr.worktreeRemove"], { cwd: ctx.root, on: ctx.on }).catch(() => null);
+  return { ...action, open: Boolean(at.space || at.pane), custom: r?.code === 0 ? r.stdout.trim() || null : null };
 }
 
 export function showChanges() {

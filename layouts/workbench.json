@@ -123,6 +123,15 @@
                 {
                   "id": "panel-body",
                   "type": "stack",
+                  "header": {
+                    "content": {
+                      "mod": "side-header",
+                      "props": {
+                        "stack": "panel-body"
+                      }
+                    },
+                    "height": 40
+                  },
                   "children": [
                     {
                       "id": "files",

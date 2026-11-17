@@ -20,6 +20,14 @@ export const LAST = "fleet-board.lastRepo";
 export const load = () => { const v = shared(LAST); return typeof v === "string" ? v : null; };
 export const save = (v) => { if (shared(LAST) !== v) setShared(LAST, v); };
 
+// What the board reads: a folder (its repository's current epic) or one epic of it, as one string
+// (a map key, and kept in shared state as before: a plain folder is still a target).
+export const targetOf = (cwd, epic) => (epic ? `${cwd}\u0000${epic}` : cwd);
+export function splitTarget(target) {
+  const [cwd, epic] = String(target ?? "").split("\u0000");
+  return { cwd: cwd || null, epic: epic || null };
+}
+
 // The focused terminal's folder; else its pane's, else its space's (as the file browser finds it).
 export function focusedFolder() {
   const f = focused();

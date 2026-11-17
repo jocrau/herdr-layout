@@ -91,6 +91,7 @@ export function summarize(snap, cwd) {
     cwd, repoName, epic: snap.epic.id,
     running: Boolean(snap.epic.wave?.running), parked: b.parked ?? 0, busy: b.running ?? 0,
     open: (b.total ?? 0) - (b.done ?? 0) - (b.dropped ?? 0), last: last || null,
+    finished: (b.total ?? 0) - (b.done ?? 0) - (b.dropped ?? 0) <= 0 && !snap.epic.wave?.running,
   };
 }
 
@@ -127,13 +128,20 @@ export function parseSnapshot(stdout, cwd) {
 }
 
 // `fleet runs --json`'s output as the strip's runs (summarize()'s shape), or null when it isn't that.
-export function parseRuns(stdout) {
+// Every run, each epic of each repository (not only a repository's current one), read again by folder and epic.
+// A run that didn't record its repository's folder is looked for under the code folder (`codeDir/<repo>`).
+export function parseRuns(stdout, codeDir = null) {
   let raw;
   try { raw = JSON.parse(stdout); } catch { return null; }
   if (raw?.schema !== 1 || !Array.isArray(raw.runs)) return null;
-  return raw.runs.filter((x) => x.repo && (x.current === undefined || x.current === x.epic || x.wave?.running)).map((x) => ({
-    key: runKey(x.repo_name ?? x.repo.split("/").pop(), x.epic), cwd: x.repo, repoName: x.repo_name ?? x.repo.split("/").pop(), epic: x.epic,
-    running: Boolean(x.wave?.running), parked: x.beads?.parked ?? 0, busy: x.beads?.running ?? 0,
-    open: (x.beads?.total ?? 0) - (x.beads?.done ?? 0) - (x.beads?.dropped ?? 0), last: ms(x.last_activity),
-  }));
+  return raw.runs.map((x) => {
+    const repoName = x.repo_name ?? x.repo?.split("/").pop() ?? null;
+    const cwd = x.repo ?? (repoName && codeDir ? `${codeDir}/${repoName}` : null);
+    return cwd && x.epic ? {
+      key: runKey(repoName, x.epic), cwd, repoName, epic: x.epic,
+      running: Boolean(x.wave?.running), parked: x.beads?.parked ?? 0, busy: x.beads?.running ?? 0,
+      open: (x.beads?.total ?? 0) - (x.beads?.done ?? 0) - (x.beads?.dropped ?? 0), last: ms(x.last_activity),
+      finished: Boolean(x.finished),
+    } : null;
+  }).filter(Boolean);
 }

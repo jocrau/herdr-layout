@@ -16,6 +16,8 @@ several mods need lives here, and `lib/sync.mjs` copies each file into the mods 
 | `names.js` | a branch as a space or tab name (`feat/csv-export` → "Csv Export") | git-graph, worktree-actions, worktree-support |
 | `settings.js` | `<appHome>/data/workbench.json`: `code_dir`, `fleet` | fleet-board, git-graph, new-space |
 | `repos.js` | finding repositories with one `find` (a code folder of `~` only two levels down) | git-graph, new-space |
+| `boardheader.js` | the header of every board in a side column: one 40 px row (title, facts, buttons, ×), the board's own rows below | fleet-board, pr-board, side-header |
+| `sidecolumn.js` | closing a side column the same way everywhere: the header's ×, Esc, its keys.json toggle | fleet-board, pr-board, preview-plus, side-header, tabs-graph |
 | `worktree.js` | removing a worktree and its branch; `herdr.worktreeRemove` | git-graph, worktree-actions, worktree-support |
 
 ## Rules the shared code keeps

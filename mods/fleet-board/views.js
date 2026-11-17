@@ -6,6 +6,7 @@ import { theme, run } from "herdr";
 import { STEPS, VIEWS, SPANS, TAIL_LINES, SECTIONS, ROW, OK, PHASES, phaseOf, dur, spanLabel, AGENT_STEPS, hm, timeline, gateText, asks, fixRounds, fixSessions, natural, mergedAt, tipText } from "./model.js";
 import { phaseColor, shaped, swatch } from "./ui.js";
 import { shown } from "./env.js";
+import { boardHeader, boardTop } from "./lib/boardheader.js";
 
 export const ViewsMethods = {
   // The panel: which bead, whether it still runs, a real terminal (follow), close; then its last lines,
@@ -50,24 +51,36 @@ export const ViewsMethods = {
   // One chip per run: a dot (breathing while a wave runs), repository · epic, and a red count of beads
   // waiting for you. The one on screen is outlined; a finished one (nothing open, no wave) is dimmed.
   // Shown when there is more than the one on screen.
-  runStrip(t, now) {
-    const list = this.chips(now), current = this.s ? this.summary(this.s, this.cwd).key : null;
-    if (!list.length || (list.length === 1 && list[0].key === current)) return null;
-    // Repository names without the prefix they all share (mm-data-platform, mm-tsdb: data-platform, tsdb).
-    const names = list.map((r) => r.repoName), dash = names[0].indexOf("-") + 1;
-    const common = names.length > 1 && dash > 0 && names.every((n) => n.startsWith(names[0].slice(0, dash))) ? dash : 0;
-    return h_flex().px(10).pt(6).pb(2).gap(4).flex_wrap().children(list.map((r, i) => {
-      const on = r.key === current, finished = !r.running && !r.parked && r.open <= 0;
+  // The run list, a dropdown under the board's title while it's open: "Active", then "Finished this week".
+  // A row: a dot (a wave running breathes; ✓ finished), the epic, its repository, a red count of beads waiting
+  // for you, the last activity. Click or ⏎ shows that run; esc closes the list.
+  runPicker(t, now) {
+    const { active, done, flat } = this.runList(now), current = this.runKey();
+    this.pickAt = Math.min(this.pickAt, Math.max(0, flat.length - 1));
+    const row = (r) => {
+      const i = flat.indexOf(r), on = r.key === current, finished = done.includes(r);
       const epic = r.epic.startsWith(r.repoName + "-") ? r.epic.slice(r.repoName.length + 1) : r.epic;
-      return h_flex().id(`run-${i}`).h(22).px(7).gap(5).items_center().rounded(11).border_1()
-        .border_color(on ? t.accent : t.border).when(on, (el) => el.bg(t.hover))
-        .hover((el) => el.bg(t.hover))
-        .tooltip(`${r.repoName} · ${r.epic}\n${r.running ? "a wave is running" : "no wave running"}; ${r.parked} waiting for you, ${r.busy} running, ${r.open} open${r.last ? `\nlast activity ${dur(now - r.last)} ago` : ""}\n${r.cwd}`)
-        .on_click((_e, cx) => this.choose(cx, r))
-        .child(div().size(6).rounded(3).flex_none().bg(r.running ? t.ansi2 : t.dim).when(r.running, (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1400 })))
-        .child(div().max_w(240).truncate().text_size(11).text_color(on ? t.foreground : finished ? t.dim : t.muted).child(`${r.repoName.slice(common)} · ${epic}${finished ? " ✓" : ""}`))
-        .when(r.parked > 0, (el) => el.child(div().flex_none().px(5).rounded(7).bg(t.ansi1).text_size(10.5).text_color(t.background).child(String(r.parked))));
-    }));
+      return h_flex().id(`run-${i}`).h(30).px(10).gap(8).items_center().cursor_pointer()
+        .when(i === this.pickAt, (el) => el.bg(t.hover)).hover((el) => el.bg(t.hover))
+        .tooltip(`${r.repoName} · ${r.epic}\n${r.running ? "a wave is running" : "no wave running"}; ${r.parked} waiting for you, ${r.busy} running, ${r.open} open\n${r.cwd}`)
+        .on_click((_e, cx) => { this.picking = false; this.choose(cx, r); })
+        .child(finished
+          ? div().w(8).flex_none().text_size(11).text_color(t.dim).child("✓")
+          : div().size(7).rounded(4).flex_none().bg(r.running ? t.ansi2 : r.parked ? t.ansi1 : t.dim)
+            .when(r.running, (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1400 })))
+        .child(div().flex_none().max_w(200).truncate().text_size(12.5).when(on, (el) => el.font_semibold())
+          .text_color(on ? t.foreground : finished ? t.muted : t.foreground).child(epic))
+        .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(r.repoName))
+        .when(r.parked > 0, (el) => el.child(div().flex_none().px(5).rounded(7).bg(t.ansi1).text_size(10.5).text_color(t.background).child(String(r.parked))))
+        .child(div().flex_none().w(34).text_size(11).text_color(t.dim).text_right().child(r.running ? "now" : r.last ? dur(now - r.last) : ""));
+    };
+    const head = (label, n) => div().px(10).pt(6).pb(3).text_size(11).text_color(t.dim).child(`${label.toUpperCase()} ${n}`);
+    const out = [];
+    if (active.length) out.push(head("Active", active.length), ...active.map(row));
+    if (done.length) out.push(head("Finished this week", done.length), ...done.map(row));
+    if (!flat.length) out.push(div().p(14).text_size(12).text_color(t.dim).child(this.scanAt ? "No fleet runs." : "Listing the fleet's runs…"));
+    out.push(div().px(10).pt(8).pb(4).mt(4).border_t_1().border_color(t.border).text_size(11).text_color(t.dim).child("j k · ⏎ show · e esc close · ⌘← ⌘→ step"));
+    return out;
   },
 
   // The bar that asks.
@@ -201,14 +214,20 @@ export const ViewsMethods = {
         .tooltip(tipText(`${wave.last_ended ? `Wave ${wave.number} ended: ${wave.last_ended.reason}, ${new Date(wave.last_ended.at).toLocaleString()}` : "No wave running"}\nClick to start the next one (asks first)`))
         .child(div().size(6).rounded(3).bg(t.dim))
         .child(div().max_w(150).truncate().text_size(11.5).text_color(t.muted).child(wave.last_ended?.at ? `${wave.last_ended.reason} · ${dur(now - wave.last_ended.at)} ago` : "no wave"));
-    return v_flex().px(10).pt(8).pb(6).gap(5).border_b_1().border_color(t.border)
-      .child(h_flex().gap(6).items_center()
-        .child(div().id("epic").flex_1().min_w(0).truncate().font_family(mono).text_size(13).font_semibold().text_color(t.foreground)
-          .tooltip([`Epic: ${e.id}`, e.link && `Link: ${e.link}`, e.integration && `Integration branch: ${e.integration}`, `Repository: ${this.cwd}`].filter(Boolean).join("\n")).child(e.id))
-        .when(Boolean(e.mode && e.mode !== "real"), (el) => el.child(div().flex_none().px(5).rounded(4).bg(t.ansi3).text_size(10.5).text_color(t.background).child(e.mode)))
-        .when(e.sandbox === false, (el) => el.child(div().flex_none().px(5).rounded(4).bg(t.ansi1).text_size(10.5).text_color(t.background).child("SANDBOX OFF")))
-        .child(wavePill))
-      .child(h_flex().gap(6).items_center()
+    const head = boardHeader(t, {
+      mod: "fleet-board", title: e.id, open: this.picking, onTitle: (cx) => { this.togglePicker(); cx.notify(); }, onClose: (cx) => { this.closePicker(); cx.notify(); },
+      menu: this.picking ? this.runPicker(t, now) : null,
+      titleTip: [`Epic: ${e.id}`, e.link && `Link: ${e.link}`, e.integration && `Integration branch: ${e.integration}`, `Repository: ${this.cwd}`, "Every run: click or e (⌘← ⌘→ step through them)"].filter(Boolean).join("\n"),
+      facts: [
+        { id: "repo", text: this.summary(s, this.cwd).repoName, tip: this.cwd },
+        e.mode && e.mode !== "real" ? { id: "mode", text: e.mode, color: t.ansi3 } : null,
+        e.sandbox === false ? { id: "sandbox", text: "SANDBOX OFF", color: t.ansi1 } : null,
+      ],
+      buttons: [{ id: "fleet-refresh", label: "↻", tip: "Read the run again (r)", color: this.loading ? t.accent : null, pulse: this.loading, onClick: (cx) => this.refresh(cx, true) }],
+    });
+    return boardTop(t, head,
+      h_flex().gap(6).items_center()
+        .child(wavePill)
         .child(div().id("progress").flex_1().relative().h(6).rounded(3).bg(t.border)
           .tooltip(Object.entries(counts).filter(([k, v]) => k !== "total" && v).map(([k, v]) => `${k}: ${v}`).join("\n") || "no beads")
           // Dropped beads count as closed, in a dimmer shade after the merged ones.
@@ -218,10 +237,10 @@ export const ViewsMethods = {
         .child(div().text_size(12).text_color(t.foreground).child(`${counts.done}/${counts.total - (counts.dropped ?? 0)}`))
         .when(Boolean(counts.dropped), (el) => el.child(div().id("dropped").text_size(12).text_color(t.dim)
           .tooltip(`${counts.dropped} dropped: taken out of the epic, not counted`).child(`−${counts.dropped}`)))
-        .child(div().text_size(12).text_color(t.dim).child(`$${(e.cost ?? 0).toFixed(0)}${e.unpriced ? "+?" : ""}`)))
+        .child(div().text_size(12).text_color(t.dim).child(`$${(e.cost ?? 0).toFixed(0)}${e.unpriced ? "+?" : ""}`)),
       // Every gauge on one line (it wraps when the pane is narrow): agents at work while a wave runs, pace, you.
       // (Usage windows are left to the status bar, which reads Claude Code's own, current numbers.)
-      .child(h_flex().gap(10).items_center().flex_wrap()
+      h_flex().gap(10).items_center().flex_wrap()
         .when(Boolean(wave.running || e.workers.used), (el) => el.child(h_flex().id("workers").gap(3).items_center().tooltip(`Agents at work (implement, fix, review): ${e.workers.used} of ${e.workers.max ?? "?"}. Checks and merges don't take one.`)
           .child(div().text_size(11.5).text_color(t.dim).child("agents"))
           .children(Array.from({ length: e.workers.max ?? 0 }, (_, i) => div().size(7).rounded(2).bg(i < e.workers.used ? t.ansi4 : t.border)))))
@@ -646,6 +665,7 @@ export const ViewsMethods = {
       ["b", "it in the beads view"],
       ["/", "filter by id or title (backspace clears)"],
       ["1 2", "Board, Lanes"],
+      ["e", "every fleet run, in a list under the title (j k, ⏎ shows one, esc closes)"],
       ["⌘← ⌘→", "the previous / next fleet run"],
       ["d", "show or fold Done"],
       ["[ ]", "zoom Lanes"],

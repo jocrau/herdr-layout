@@ -2,7 +2,7 @@
 // output. This file runs commands and reads the settings; it never changes the run.
 
 import { exec } from "herdr";
-import { readSettings, settingPath } from "./lib/settings.js";
+import { readSettings, settingPath, codeDir } from "./lib/settings.js";
 import { failure, parseSnapshot, parseRuns } from "./snapshot.js";
 
 // Which `fleet` to run: "fleet" from the person's PATH, or the one named in the layout's settings,
@@ -21,12 +21,13 @@ export async function fleetBin() {
   return bin;
 }
 
-// One snapshot for the folder `cwd` (a repo or any worktree of it): { ok: true, snap } or { ok: false, kind, message }.
-export async function readSnapshot(cwd) {
+// One snapshot for the folder `cwd` (a repo or any worktree of it), of `epic` or else its current one:
+// { ok: true, snap } or { ok: false, kind, message }.
+export async function readSnapshot(cwd, epic = null) {
   const bin = await fleetBin();
   let r;
   try {
-    r = await exec(bin, ["status", "--json", "--repo", cwd], { cwd, timeout: 20000 });
+    r = await exec(bin, ["status", "--json", "--repo", cwd, ...(epic ? ["--epic", epic] : [])], { cwd, timeout: 20000 });
   } catch (e) {
     return { ok: false, kind: "missing", message: `Can't run ${bin}: ${String(e?.message ?? e)}` };
   }
@@ -39,5 +40,5 @@ export async function readRuns() {
   const bin = await fleetBin();
   let r;
   try { r = await exec(bin, ["runs", "--json"], { timeout: 15000 }); } catch { return null; }
-  return r.code === 0 ? parseRuns(r.stdout) : null;
+  return r.code === 0 ? parseRuns(r.stdout, await codeDir()) : null;
 }
