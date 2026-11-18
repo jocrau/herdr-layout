@@ -10,7 +10,16 @@ export const DIRTY_EVERY = 15000; // another run whose files changed is read aga
 export const HIDDEN_CHECK = 120000; // hidden, the pane still looks this often for new waits (one cheap read)
 export const MIN_GAP = 15000; // at most one `fleet status --json` per this many ms (a busy wave writes often)
 export const TAIL_EVERY = 4000; // the tail panel re-reads an active bead's `fleet tail` this often
-export const TAIL_LINES = 14; // lines the tail panel shows
+// The panel's own sizes (TAIL_LINE, TAIL_LINES, TAIL_MIN) are in lib/tailpanel.js, shared with pr-board.
+
+// `fleet tail`'s lines as the tail panel (lib/tailpanel.js) draws them: the session (implement-0, review-1) as the
+// dim label in front, an attempt's start and a result as marks. The key is the whole line (a click wraps it).
+export function fleetTailLines(lines) {
+  return lines.map((l) => {
+    const m = l.match(/^(\S+-\d+)(\s+)(.*)$/), text = m ? m[3] : l;
+    return { label: m ? m[1] : null, text, kind: /^(--- attempt|result )/.test(text) ? "mark" : "text", key: l };
+  });
+}
 
 // Sections of the board, most urgent first.
 export const SECTIONS = [

@@ -14,11 +14,12 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle } from "gpui-base";
-import { theme, settings, nextCommand, props, focused, run } from "herdr";
+import { theme, settings, nextCommand, props, focused, run, shared, setShared } from "herdr";
 import { VIEWS, SPANS, HIDDEN_CHECK, dur, shortener, graph, tipText } from "./model.js";
 import { closeSide } from "./lib/sidecolumn.js";
 import { splitTarget } from "./env.js";
 import { boardHeader, boardTop } from "./lib/boardheader.js";
+import { TailSize } from "./lib/tailpanel.js";
 
 export default class FleetBoard extends View {
   init(_props, cx) {
@@ -40,12 +41,15 @@ export default class FleetBoard extends View {
     this.parkedIds = new Map(); this.parkedSeen = new Map();
     // The tail panel at the bottom: the open (else selected) bead's last lines of `fleet tail`.
     this.tailOn = false; this.tail = { id: null, lines: [], at: 0, error: null };
+    // Its body's height: its top edge drags (double-click, back to the default; - = three lines), remembered.
+    this.tailSize = new TailSize("fleet-board.tail-height");
     this.openId = null; // the one bead showing its details (they follow j k while open)
     this.showDone = true; // open, so j k reach the done beads too (d folds it)
     this.help = false; // ? shows the keys
     this.confirm = null; // { title, detail, label, run, copy? }: a command that changes the run, asked about first
     this.busy = null; // the command running now (its label)
-    this.span = "fit";
+    // Lanes' zoom, remembered: the last hour unless set; [ ] zoom (out to 7 days, in to "fit": the whole run).
+    this.span = SPANS.includes(shared("fleet-board.span")) ? shared("fleet-board.span") : 3600000;
     this.h = cx.focus_handle();
     this.s = null; // the snapshot shown
     this.problem = null; // why the focused folder shows nothing: { kind, message, cwd }
@@ -145,18 +149,26 @@ export default class FleetBoard extends View {
     else if (is("backspace") && this.filter) { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; }
     else if (is("?", "shift-/")) this.help = !this.help;
     else if (is("t")) this.tailOn = !this.tailOn;
+    else if (is("-") && this.tailOn) this.tailSize.step(-1, this.height, cx);
+    else if (is("=") && this.tailOn) this.tailSize.step(1, this.height, cx);
     else if (is("b") && b) this.inBeads(b);
     else if (is("escape") && this.filter) { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; }
     else if (is("escape") && this.openId) this.openId = null;
     // Esc undoes one thing at a time (the filter, then the open bead); with nothing left, it closes the column.
     else if (is("escape")) closeSide("fleet-board");
     else if (is("d")) this.showDone = !this.showDone;
-    else if (is("[")) this.span = SPANS[Math.max(0, SPANS.indexOf(this.span) - 1)];
-    else if (is("]")) this.span = SPANS[Math.min(SPANS.length - 1, SPANS.indexOf(this.span) + 1)];
+    else if (is("[")) this.zoom(SPANS[Math.max(0, SPANS.indexOf(this.span) - 1)]);
+    else if (is("]")) this.zoom(SPANS[Math.min(SPANS.length - 1, SPANS.indexOf(this.span) + 1)]);
     else if (is("r")) this.refresh(cx, true);
     else return;
     cx.stop_propagation();
     cx.notify();
+  }
+
+  // Lanes' time window (one of SPANS), kept for the next session.
+  zoom(span) {
+    this.span = span;
+    setShared("fleet-board.span", span);
   }
 
   // ---------- pieces
@@ -168,7 +180,13 @@ export default class FleetBoard extends View {
   render(_cx) {
     const t = theme(), mono = settings().font_family ?? "JetBrains Mono", now = Date.now();
     const root = v_flex().id("fleet-board").size_full().bg(t.background).text_color(t.foreground)
-      .on_size_change((size, cx) => { if (Math.abs((this.width ?? 0) - size.width) > 1) { this.width = size.width; cx.notify(); } })
+      .on_size_change((size, cx) => {
+        if (Math.abs((this.width ?? 0) - size.width) > 1 || Math.abs((this.height ?? 0) - size.height) > 1) { this.width = size.width; this.height = size.height; cx.notify(); }
+      })
+      // The tail's top edge drags over the whole pane; a drag ends when the pointer leaves it (a release outside never arrives).
+      .on_mouse_move((e, cx) => this.tailSize.move(e, cx))
+      .on_mouse_up("left", (_e, cx) => this.tailSize.end(this.height, cx))
+      .on_hover((hovered, cx) => { if (!hovered) this.tailSize.end(this.height, cx); })
       .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx));
     // No run shown yet: the same header (the run list behind its title), then what's missing.
     if (!this.s) {

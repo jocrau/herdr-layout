@@ -44,6 +44,8 @@ export class Graph {
     { const v = Number(shared("git-graph.files-width")); this.filesSplit = v > 0 ? v : null; }
     // Local change: `c` reviews everything since the base branch instead of the one commit.
     this.sinceBase = shared("git-graph.since") === true;
+    // Local change: the diff ignores whitespace (w); long lines scroll sideways, or wrap (⇧W).
+    this.ignoreSpace = shared("git-graph.ignore-space") === true; this.wrapLines = shared("git-graph.wrap") === true; this.diffX = 0;
     // Local change: another mod can open the graph on one review, e.g. the fleet board's diff of a bead:
     // props.review = { head, base, title } reviews everything from the merge-base of base and head up to
     // head (git diff base...head), for this copy only.
@@ -78,7 +80,8 @@ export class Graph {
       for (;;) {
         const c = String(await nextCommand()).replace(/^git-graph\./, "");
         if (c === "prev-pr" || c === "next-pr") {
-          if (this.pr) this.prStep(c === "next-pr" ? 1 : -1, cx); else run(c === "next-pr" ? "space.next" : "space.prev");
+          if (this.prPick) this.prPickMove(c === "next-pr" ? 1 : -1);
+          else if (this.prMode()) this.prStep(c === "next-pr" ? 1 : -1, cx); else run(c === "next-pr" ? "space.next" : "space.prev");
         }
         cx.notify();
       }
@@ -270,12 +273,12 @@ export class Graph {
     const t = theme(), mono = settings().font_family ?? "JetBrains Mono", ready = this.state === "ready";
     this.prSlug(cx); // for the PR stage on branches
     this.prFollow(cx); // the PR view: another PR asked for
-    const graph = v_flex().id("git-graph").size_full().min_h(0).when(!this.pr, (e) => e.rounded(10).border_1().border_color(t.border)).overflow_hidden().bg(t.background)
+    const graph = v_flex().id("git-graph").size_full().min_h(0).when(!this.prMode(), (e) => e.rounded(10).border_1().border_color(t.border)).overflow_hidden().bg(t.background)
       .text_color(t.foreground).text_size(12.5).track_focus(this.handle)
       .on_mouse_move((e, cx) => this.moveDrag(e, cx))
       .on_mouse_up("left", (_e, cx) => this.endDrag(cx))
       // A drag ends when the pointer leaves (a release outside never arrives); in the PR view, the whole frame.
-      .on_hover((hovered, cx) => { if (!hovered && !this.pr) this.endDrag(cx); })
+      .on_hover((hovered, cx) => { if (!hovered && !this.prMode()) this.endDrag(cx); })
       .on_key_down((e, cx) => {
         const k = e.keystroke;
         // The help panel: any key closes it.
@@ -316,7 +319,7 @@ export class Graph {
         if (this.state === "ready" && !this.picking) {
           // Lowercase reads (fetch, refresh); a change to branches takes Shift.
           const act = { f: () => this.fetch(cx), "shift-f": () => this.syncAction("ff", cx), "shift-p": () => this.syncAction("push", cx),
-            "shift-c": () => this.syncAction("commit", cx), r: () => this.refresh(cx), "shift-b": () => this.newBranch(), p: () => this.openCursorPr(),
+            "shift-c": () => this.syncAction("commit", cx), r: () => this.refresh(cx), "shift-b": () => this.newBranch(), p: () => this.openCursorPr(cx),
             "?": () => { this.help = true; }, "shift-/": () => { this.help = true; } }[e.keystroke];
           if (act) { act(); cx.stop_propagation(); cx.notify(); return; }
           if (this.navKey(e, cx)) { cx.stop_propagation(); return; }
@@ -335,21 +338,24 @@ export class Graph {
         if (Math.abs(height - (this.height ?? 0)) > 1) { this.height = height; if (this.selected) this.keepCursorVisible(cx); cx.notify(); }
       })
       .child(this.header(t))
-      .when(Boolean(this.pr), (e) => e.child(this.prBar(t, mono)))
+      .when(this.prMode(), (e) => e.child(this.prBar(t, mono)))
       .when(Boolean(this.rp), (e) => e.child(this.repoPanel(t)))
       .when(!this.rp && this.state === "workspace", (e) => e.child(this.workspaceList(t)))
       .when(Boolean(this.picking && this.workspace && this.opened), (e) => e.child(this.picker(t)))
       .when(!this.rp && ready && Boolean(this.help), (e) => e.child(this.helpPanel(t)))
       .when(!this.rp && ready && !this.help && Boolean(this.bp), (e) => e.child(this.branchPanel(t)))
-      .when(!this.rp && ready && !this.help && !this.bp, (e) => e.child(this.toolbar(t)).child(this.columns(t, this.graphWidth())).child(this.list(t, mono))
+      .when(!this.rp && ready && !this.help && !this.bp, (e) => e.child(this.toolbar(t))
+        // Local change: a straight PR's graph folds to one line, the review below gets the room (pr.js).
+        .when(this.prFolded(), (el) => el.child(this.prFoldLine(t, mono)))
+        .when(!this.prFolded(), (el) => el.child(this.columns(t, this.graphWidth())).child(this.list(t, mono)))
         .when(Boolean(this.selected), (el) => el.child(this.detailsPane(t, mono))))
       .when(!this.rp && !ready && this.state !== "workspace", (e) => e.child(this.empty(t)));
-    // The PR view: pr-board's queue beside the graph, one frame around both.
+    // The PR view: pr-board's queue beside the graph (when asked for, ⇧L), one frame around both.
     // Drags that start on its edges (the list's width) move over the list too: the frame passes them on.
-    return !this.pr ? graph : h_flex().id("git-graph-pr").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
+    return !this.prMode() ? graph : h_flex().id("git-graph-pr").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border)
       .on_mouse_move((e, cx) => this.moveDrag(e, cx)).on_mouse_up("left", (_e, cx) => this.endDrag(cx))
       .on_hover((hovered, cx) => { if (!hovered) this.endDrag(cx); })
-      .child(this.prRail(t, mono)).child(this.railHandle(t)).child(div().flex_1().min_w(0).h_full().child(graph));
+      .when(Boolean(this.railOn), (e) => e.child(this.prRail(t, mono)).child(this.railHandle(t))).child(div().flex_1().min_w(0).h_full().child(graph));
   }
 }
 

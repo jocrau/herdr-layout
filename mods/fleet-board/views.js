@@ -3,10 +3,11 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Textarea } from "gpui-base";
 import { theme, run } from "herdr";
-import { STEPS, VIEWS, SPANS, TAIL_LINES, SECTIONS, ROW, OK, PHASES, phaseOf, dur, spanLabel, AGENT_STEPS, hm, timeline, gateText, asks, fixRounds, fixSessions, natural, mergedAt, tipText } from "./model.js";
+import { STEPS, VIEWS, SPANS, fleetTailLines, SECTIONS, ROW, OK, PHASES, phaseOf, dur, spanLabel, AGENT_STEPS, hm, timeline, gateText, asks, fixRounds, fixSessions, natural, mergedAt, tipText } from "./model.js";
 import { phaseColor, shaped, swatch } from "./ui.js";
 import { shown } from "./env.js";
 import { boardHeader, boardTop } from "./lib/boardheader.js";
+import { tailPanel } from "./lib/tailpanel.js";
 
 export const ViewsMethods = {
   // The panel: which bead, whether it still runs, a real terminal (follow), close; then its last lines,
@@ -14,38 +15,19 @@ export const ViewsMethods = {
   tailPanel(t, mono, short, now) {
     const b = this.tailBead(), same = b && this.tail.id === b.id;
     const active = b && ["running", "parked", "interrupted", "waiting for CI"].includes(b.state);
-    const btn = (id, label, tip, go) => div().id(id).px(6).h(18).rounded(4).flex().items_center().text_size(11).text_color(t.muted)
-      .hover((x) => x.bg(t.border).text_color(t.foreground)).tooltip(tip).on_click((_e, cx) => { go(); cx.notify(); }).child(label);
-    // The newest lines at the bottom: a wrapped line pushes the oldest out at the top.
-    const body = v_flex().px(10).pb(6).h(TAIL_LINES * 16 + 6).overflow_hidden().justify_end().font_family(mono);
-    const opened = (this.tailOpen ??= new Set());
-    if (same && opened.size) for (const k of opened) if (!this.tail.lines.includes(k)) opened.delete(k); // lines gone from the tail
-    if (!b) body.child(div().text_size(11).text_color(t.dim).child("Select a bead to see its tail."));
-    else if (!b.history.length) body.child(div().text_size(11).text_color(t.dim).child("Nothing has run on it yet."));
-    else if (!same) body.child(div().text_size(11).text_color(t.dim).child("Reading…"));
-    else if (this.tail.error) body.child(div().text_size(11).text_color(t.ansi1).child(this.tail.error));
-    else body.children(this.tail.lines.slice(-TAIL_LINES).map((l, i) => {
-      const m = l.match(/^(\S+-\d+)(\s+)(.*)$/);
-      const text = m ? m[3] : l, mark = /^(--- attempt|result )/.test(text), wrap = this.tailWrap || opened.has(l);
-      // One line each, cut at the edge; hover shows it whole, a click wraps it (again: one line), "wrap" all.
-      return h_flex().id(`tl-${i}`).flex_none().min_h(16).gap(6).items_start().text_size(11).rounded(3)
-        .hover((x) => x.bg(t.hover)).tooltip(wrap ? "" : text)
-        .on_click((_e, cx) => { if (opened.has(l)) opened.delete(l); else opened.add(l); cx.notify(); })
-        .when(Boolean(m), (x) => x.child(div().flex_none().w(78).h(16).flex().items_center().truncate().text_color(t.dim).child(m[1])))
-        .child(div().flex_1().min_w(0).py(1).when(!wrap, (x) => x.truncate()).text_color(mark ? t.accent : t.muted).child(text));
-    }));
-    return v_flex().flex_none().border_t_1().border_color(t.border)
-      .child(h_flex().px(10).py(3).gap(6).items_center()
-        .child(div().text_size(11).font_semibold().text_color(t.dim).child("TAIL"))
-        .child(div().min_w(0).truncate().font_family(mono).text_size(ROW.small).text_color(t.foreground).child(b ? short(b.id) : ""))
-        .when(Boolean(b && same), (el) => el.child(div().text_size(11).text_color(active ? t.ansi4 : t.dim)
-          .child(active ? `following · ${dur(now - this.tail.at)} ago` : "ended")))
-        .child(div().flex_1())
-        .when(Boolean(b && same && !this.tail.error), (el) => el.child(btn("tail-wrap", this.tailWrap ? "unwrap" : "wrap",
-          this.tailWrap ? "One line each again (a click on a line wraps only it)" : "Wrap every line (a click on a line wraps only it)", () => { this.tailWrap = !this.tailWrap; })))
-        .when(Boolean(b?.history.length), (el) => el.child(btn("tail-term", "terminal", `fleet tail ${b.id} --follow, in a terminal below`, () => this.inTerminal(["fleet", "tail", b.id, "--follow"], `tail ${b.id}`))))
-        .child(btn("tail-close", "✕", "Close the tail (t)", () => { this.tailOn = false; })))
-      .child(body);
+    // The lines as the shared panel draws them, converted once per read (not per frame).
+    if (same && this.tailLinesOf !== this.tail) { this.tailLinesOf = this.tail; this.tailLines = fleetTailLines(this.tail.lines); }
+    const note = !b ? "Select a bead to see its tail." : !b.history.length ? "Nothing has run on it yet." : !same ? "Reading…" : null;
+    return tailPanel(t, {
+      mono, size: this.tailSize, pane: this.height, title: b ? short(b.id) : "",
+      status: b && same ? { text: active ? `following · ${dur(now - this.tail.at)} ago` : "ended", live: active } : null,
+      note, error: same ? this.tail.error : null, lines: same ? this.tailLines : [],
+      wrap: this.tailWrap, opened: (this.tailOpen ??= new Set()),
+      onWrap: b && same && !this.tail.error ? () => { this.tailWrap = !this.tailWrap; } : null,
+      onTerminal: b?.history.length ? () => this.inTerminal(["fleet", "tail", b.id, "--follow"], `tail ${b.id}`) : null,
+      terminalTip: b ? `fleet tail ${b.id} --follow, in a terminal below` : "",
+      onClose: () => { this.tailOn = false; }, closeTip: "Close the tail (t)",
+    });
   },
 
   // One chip per run: a dot (breathing while a wave runs), repository · epic, and a red count of beads
@@ -187,6 +169,45 @@ export const ViewsMethods = {
           .child(div().text_size(11).text_color(t.muted).child(v))))));
   },
 
+  // The epic past this run's beads (its epic.* events): the epic check on the epic branch, the epic's beads
+  // and the follow-ups waiting for triage, and its PR to main, each with what to do about it.
+  epicNext(t, mono, now) {
+    const s = this.s, e = s.epic, ph = s.epicPhase ?? {}, chk = ph.check, st = ph.status, br = e.epic_branch;
+    if (!chk && !st) return null;
+    const sha = (h) => String(h ?? "").slice(0, 7);
+    const btn = (id, label, tip, go) => div().id(id).flex_none().px(6).h(18).flex().items_center().rounded(4).border_1().border_color(t.border)
+      .text_size(11).text_color(t.foreground).hover((x) => x.bg(t.border)).tooltip(tipText(tip))
+      .on_click((_e, cx) => { go(cx); cx.notify(); }).child(label);
+    const row = (mark, markColor, text, color, ...extra) => h_flex().gap(6).items_center().min_h(20)
+      .child(div().w(12).flex_none().text_size(11.5).text_color(markColor).child(mark))
+      .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(color).child(text))
+      .children(extra.filter(Boolean));
+    const rows = [];
+    if (chk?.state === "running") rows.push(row("●", t.ansi4, `Checking the epic branch at ${sha(chk.head)} · ${dur(now - (chk.since ?? now))}`, t.foreground));
+    else if (chk?.state === "pass") rows.push(row("✓", t.ansi2, `Epic check passed at ${sha(chk.head)} · ${dur(now - (chk.at ?? now))} ago`, t.muted));
+    else if (chk?.state === "fail") rows.push(row("✗", t.ansi1, `Epic check failed at ${sha(chk.head)} · ${dur(now - (chk.at ?? now))} ago`, t.ansi1,
+      chk.log ? btn("epic-log", "log", chk.log, () => this.inTerminal(["less", "+G", chk.log], `epic check ${e.id}`)) : null));
+    if (st) {
+      const open = Math.max(0, st.total - st.closed), fu = st.followups.length;
+      rows.push(row(open ? "○" : "✓", open ? t.dim : t.ansi2, `${st.closed} of ${st.total} epic beads done${open ? ` · ${open} open` : ""}`, t.muted));
+      if (fu) rows.push(row("!", t.ansi3, `${fu} follow-up${fu === 1 ? "" : "s"} wait for your triage`, t.foreground,
+        btn("epic-triage", "triage", `fleet triage ${e.id}: the follow-ups agents filed, and the changes they proposed. No run takes them before you decide; they don't hold the PR to main.\n${st.followups.join(" ")}`, () => this.inTerminal(["fleet", "triage", e.id], `triage ${e.id}`))));
+    }
+    const pr = st?.pr;
+    if (pr) rows.push(row("↗", t.accent, `PR to main: ${pr.label}`, t.foreground,
+      pr.url ? btn("epic-pr", "open", pr.url, (cx) => cx.open_url(pr.url)) : null));
+    // No PR to main: agent-fleet opens it once every epic bead is done (follow-ups don't hold it); propose opens it now.
+    else if (st || br?.unproposed) rows.push(row("→", t.dim, st && st.closed < st.total
+      ? `PR to main opens once the epic's beads are done`
+      : `All epic beads done; no PR to main yet`, t.muted,
+      btn("epic-propose", "propose", `fleet propose ${e.id}: open the epic branch's PR to main as a draft, as you (never merges; asks first)`,
+        () => this.ask(`Open the PR to main for ${e.id}?`, "fleet propose opens the epic branch's PR to main as a draft, as you. It never merges.", "Propose",
+          (cx, cwd) => cx.spawn((cx) => this.runFleet(cx, ["fleet", "propose", e.id], `propose ${e.id}`, cwd)), `fleet propose ${e.id}`))));
+    return v_flex().mx(10).mt(8).mb(2).p(8).gap(2).rounded(6).border_1().border_color(t.border)
+      .child(div().pb(2).text_size(11).font_semibold().text_color(t.muted).child("EPIC"))
+      .children(rows);
+  },
+
   spark(t, values) {
     const max = Math.max(1, ...values);
     return h_flex().id("spark").h(14).gap(1).items_end().tooltip(`Beads merged per hour, last ${values.length} h: ${values.join(" ")}`)
@@ -202,13 +223,16 @@ export const ViewsMethods = {
     const fp = s.gauges.first_pass_review, wait = s.gauges.parked_waits[0];
     // Every wait for the person (agent-fleet.flow.snapshotgates); before it, only the current ones are known.
     const pw = s.gauges.person_waits;
-    const br = e.epic_branch;
+    const br = e.epic_branch, chk = s.epicPhase?.check;
+    // A wave doing only the epic check (no bead at work) says so, instead of looking idle.
+    const checking = wave.running && chk?.state === "running" && !counts.running;
     const wavePill = wave.running
       ? h_flex().id("wave").flex_none().gap(4).items_center().px(6).h(18).rounded(9).bg(t.hover)
         .hover((x) => x.bg(t.border)).on_click((_e, cx) => { this.waveAction(); cx.notify(); })
-        .tooltip(`Wave ${wave.number} running (pid ${wave.pid}) since ${wave.started ? new Date(wave.started).toLocaleTimeString() : "?"}\nClick to stop it (asks first)`)
+        .tooltip(`Wave ${wave.number} running (pid ${wave.pid}) since ${wave.started ? new Date(wave.started).toLocaleTimeString() : "?"}${checking ? `\nChecking the epic branch at ${String(chk.head ?? "").slice(0, 7)} since ${chk.since ? new Date(chk.since).toLocaleTimeString() : "?"}` : ""}\nClick to stop it (asks first)`)
         .child(div().size(6).rounded(3).bg(t.ansi2).loop("opacity", { from: 0.35, to: 1, period: 1400 }))
-        .child(div().text_size(11.5).text_color(t.foreground).child(wave.started ? `wave ${wave.number} · ${dur(now - wave.started)}` : `wave ${wave.number ?? ""}`.trim()))
+        .child(div().text_size(11.5).text_color(t.foreground).child(checking ? `epic check · ${dur(now - (chk.since ?? now))}`
+          : wave.started ? `wave ${wave.number} · ${dur(now - wave.started)}` : `wave ${wave.number ?? ""}`.trim()))
       : h_flex().id("wave").flex_none().gap(4).items_center().px(6).h(18).rounded(9).border_1().border_color(t.border)
         .hover((x) => x.bg(t.hover)).on_click((_e, cx) => { this.waveAction(); cx.notify(); })
         .tooltip(tipText(`${wave.last_ended ? `Wave ${wave.number} ended: ${wave.last_ended.reason}, ${new Date(wave.last_ended.at).toLocaleString()}` : "No wave running"}\nClick to start the next one (asks first)`))
@@ -273,7 +297,7 @@ export const ViewsMethods = {
       .when(this.loading, (el) => el.child(div().pb(5).px(4).text_size(11).text_color(t.dim).loop("opacity", { from: 0.3, to: 1, period: 900 }).child("●")))
       .when(this.view === "lanes", (el) => el.child(div().id("span").pb(5).px(4).text_size(11.5).text_color(t.muted)
         .hover((x) => x.text_color(t.foreground)).tooltip("Time shown: [ ] or click")
-        .on_click((_e, cx) => { this.span = SPANS[(SPANS.indexOf(this.span) + 1) % SPANS.length]; cx.notify(); })
+        .on_click((_e, cx) => { this.zoom(SPANS[(SPANS.indexOf(this.span) + 1) % SPANS.length]); cx.notify(); })
         .child(spanLabel(this.span))));
   },
 
@@ -511,11 +535,14 @@ export const ViewsMethods = {
   },
 
   // One line per bead: state, id, title, what the row adds to its section, time and cost. A parked bead adds
-  // the gate's reason underneath (that is what you need to act); an open bead shows its whole title.
+  // the gate's reason underneath (that is what you need to act), a bead waiting on GitHub what it waits for; an
+  // open bead shows its whole title.
   row(t, b, mono, g, short, now) {
     const open = this.openId === b.id, tag = this.tag(b, short, t);
     const titleColor = this.titleColor(t, b);
     const reason = b.state === "parked" && !open ? gateText(b.gate) : ""; // open, the details say it
+    // Waiting on GitHub: what for (fleet 0.38's waiting_on: checks running, its turn, the epic branch red, ...).
+    const waits = b.state === "waiting for CI" ? b.waiting_on ?? "" : "";
     // Every cell sits in a first line of ROW.h, centred, open or not. Open, the title leaves that line for one of
     // its own underneath, from under the id to the right edge, so a long title wraps over the whole width (not the middle column).
     const cell = (el) => h_flex().h(ROW.h).flex_none().items_center().child(el);
@@ -528,16 +555,19 @@ export const ViewsMethods = {
         .when(Boolean(tag), (el) => el.child(cell(div().max_w(150).truncate().text_size(ROW.small).text_color(tag[1]).when(Boolean(tag[2]), (x) => x.font_semibold()).child(tag[0]))))
         .child(cell(this.meta(t, b, now))))
       .when(open, (el) => el.child(div().pl(18).pb(4).text_size(ROW.text).text_color(titleColor).child(b.title)))
-      .when(Boolean(reason), (el) => el.child(div().pl(18).pb(4).text_size(ROW.small).text_color(t.ansi1).when(!open, (x) => x.truncate()).child(reason)));
+      .when(Boolean(reason), (el) => el.child(div().pl(18).pb(4).text_size(ROW.small).text_color(t.ansi1).when(!open, (x) => x.truncate()).child(reason)))
+      .when(Boolean(waits), (el) => el.child(div().pl(18).pb(4).text_size(ROW.small).text_color(t.muted).when(!open, (x) => x.truncate()).child(waits)));
     return this.item(t, b, g, now, `row-${b.id}`, line);
   },
 
   board(t, mono, g, short, now) {
-    const out = [], c = this.s.epic.beads;
-    if (!this.filter && c.total && c.total === c.done + (c.dropped ?? 0) && !this.s.epic.wave.running) {
+    const out = [], c = this.s.epic.beads, closed = c.total && c.total === c.done + (c.dropped ?? 0);
+    if (!this.filter && closed && !this.s.epic.wave.running) {
       const r = this.recap(t, mono, short, now);
       if (r) out.push(r);
     }
+    // Every bead of the run closed: what the epic itself is at, and what's left for you.
+    if (!this.filter && closed) { const x = this.epicNext(t, mono, now); if (x) out.push(x); }
     // The columns fit the rows drawn: every section's beads, Done only while unfolded.
     this.columns(SECTIONS.flatMap((sec) => (sec.fold && !this.showDone && !this.filter ? [] : this.sectionBeads(sec).filter((b) => this.match(b)))), now);
     // The critical path, once, where the waiting starts: above Queued (else Blocked, else Done).
@@ -662,6 +692,7 @@ export const ViewsMethods = {
       ["l →  h ← x", "open / close the details"],
       ["space", "its first action (answer a question, resume, tail, diff); one that changes the run asks first"],
       ["t", "its fleet tail at the bottom"],
+      ["- =", "the tail three lines shorter / taller (or drag its top edge; double-click: back to 14)"],
       ["b", "it in the beads view"],
       ["/", "filter by id or title (backspace clears)"],
       ["1 2", "Board, Lanes"],

@@ -2,8 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { dur, timeline, graph, shortener, natural, wordsOf, readOnly, shq, gateText, fixRounds, tipText } from "../../mods/fleet-board/model.js";
-import { normalize, gatesOf, summarize, runKey, parseRuns, parseSnapshot, failure, changedRepos, relevant, stateRoot } from "../../mods/fleet-board/snapshot.js";
+import { dur, timeline, graph, shortener, natural, wordsOf, readOnly, shq, gateText, fixRounds, tipText, fleetTailLines } from "../../mods/fleet-board/model.js";
+import { normalize, gatesOf, summarize, runKey, parseRuns, parseSnapshot, failure, changedRepos, relevant, stateRoot, epicPhase } from "../../mods/fleet-board/snapshot.js";
 
 const T = (min) => new Date(Date.UTC(2026, 10, 16, 10, min)).toISOString();
 const raw = (over = {}) => ({
@@ -151,3 +151,69 @@ test("tooltip text wraps at about 90 characters and stops after 6 lines", () => 
   assert.equal(tipText("short"), "short");
   assert.equal(tipText("x".repeat(200)).split("\n")[0].length, 90, "a word longer than a line is cut");
 });
+
+test("the epic phase: the last epic check (running, passed, failed) and the last epic.status", () => {
+  const ev = (type, ts, detail) => JSON.stringify({ type, ts, detail });
+  const passed = ev("epic.check", "2026-11-17T22:44:18+00:00", { head: "cbcdd52e74fd", status: "pass", log: "/run/beads/_epic/check.log" });
+  const started = ev("epic.check", "2026-11-17T22:44:18+00:00", { head: "69074e2596f3", status: "started" });
+  const status = ev("epic.status", "2026-11-17T22:44:09+00:00", { closed: 5, total: 6, followups: ["e.7", "e.8"], pr: null });
+  const p = epicPhase([status, passed, started, "not json"]);
+  assert.deepEqual(p.check, { state: "running", head: "69074e2596f3", since: Date.parse("2026-11-17T22:44:18Z") });
+  assert.deepEqual(p.status, { closed: 5, total: 6, followups: ["e.7", "e.8"], pr: null });
+  assert.equal(epicPhase([started, passed]).check.state, "pass");
+  const failed = ev("epic.check", "2026-11-17T23:00:00+00:00", { head: "abc", status: "fail", log: "/l" });
+  assert.deepEqual(epicPhase([failed]).check, { state: "fail", head: "abc", at: Date.parse("2026-11-17T23:00:00Z"), log: "/l" });
+  assert.deepEqual(epicPhase([]), { check: null, status: null });
+  const pr = (v) => epicPhase([ev("epic.status", "2026-11-17T23:00:00+00:00", { closed: 6, total: 6, followups: [], pr: v })]).status.pr;
+  assert.deepEqual(pr("https://github.com/acme/api/pull/42"), { url: "https://github.com/acme/api/pull/42", label: "api#42" });
+  assert.deepEqual(pr(42), { url: null, label: "#42" });
+  assert.deepEqual(pr({ number: 42, url: "https://github.com/acme/api/pull/42", state: "OPEN" }), { url: "https://github.com/acme/api/pull/42", label: "#42 open" });
+});
+
+test("a resize handle's drag: the pointer's move in layout units, bigger upward where the sign says so", async () => {
+  const { register } = await import("node:module");
+  register("./stub-hooks.mjs", import.meta.url);
+  const { dragTo } = await import("../../lib/splitter.js");
+  const row = { axis: "row", at: 500, from: 230, moved: false };
+  assert.equal(dragTo(row, { position: { x: 0, y: 440 } }, 1, -1), 290, "up 60: the tail 60 taller");
+  assert.equal(row.moved, true);
+  assert.equal(dragTo({ axis: "col", at: 100, from: 200 }, { position: { x: 160, y: 0 } }, 2), 230, "zoom 2: half the pointer's move");
+});
+
+test("the tail panel (lib/tailpanel.js): its height, clicked-open lines that went away", async () => {
+  const { register } = await import("node:module");
+  register("./stub-hooks.mjs", import.meta.url);
+  const { tailHeight, pruneOpened, lineKey, TAIL_LINE, TAIL_LINES, TAIL_MIN } = await import("../../lib/tailpanel.js");
+  assert.equal(tailHeight(null), TAIL_LINES * TAIL_LINE + 6, "14 lines until dragged");
+  assert.equal(tailHeight(10), TAIL_MIN * TAIL_LINE + 6, "at least 3 lines");
+  assert.equal(tailHeight(900, 800), 600, "the board's header and a few rows stay");
+  assert.equal(tailHeight(300.4, null), 300);
+  const lines = Array.from({ length: 30 }, (_, i) => ({ text: `l${i}` }));
+  assert.equal(lineKey({ label: "fix-1", text: "x" }), "fix-1\tx");
+  assert.equal(lineKey({ text: "x", key: "fix-1   x" }), "fix-1   x");
+  const opened = new Set(["\tl29", "\tgone"]);
+  assert.deepEqual([...pruneOpened(opened, lines)], ["\tl29"]);
+});
+
+test("fleet tail's lines for the panel: the session as the label, attempts and results as marks", () => {
+  assert.deepEqual(fleetTailLines(["fix-1   Edit tests/q.py", "review-1  --- attempt 1 2026", "fix-1 result success $0.57", "merge   rebased"]), [
+    { label: "fix-1", text: "Edit tests/q.py", kind: "text", key: "fix-1   Edit tests/q.py" },
+    { label: "review-1", text: "--- attempt 1 2026", kind: "mark", key: "review-1  --- attempt 1 2026" },
+    { label: "fix-1", text: "result success $0.57", kind: "mark", key: "fix-1 result success $0.57" },
+    { label: null, text: "merge   rebased", kind: "text", key: "merge   rebased" },
+  ]);
+});
+
+test("tail panel: a turn up stops following the newest line, sideways in px within the widest line", async () => {
+  const { scrolled } = await import("../../lib/tailpanel.js");
+  let v = { follow: true, x: 0 };
+  assert.equal(scrolled(v, -40, 0, 500).follow, true, "down: still following");
+  v = { ...v, ...scrolled(v, 40, 0, 500) };
+  assert.equal(v.follow, false, "up: stops following");
+  assert.equal(scrolled(v, -40, 0, 500).follow, false, "down again: until ↓ newest");
+  v = { ...v, ...scrolled(v, 0, -120, 500) };
+  assert.equal(v.x, 120);
+  assert.equal(scrolled(v, 0, -900, 500).x, 500);
+  assert.equal(scrolled(v, 0, 900, 500).x, 0);
+});
+

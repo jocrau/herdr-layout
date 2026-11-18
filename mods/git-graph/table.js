@@ -6,6 +6,7 @@ import { settings, props, setShared, openOverlay, home, notify, run } from "herd
 import { LABEL, hitLabel, menuFor, menuHeight, fastForwardable, worktreeOf, splitRemote } from "./git.js";
 import { perform, openDialog, goToWorktree } from "./act.js";
 import { icon } from "./menu.js";
+import { splitter, dragTo } from "./lib/splitter.js";
 import { MORE_ROUNDS, PAGE, listsZoom, GRAPH_MIN, COLUMNS, laneColors, ago, tilde, brief, count, depthSetting, ROW, LANE, PAD } from "./common.js";
 
 export const TableMethods = {
@@ -215,25 +216,24 @@ export const TableMethods = {
     return Math.round(Math.max(min, Math.min(max, w)));
   },
 
-  startDrag(key, e, cx) {
-    cx.stop_propagation();
-    if (e.click_count < 2) { this.drag = { key, x: e.position.x, from: key === "graph" ? this.graphWidth() : this.cols[key] }; return; }
+  resetColumn(key, cx) {
     if (this.cols[key] !== COLUMNS[key].width) { this.cols = { ...this.cols, [key]: COLUMNS[key].width }; this.saveColumns(); cx.notify(); }
   },
 
   moveDrag(e, cx) {
+    const u = this.unit();
     const sd = this.splitDrag;
-    if (sd) { this.split = sd.from - (e.position.y - sd.y) / this.unit(); sd.moved = true; cx.notify(); return; }
+    if (sd) { this.split = dragTo(sd, e, u, -1); cx.notify(); return; }
     const fd = this.filesDrag;
-    if (fd) { this.filesSplit = fd.from + (e.position.x - fd.x) / this.unit(); fd.moved = true; cx.notify(); return; }
+    if (fd) { this.filesSplit = dragTo(fd, e, u); cx.notify(); return; }
     const rd = this.railDrag; // the PR view: the edge of the PR list on the left
-    if (rd) { this.railSplit = rd.from + (e.position.x - rd.x) / this.unit(); rd.moved = true; cx.notify(); return; }
+    if (rd) { this.railSplit = dragTo(rd, e, u); cx.notify(); return; }
     const nd = this.notesDrag; // the PR view: the line between its notes and the file list
-    if (nd) { this.notesSplit = nd.from + (e.position.y - nd.y) / this.unit(); nd.moved = true; cx.notify(); return; }
+    if (nd) { this.notesSplit = dragTo(nd, e, u); cx.notify(); return; }
     const d = this.drag;
     if (!d) return;
-    const w = this.clampColumn(d.key, d.from + COLUMNS[d.key].side * (e.position.x - d.x) / this.unit());
-    if (w !== this.cols[d.key]) { this.cols = { ...this.cols, [d.key]: w }; d.moved = true; cx.notify(); }
+    const w = this.clampColumn(d.key, d.from + COLUMNS[d.key].side * (dragTo(d, e, u) - d.from));
+    if (w !== this.cols[d.key]) { this.cols = { ...this.cols, [d.key]: w }; cx.notify(); }
   },
 
   endDrag(cx) {
@@ -473,7 +473,7 @@ export const TableMethods = {
     return h_flex().h(34).flex_none().px(10).gap(8).items_center().border_b(1).border_color(t.border)
       .child(h_flex().p(2).gap(2).rounded(7).bg(t.background).border_1().border_color(t.border)
         // Local change: the PR view reads only the PR and its base ("This PR"); the others leave that.
-        .when(Boolean(this.pr), (e) => e.child(segment("graph-pr", "This PR", Boolean(this.prRevs), (_e, cx) => this.setPrScope(cx))))
+        .when(this.prMode(), (e) => e.child(segment("graph-pr", "This PR", Boolean(this.prRevs), (_e, cx) => this.setPrScope(cx))))
         .child(segment("graph-all", "All branches", this.all && !this.prRevs, (_e, cx) => this.setScope(true, cx)))
         .child(segment("graph-current", "Current", !this.all && !this.prRevs, (_e, cx) => this.setScope(false, cx))))
       .child(h_flex().id("graph-remotes").h(24).px(6).gap(6).items_center().rounded(6).cursor_pointer().text_size(11.5).text_color(t.muted)
@@ -499,10 +499,8 @@ export const TableMethods = {
     const head = (text, w) => div().when(w !== undefined, (e) => e.w(w).flex_none()).truncate().child(text);
     const titles = { date: "Date", author: "Author", hash: "Commit" };
     // Handles stand in for the rows' gaps, 1px wider each side.
-    const handle = (key) => div().id(`graph-col-${key}`).w(LABEL.GAP + 2).mx(-1).h_full().flex_none().flex().justify_center().cursor_col_resize()
-      .on_mouse_down("left", (e, cx) => this.startDrag(key, e, cx))
-      .child(div().w(1).h_full().when(this.drag?.key === key, (e) => e.bg(t.accent)))
-      .hover((s) => s.bg(t.border));
+    const handle = (key) => splitter(t, { id: `graph-col-${key}`, axis: "col", line: false, width: LABEL.GAP + 2, dragging: this.drag?.key === key,
+      from: () => key === "graph" ? this.graphWidth() : this.cols[key], onStart: (d) => { this.drag = { ...d, key }; }, onReset: (cx) => this.resetColumn(key, cx) }).mx(-1);
     return h_flex().h(24).flex_none().pr(10).items_center().border_b(1).border_color(t.border).text_size(11).text_color(t.dim)
       .child(head("Graph", width).pl(PAD)).child(handle("graph")).child(div().flex_1().min_w(0).child("Description"))
       .children(this.trailing().flatMap((k) => [handle(k), head(titles[k], this.cols[k]).when(k === "date", (e) => e.text_right())]));
@@ -517,7 +515,9 @@ export const TableMethods = {
           // Scrolling to the end loads the next page, as Git Graph does; the row also takes a click.
           if (range.end > this.commits.length && this.hasMore && !this.loading && this.moreAsked !== this.limit) {
             this.moreAsked = this.limit;
-            cx.spawn(async (cx) => this.loadMore(cx));
+            // Local change: after this frame, not in it: loading redraws, and a redraw asked for while the list is
+            // laid out is refused (the list then stayed blank).
+            cx.timer.after(0, (cx) => this.loadMore(cx));
           }
           return Array.from({ length: range.end - range.start }, (_x, k) => range.start + k).map((i) => i < this.commits.length
             ? this.row(i, t, colors, mono, width)

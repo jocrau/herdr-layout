@@ -7,6 +7,44 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status`, `preview-plus` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- `pr-board`, `fleet-board`: the tail panel scrolls smoothly (a wrapped line scrolls through as the lines it
+  takes): a turn up stops following the newest line, "↓ newest" in its header starts it again; sideways (a
+  sideways swipe or shift-wheel) with the labels staying put. An ended job whose log read found nothing (a
+  timeout while busy) is read again.
+- `pr-board`: calmer details again: no NEXT/OPEN labels; pr-flow's summary sits with the PR's own facts as
+  "Changes: …"; later/ignore/hand back fold under ⋯ when there are several; the row counts findings ("6
+  findings", the kinds in its tooltip) and the PR view link no longer repeats them; **draft ↗** shows whenever
+  pr-flow drafted comments, not only after a job.
+- `pr-board`: an open PR's branch → base (and GitHub's verdict, open threads, conflicts) sits under its context
+  line, with the PR's own info, instead of at the end of the details.
+- `pr-board`: **log ↗** / **output ↗** and `w` open a pr-flow job's log in a tail panel at the bottom of the pane,
+  the fleet board's own (now shared in lib/tailpanel.js), instead of a terminal: the agent's words, one line per
+  command or file read, failures and denials in red, and the result ("done · 4m 35s · $2.15"), read from the job's
+  transcript and followed every 3 s while it runs. `-` `=` and its top edge set its height (remembered on its
+  own), esc or ✕ closes it, **terminal** still shows pr-flow's `job show` in a terminal. The fleet board's tail
+  looks and works as before.
+- `git-graph` PR view: its notes no longer start with a lone stage word ("draft", already in the bar) or
+  pr-flow's "job-… working since" line, as on pr-board's card.
+- PR view: its bar says what the PR's card on the board says, from one pr-flow read (`view <pr> --json`, pr-flow
+  0.32+) instead of the queue's copy: the same stage, next step and actions in pr-flow's labels, alternatives that
+  can't run now left out, "Self-check again" after a done self-check, a running job as a self-check on your own
+  PR. Opening a PR reads pr-flow twice instead of three times (view and show; the findings come with show); the
+  bar follows the board within seconds of an action or a queue read. With an older pr-flow, as before.
+- `pr-board`: a running pr-flow job no longer reads as "its agent stopped and waits for you" when the PR's Claude
+  tab is idle from before; a review of your own PR is called a self-check on the board and in the PR view; an
+  agent's commands read as what they're for ("reading GitHub", "reading the code"); job ids in pr-flow's texts
+  read as "a job", and its "job-… working since" reason is left out (the NEXT line says it).
+- `pr-board`: a PR's details say each thing once, in two zones: NEXT (what the last job found, "Self-check found
+  2 low findings · 32m ago", then one row of buttons with later/ignore on the right) and OPEN (the PR view with
+  its findings, the Claude tab, GitHub, the branch). One-word reasons that repeat the section ("draft") are gone;
+  the row's findings read "2 low".
+- `pr-board`: a PR's open findings are on its row ("2 findings · low", red for high, amber for medium), and a
+  finished review or self-check says what it found with a **findings ↗** link to the PR view; a review of your
+  own PR is called a self-check there too.
+- `pr-board`: a PR's details are calmer: its pr-flow job is one line that keeps its height (the current phase,
+  not a growing list of them; runtime, model and id in its tooltip), with output/log and stop as quiet links
+  beside it; actions that can't run now are left out instead of dimmed; diff, tab and GitHub moved to a quiet
+  line of links with later, ignore and hand back.
 - Side columns (the PR board, the fleet board, the side panel) open one at a time: opening one
   closes the other. Each closes the same three ways: the × at the right of its header, Esc once
   nothing in it is left to clear, and its key (⌘⇧R, ⌘⇧F, ⌘⇧O). Every board has the same 40 px
@@ -28,12 +66,54 @@ dialogs and the fleet pane.
   The PR view (⌘⌥R, `d`) is the git graph on the PR's range with the queue beside it and pr-flow's
   notes and findings on their lines; branches with a tracked PR show its stage. Agent actions go to
   the PR's own Claude tab. The file browser opens at a line (`props.line`).
+- PR view: the queue moved from a list on the left to a dropdown under the PR's name (`p`, type to
+  filter; `⇧L` brings the list back); the notes are as tall as they need; findings are cards (severity,
+  place, the whole title, opened: the fix and its code); "Where to spend your time" shows the code
+  at each place, read at the PR's head with the PR's changed lines tinted; the finding reached shows
+  whole in the diff. `n` `N` go through the findings and the places to look at as one path, in the
+  files' order ("stop 3 of 7"); `m` marks a file viewed ("7/18 viewed") until a push changes it. Open
+  GitHub review threads show as cards, under their lines and as stops; deleted, lockfile and generated
+  files fold into one row; a straight PR's graph folds to one line (`z`). One dialog for both: `p` in
+  the git graph turns it into the PR view and esc steps back; a tracked PR's notes show in the plain
+  graph when its head is reviewed since base.
+- PR view: review threads resolve and unresolve from their cards (or `⇧R`); a note on a line of the
+  diff is read there, its card stays short (code and full text only for places outside the diff).
+- PR view: the right side shows the file as it will be once merged (changed lines tinted, removed
+  lines marked, notes under their lines, the note's line range highlighted); `s` switches to the diff.
+- Git graph review: `w` ignores whitespace in the diff; long lines scroll sideways with the line numbers in place, or wrap (`⇧W`); a hunk's header stays at the top while its lines scroll; `s` shows the whole file at the commit instead of the diff. A note on a line range heads it; the range reached is marked beside the line numbers.
+- PR view: your draft review (pr-flow 0.33.0's stored drafts): the summary in the notes and each
+  comment on its line, marked Draft, as stops of `n N`; a chip per version (`⇧V`); Post… and
+  Approve with it… ask first, then send the version shown unchanged (`⌘⏎`); Copy puts it on the
+  clipboard (`y`); Shorter, Softer and More reword it in the background and show the new version;
+  Reword in Claude opens the PR's tab; Discard… asks. The pane says "✎ draft v3 ready", and its post
+  and copy open the PR view on the draft. Without pr-flow's `draft` capability nothing changes.
+- pr-board on pr-flow's view model (pr-flow 0.32): groups, next steps and actions come from pr-flow
+  (its labels, its confirm questions; an action that can't run now is dimmed and says why), the board's
+  own rules only for an older pr-flow. A pr-flow job shows on its PR's row; job verbs start a job when
+  pr-flow can run one, else go to the PR's Claude tab as before. The PR's details show its job: what
+  it's doing, followed live while open, and why it failed; **output ↗** (`w`) shows pr-flow's output in
+  a terminal below (live while it runs), **stop** (`c`) stops it.
 - `pr-board` with a newer pr-flow: from 0.30.0 it takes each PR's facts from pr-flow's listing and
   reads it with `--no-save`, so its polls no longer move your last listing; from 0.31.0 a new PR
   tab starts from pr-flow's own prompt for the task instead of typed shorthand. Older pr-flow
   versions work as before. `later` hides a PR until the next working day's morning. Cards read
   title, next step, then one quiet line (repo · people · age · size). A queue read that never comes
   back no longer stops the pane reading.
+- `pr-board`: **tab ↗** is in every PR's details (and `t` works on every PR): it brings the PR's Claude tab
+  forward, or opens one first just to talk about the PR: the agent reads it, says what it does and waits for
+  your questions, taking no action unless asked. Later actions go to the same tab.
+- `fleet-board`: Lanes open on the last hour instead of the whole run (`[` still fits the run); the
+  zoom is remembered between sessions.
+- `fleet-board`: the tail panel is resizable: drag its top edge (`-` `=` three lines at a time,
+  double-click back to 14 lines); the height is remembered. One splitter (`lib/splitter.js`) now
+  draws every resize handle in the boards (the tail, git-graph's review and PR splits and its
+  column edges): a 6 px band, a 1 px line in the accent colour while it drags, the band tinted on
+  hover, a double-click back to the default. Column edges now tint on hover like the splits.
+- `fleet-board`: once a run's beads are closed, an Epic card shows the epic check on the epic branch,
+  the epic's beads done, the follow-ups waiting for triage and the PR to main (or `propose`); a wave
+  doing only the epic check says `epic check` instead of looking stalled.
+- `fleet-board`: a bead waiting on GitHub says underneath what for (agent-fleet 0.38's `waiting_on`:
+  checks running by name, auto-merge on, its turn behind another PR, the epic branch red on GitHub).
 
 - Safer destructive actions (from a code review): the git graph's file reset takes the name
   literally (`a[1].log` no longer also deletes `a1.log`); ⇧C keeps a partial staging; the main

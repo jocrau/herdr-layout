@@ -3,14 +3,18 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list } from "gpui-base";
 import { exec, readTextFile, settings, props, shared, setShared, openOverlay, notify } from "herdr";
-import { fileArgs, joinFiles, diffArgs, diffRows, baseCandidates, rangeFileArgs, rangeDiffArgs, READ } from "./git.js";
+import { fileArgs, joinFiles, diffArgs, diffRows, baseCandidates, rangeFileArgs, rangeDiffArgs, READ, wrapDiff, ignoringSpace, fileRows } from "./git.js";
 import { openDialog, showChanges } from "./act.js";
 import { ago, stamp, count, keep, VIEWER_CLOSED, ROW, DIFF_ROW, DETAILS } from "./common.js";
 import { exists, background, openInEditor } from "./tools.js";
+import { splitter } from "./lib/splitter.js";
+import { alpha } from "./lib/prrows.js";
 
 export const ReviewMethods = {
   // Local change: the review's height: dragged or keyed (remembered), else half the dialog (320 in a panel).
   detailsHeight() {
+    // Local change: under a folded graph (pr.js), all of the room: header, PR bar, toolbar and the folded line.
+    if (this.prFolded()) return Math.max(160, Math.round((this.height ?? 700) - 42 - 40 - 34 - 30));
     const room = this.height ? this.height - 42 - 34 - 24 : 640;
     const want = this.split ?? (this.dialog && this.height ? Math.round(room * 0.5) : 320);
     return Math.round(Math.max(160, Math.min(want, room - 3 * ROW)));
@@ -152,30 +156,116 @@ export const ReviewMethods = {
   },
 
   openDiff(commit, file, cx) {
-    this.diff = { path: file.path, rows: null, width: 300 };
+    this.diff = { path: file.path, rows: null, width: 300 }; this.diffX = 0;
     const hash = commit.hash, details = this.details, since = details?.since;
     cx.spawn(async (cx) => {
-      let rows;
+      let rows, whole = false;
       try {
-        if (commit.uncommitted && file.untracked) {
+        if (this.asFile() && !commit.uncommitted && file.status !== "D" && !file.binary) {
+          // Local change: the file as it is at the commit (for a PR, as it will be once merged), the change marked.
+          const plain = since ? rangeDiffArgs(since.from, commit.hash, file.path) : diffArgs(commit, file.path);
+          const u0 = [plain[0], "-U0", ...plain.slice(1)];
+          const [show, d] = await Promise.all([exec("git", [...READ, "show", `${commit.hash}:${file.path}`], { cwd: this.root, on: this.on }),
+            exec("git", [...READ, ...(this.ignoreSpace ? ignoringSpace(u0) : u0)], { cwd: this.root, on: this.on })]);
+          if (show.code !== 0) throw new Error(show.stderr.trim());
+          rows = show.stdout.includes("\0") ? [{ kind: "", text: "Binary file" }] : fileRows(show.stdout, d.stdout ?? "");
+          whole = !show.stdout.includes("\0");
+        } else if (commit.uncommitted && file.untracked) {
           const text = await readTextFile(`${this.root}/${file.path}`, { on: this.on }).catch(() => null);
           rows = text === null || text.includes("\0") ? [{ kind: "", text: "Binary or unreadable file" }]
             : diffRows(`@@ -0,0 +1 @@\n${text.slice(0, 400000).split("\n").slice(0, 3000).map((l) => `+${l}`).join("\n")}`);
         } else {
-          const args = since ? rangeDiffArgs(since.from, commit.uncommitted ? null : commit.hash, file.path) : diffArgs(commit, file.path);
+          const plain = since ? rangeDiffArgs(since.from, commit.uncommitted ? null : commit.hash, file.path) : diffArgs(commit, file.path);
+          const args = this.ignoreSpace ? ignoringSpace(plain) : plain;
           const r = await exec("git", [...READ, ...args], { cwd: this.root, on: this.on });
           if (r.code !== 0) throw new Error(r.stderr.trim());
           rows = diffRows(r.stdout) ?? [{ kind: "", text: file.binary ? "Binary file changed" : "No text changes" }];
-          rows = this.prDiffRows(file.path, rows); // the PR view: findings under their lines
         }
       } catch (e) { rows = [{ kind: "", text: `Can't show this diff: ${e?.message ?? e}` }]; }
       if (this.selected === hash && this.details === details && this.diff?.path === file.path) {
-        this.diff = { path: file.path, rows, width: Math.max(300, ...rows.map((r) => r.text.length * 6.6 + 60)) };
+        // The PR view: findings under their lines (again when the finding reached changes: raw is the diff alone).
+        this.diff = { path: file.path, raw: rows, width: Math.max(300, ...rows.map((r) => r.text.length * 6.6 + 60)), asFile: whole };
+        this.diff.rows = this.diffView(this.diff);
+        // A whole file opens at its first change, unless a note's line is asked for (prJump).
+        if (this.diff.asFile && !this.pr?.jump) { const i = this.diff.rows.findIndex((x) => x.start); if (i > 0) { this.diffAt = i; cx.timer.after(0, () => this.diffScroll.scroll_to_item(i, "center")); } }
         this.prJump(cx);
       }
       cx.notify();
     });
     cx.notify();
+  },
+
+  // Local change: the rows the diff shows: its own, the PR view's notes under their lines, and long lines wrapped
+  // to the diff's width (unless ⇧W turned that off). diff.chars: the width they were wrapped to.
+  diffView(diff) {
+    const rows = this.prDiffRows(diff.path, diff.raw);
+    diff.chars = this.wrapLines ? this.diffChars() : 0;
+    return diff.chars ? wrapDiff(rows, diff.chars) : rows;
+  },
+
+  // Local change: the hunk header of the row at the top of the diff (none while a header is itself the top row),
+  // noted as the list draws; shown over the top on the next frame (a redraw asked for while the list is laid out
+  // is refused, so it's asked for after).
+  diffTopAt(rows, top, cx) {
+    let at = -1;
+    for (let i = top; i >= 0; i--) if (rows[i]?.kind === "@") { at = i; break; }
+    const sticky = at >= 0 && at < top ? rows[at] : null;
+    if (sticky === this.diffSticky) return;
+    this.diffSticky = sticky;
+    cx?.timer?.after(0, (cx) => cx.notify());
+  },
+
+  // The characters a diff line has room for: the diff's width less the number column, at 11 px monospace.
+  diffChars() {
+    return Math.max(30, Math.floor(((this.width ?? 900) - this.filesWidth() - 72) / 6.6));
+  },
+
+  // Local change: the review's right side shows the file as it is at the commit (the change marked in it) or the
+  // diff. s switches; remembered apart for the PR view (the file unless set) and other reviews (the diff unless set).
+  asFile() {
+    const pr = Boolean(this.pr?.status === "ready" && this.selected === this.pr.head);
+    const v = shared(pr ? "git-graph.pr-as" : "git-graph.review-as");
+    return v === "file" || (pr && v !== "diff");
+  },
+
+  toggleAsFile(cx) {
+    const pr = Boolean(this.pr?.status === "ready" && this.selected === this.pr.head);
+    setShared(pr ? "git-graph.pr-as" : "git-graph.review-as", this.asFile() ? "diff" : "file");
+    this.diffWant = null; this.diff = null; cx.notify();
+  },
+
+  // ⇧W: long lines wrapped, or (unless set) one line each, scrolled sideways with the line numbers kept in place.
+  toggleWrap(cx) {
+    this.wrapLines = !this.wrapLines; setShared("git-graph.wrap", this.wrapLines);
+    this.diffX = 0;
+    if (this.diff?.raw) this.diff.rows = this.diffView(this.diff);
+    cx.notify();
+  },
+
+  // Sideways in the diff: the text moves, the line numbers stay. The widest line sets how far (diff.width).
+  diffRoom() { return Math.max(100, (this.width ?? 900) - this.filesWidth() - 66); },
+
+  scrollDiffX(dx, cx) {
+    const max = Math.max(0, (this.diff?.width ?? 0) - 60 - this.diffRoom());
+    const x = Math.max(0, Math.min(max, (this.diffX ?? 0) + dx));
+    if (x !== this.diffX) { this.diffX = x; cx.notify(); }
+  },
+
+  // w: whitespace ignored or not (read again), remembered.
+  toggleSpace(cx) {
+    this.ignoreSpace = !this.ignoreSpace; setShared("git-graph.ignore-space", this.ignoreSpace);
+    this.diffWant = null; this.diff = null; cx.notify();
+  },
+
+  // The diff's title bar: the two switches, lit while on.
+  diffSwitches(t) {
+    const sw = (id, label, on, tip, go) => div().id(id).flex_none().px(5).rounded(4).text_size(10.5).cursor_pointer()
+      .text_color(on ? t.accent : t.dim).when(on, (e) => e.bg(t.hover)).hover((e) => e.bg(t.hover).text_color(t.foreground))
+      .tooltip(tip).on_click((_e, cx) => go(cx)).child(label);
+    return h_flex().flex_none().gap(2)
+      .child(sw("diff-file", "file", this.asFile(), "The file as it is at the commit (for a PR: once merged), the change marked; off, the diff (s)", (cx) => this.toggleAsFile(cx)))
+      .child(sw("diff-ws", "no whitespace", Boolean(this.ignoreSpace), "Whitespace changes ignored (w)", (cx) => this.toggleSpace(cx)))
+      .child(sw("diff-wrap", "wrap", Boolean(this.wrapLines), "Long lines wrapped (⇧W); off, they scroll sideways (shift-wheel or a sideways swipe) with the line numbers in place", (cx) => this.toggleWrap(cx)));
   },
 
   // Local change: commit review as a split. Changed files on the left (they keep
@@ -208,8 +298,9 @@ export const ReviewMethods = {
     }
     const meta = (k, v, color) => h_flex().gap(8).text_size(11.5).child(div().w(64).flex_none().text_color(t.dim).child(k)).child(div().min_w(0).truncate().text_color(color ?? t.muted).child(v));
     const lines = commit.uncommitted || !d?.message ? "" : d.message.split("\n").slice(1).join("\n").trim();
-    // Local change: in the PR view the notes have the height the line under them was dragged to.
-    const info = v_flex().id("graph-details").flex_none().when(this.prReviewing(), (e) => e.h(this.notesHeight())).when(!this.prReviewing(), (e) => e.max_h(230)).overflow_y_scrollbar().px(14).py(10).gap(4)
+    // Local change: in the PR view the notes are as tall as what they say (up to a cap), or the height the line
+    // under them was dragged to.
+    const info = v_flex().id("graph-details").flex_none().when(this.prReviewing(), (e) => this.notesFit(e)).when(!this.prReviewing(), (e) => e.max_h(230)).overflow_y_scrollbar().px(14).py(10).gap(4)
       .when(since && Boolean(s?.base) && !this.prReviewing(), (el) => el
         .child(meta("Base", s.base, t.accent))
         .child(meta("Branched", s.from?.slice(0, 8) ?? "").font_family(mono))
@@ -235,57 +326,68 @@ export const ReviewMethods = {
     const filesId = `${this.listId}-files`;
     const fileList = v_virtual_list(filesId, files.length, 24, (i) => String(i), (range) => files.slice(range.start, range.end).map((f, o) => {
       const i = range.start + o, parts = f.path.split("/"), name = parts.pop();
+      // Local change: the PR view's folded row (deleted, lockfiles, generated).
+      if (f.fold) return h_flex().h(24).px(8).gap(8).items_center().rounded(6).cursor_pointer().when(i === this.fileAt, (e) => e.bg(zone === "files" ? t.selected : t.hover)).child(div().w(6).flex_none()).child(this.prFoldRow(f, t));
       const sc = f.status === "A" ? t.ansi2 : f.status === "D" || f.status === "U" ? t.ansi1 : t.blocked;
       return h_flex().h(24).px(8).gap(8).items_center().rounded(6)
         .when(i === this.fileAt, (e) => e.bg(zone === "files" ? t.selected : t.hover))
         .child(div().w(6).flex_none().child(this.prFileMark(f.path, t) ?? div()))
+        .child(this.prViewedMark(f.path, i, t) ?? div())
         .child(div().w(12).flex_none().text_size(11).text_color(sc).child(f.status))
-        .child(h_flex().flex_1().min_w(0).child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().min_w(0).truncate().child(name)))
+        .child(h_flex().flex_1().min_w(0).when(this.prReviewing() && this.prViewed(f.path), (e) => e.opacity(0.5))
+          .child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().min_w(0).truncate().child(name)))
         .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`)))
         .when(f.del > 0, (e) => e.child(div().text_size(11).text_color(t.ansi1).child(`−${f.del}`)));
     })).track_scroll(this.fileScroll)
-      .on_item_click((key, cx) => { this.fileAt = Number(key); this.zone = "files"; this.handle.focus(); cx.notify(); })
+      .on_item_click((key, cx) => { this.fileAt = Number(key); this.zone = "files"; this.handle.focus(); if (files[this.fileAt]?.fold) this.prUnfold(cx); cx.notify(); })
       .size_full();
     const left = v_flex().w(this.filesWidth()).flex_none().h_full().min_h(0)
       .child(h_flex().h(32).flex_none().px(10).gap(6).items_center().border_b(1).border_color(t.border).text_size(11.5)
         .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(title))
-        .when(!commit.uncommitted || Boolean(this.head), (e) => e.child(this.prReviewing() ? this.prModes(t) : modes))
+        .when(!commit.uncommitted || Boolean(this.head), (e) => e.child(this.prMode() && this.prReviewing() ? this.prModes(t) : modes))
         .when(Boolean(commit.uncommitted), (e) => e.child(div().id("graph-open-changes").px(6).py(1).rounded(4).text_color(t.accent).cursor_pointer().hover((s) => s.bg(t.hover))
           .on_click(() => showChanges()).child("Open Changes")))
         .child(close))
       .child(info)
       .when(this.prReviewing(), (e) => e.child(this.notesHandle(t)))
       .child(h_flex().h(26).flex_none().px(14).gap(8).items_center().text_size(11.5).when(!this.prReviewing(), (e) => e.border_t(1).border_color(t.border))
-        .child(div().text_color(zone === "files" ? t.accent : t.muted).when(zone === "files", (e) => e.font_semibold()).child(d ? count(files.length + (d.more ?? 0), "file") : "Loading files…"))
-        .when(add > 0 || del > 0, (e) => e.child(div().text_color(t.ansi2).child(`+${add}`)).child(div().text_color(t.ansi1).child(`−${del}`))))
+        .child(div().text_color(zone === "files" ? t.accent : t.muted).when(zone === "files", (e) => e.font_semibold()).child(d ? count(files.filter((f) => !f.fold).length + (d.noise?.length ?? 0) + (d.more ?? 0), "file") : "Loading files…"))
+        .when(add > 0 || del > 0, (e) => e.child(div().text_color(t.ansi2).child(`+${add}`)).child(div().text_color(t.ansi1).child(`−${del}`)))
+        .child(div().flex_1()).child(this.prViewedCount(t) ?? div()))
       .child(div().relative().flex_1().min_h(0).px(4).child(fileList).child(Scrollbar.vertical(filesId).viewport_from_layout().absolute().inset_0()));
-    const diff = this.diff, rows = diff?.rows;
+    const diff = this.diff;
+    // Wrapped to another width (the dialog or the files' edge moved): wrapped again.
+    if (diff?.raw && this.wrapLines && diff.chars !== this.diffChars()) diff.rows = this.diffView(diff);
+    const rows = diff?.rows;
     const right = v_flex().flex_1().min_w(0).h_full().min_h(0)
       .child(h_flex().h(32).flex_none().px(10).gap(6).items_center().border_b(1).border_color(t.border).text_size(11.5)
-        .child(div().flex_1().min_w(0).truncate().font_family(mono).text_color(t.foreground).child(diff?.path ?? (files.length ? "" : d ? "No changed files" : ""))))
+        .child(div().flex_1().min_w(0).truncate().font_family(mono).text_color(t.foreground).child(diff?.path ?? (files.length ? "" : d ? "No changed files" : "")))
+        .child(this.prDiffStop(t) ?? div())
+        .when(Boolean(diff), (e) => e.child(this.diffSwitches(t))))
       .child(div().flex_1().min_h(0).relative().font_family(mono).text_size(11)
         .when(Boolean(diff) && !rows, (e) => e.child(div().p(12).text_color(t.dim).child("Loading diff…")))
-        .when(Boolean(rows), (e) => e.child(div().id(`${this.diffId}-x`).size_full().overflow_x_scrollbar()
-            .child(div().w_full().min_w(diff.width).h_full().child(v_virtual_list(this.diffId, rows.length, DIFF_ROW, (i) => String(i),
-              (range) => rows.slice(range.start, range.end).map((r) => this.diffRow(r, t))).track_scroll(this.diffScroll).size_full())))
-          .child(Scrollbar.vertical(this.diffId).viewport_from_layout().absolute().inset_0())));
-    const handle = div().id("graph-split").h(6).flex_none().w_full().cursor_row_resize().flex().items_center()
-      .on_mouse_down("left", (e, cx) => {
-        cx.stop_propagation();
-        if (e.click_count >= 2) return this.setSplit(null, cx);
-        this.splitDrag = { y: e.position.y, from: this.detailsHeight() };
-      })
-      .child(div().h(1).w_full().bg(this.splitDrag ? t.accent : t.border))
-      .hover((s) => s.bg(t.hover));
-    const filesHandle = div().id("graph-files-split").w(6).flex_none().h_full().cursor_col_resize().flex().justify_center()
-      .on_mouse_down("left", (e, cx) => {
-        cx.stop_propagation();
-        if (e.click_count >= 2) return this.setFilesWidth(null, cx);
-        this.filesDrag = { x: e.position.x, from: this.filesWidth() };
-      })
-      .child(div().w(1).h_full().bg(this.filesDrag ? t.accent : t.border))
-      .hover((s) => s.bg(t.hover));
-    return v_flex().flex_none().h(this.detailsHeight()).child(handle)
+        // Local change: sideways, only the text moves (diffX), the line numbers stay; or long lines wrap (⇧W).
+        .on_scroll_wheel((ev, cx) => {
+          if (this.wrapLines || !this.diff?.rows) return;
+          const dx = Math.abs(ev.delta.x) > Math.abs(ev.delta.y) ? ev.delta.x : ev.modifiers?.shift ? ev.delta.y : 0;
+          if (dx) { this.scrollDiffX(-dx / this.unit(), cx); cx.stop_propagation(); }
+        })
+        .when(Boolean(rows), (e) => e.child(v_virtual_list(this.diffId, rows.length, DIFF_ROW, (i) => String(i),
+              (range, cx) => { this.diffTopAt(rows, range.start, cx); return rows.slice(range.start, range.end).map((r) => this.diffRow(r, t)); })
+            .track_scroll(this.diffScroll).size_full())
+          .child(Scrollbar.vertical(this.diffId).viewport_from_layout().absolute().inset_0())
+          // The hunk scrolled past stays at the top until the next hunk's header takes its place.
+          // Where the text is, sideways: a thin bar along the bottom while it's moved.
+          .when(!this.wrapLines && (this.diffX ?? 0) > 0, (el) => {
+            const room = this.diffRoom(), all = Math.max(room, (this.diff.width ?? 0) - 60), w = Math.max(30, room * room / all), at = (this.diffX / Math.max(1, all - room)) * (room - w);
+            return el.child(div().absolute().bottom(2).left(50 + at).w(w).h(4).rounded(2).bg(alpha(t.foreground, "40")));
+          })
+          .when(Boolean(this.diffSticky), (el) => el.child(div().absolute().top(0).left(0).right(0).child(this.diffRow(this.diffSticky, t))))));
+    const handle = splitter(t, { id: "graph-split", axis: "row", dragging: Boolean(this.splitDrag), from: () => this.detailsHeight(),
+      onStart: (d) => { this.splitDrag = d; }, onReset: (cx) => this.setSplit(null, cx) });
+    const filesHandle = splitter(t, { id: "graph-files-split", axis: "col", dragging: Boolean(this.filesDrag), from: () => this.filesWidth(),
+      onStart: (d) => { this.filesDrag = d; }, onReset: (cx) => this.setFilesWidth(null, cx) });
+    return v_flex().flex_none().h(this.detailsHeight()).when(!this.prFolded(), (e) => e.child(handle))
       .child(h_flex().flex_1().min_h(0).child(left).child(filesHandle).child(right));
   },
 
@@ -293,7 +395,7 @@ export const ReviewMethods = {
   // the user's own tools, so on this computer only).
   reviewTarget() {
     const commit = this.commits[this.index.get(this.selected)], file = this.details?.files?.[this.fileAt ?? 0];
-    if (!commit || !file) return null;
+    if (!commit || !file || file.fold) return null;
     if (this.on) {
       notify({ title: "Only on this computer", body: "Your editor and diff tool work for local repositories.", level: "info", timeout: 3000 });
       return null;
@@ -397,7 +499,7 @@ export const ReviewMethods = {
   // The diff beside the files follows the selected file (once the cursor rests).
   syncDiff(cx) {
     const commit = this.selected ? this.commits[this.index.get(this.selected)] : null, file = this.details?.files?.[this.fileAt ?? 0];
-    if (!commit || !file) return;
+    if (!commit || !file || file.fold) return;
     const want = `${this.details?.since?.from ?? ""}\0${commit.hash}\0${file.path}`;
     if (this.diffWant === want) return;
     this.diffWant = want;
@@ -417,7 +519,7 @@ export const ReviewMethods = {
     const toLine = (i) => { if (!rows.length) return; this.diffAt = Math.max(0, Math.min(rows.length - 1, i)); this.diffScroll.scroll_to_item(this.diffAt, "center"); };
     // From the top the middle line is about half a page down already.
     const scroll = (d) => toLine(Math.max(page, this.diffAt ?? 0) + d * page);
-    const hunk = (d) => { for (let i = (this.diffAt ?? 0) + d; i >= 0 && i < rows.length; i += d) if (rows[i].kind === "@") return toLine(i); };
+    const hunk = (d) => { for (let i = (this.diffAt ?? 0) + d; i >= 0 && i < rows.length; i += d) if (rows[i].kind === "@" || rows[i].start) return toLine(i); };
     const commitStep = (d) => { this.moveTo(this.cursorIndex() + d, cx); this.fileAt = 0; this.fileScroll.scroll_to_item(0); };
     const back = () => { this.zone = "graph"; };
     const act = {
@@ -428,7 +530,7 @@ export const ReviewMethods = {
       "ctrl-u": () => scroll(-1), pageup: () => scroll(-1), "shift-space": () => scroll(-1),
       "]": () => hunk(1), "[": () => hunk(-1),
       h: back, left: back, "shift-tab": back, tab: () => this.closeDetails(cx),
-      x: () => this.closeDetails(cx), r: () => this.resetFile(), o: () => this.openFile(cx), d: () => this.diffInTool(cx), v: () => this.viewFile(cx), c: () => this.toggleSince(cx),
+      x: () => this.closeDetails(cx), r: () => this.resetFile(), o: () => this.openFile(cx), d: () => this.diffInTool(cx), v: () => this.viewFile(cx), c: () => this.toggleSince(cx), w: () => this.toggleSpace(cx), "shift-w": () => this.toggleWrap(cx), s: () => this.toggleAsFile(cx),
       "-": () => this.setSplit(this.detailsHeight() - 3 * ROW, cx), "=": () => this.setSplit(this.detailsHeight() + 3 * ROW, cx),
     };
     const f = act[k];
@@ -441,13 +543,20 @@ export const ReviewMethods = {
     const { kind, number, text } = row;
     if (kind === "F") return this.prDiffNote(row, t);
     if (kind === "@") return div().w_full().px(12).h(DIFF_ROW).flex_none().truncate().bg(t.raised).text_color(t.dim).child(text);
+    // Local change: in the whole file, where lines were removed.
+    if (kind === "r") return div().w_full().pl(50).h(DIFF_ROW).flex_none().truncate().border_t(1).border_color(alpha(t.ansi1, "66")).text_color(alpha(t.ansi1, "cc")).text_size(10.5).child(text);
+    // Local change: the lines of the note reached (its range), marked as a GitHub line link marks them.
+    const mark = this.prMarked?.(row);
     // Local change: added and removed lines stand out: a stronger tint, a stronger band
     // behind the line number, and the number in the line's color.
     const color = kind === "+" ? t.ansi2 : kind === "-" ? t.ansi1 : null;
-    return h_flex().w_full().h(DIFF_ROW).flex_none().gap(10).when(Boolean(color), (e) => e.bg(color + "30"))
-      .child(div().w(40).h_full().pr(6).flex_none().text_right().when(Boolean(color), (e) => e.bg(color + "55"))
+    // The range marked: a bar in the number column and a light tint on unchanged lines (a changed line keeps its green).
+    return h_flex().w_full().h(DIFF_ROW).flex_none().gap(10).when(Boolean(color), (e) => e.bg(color + "30")).when(Boolean(mark) && !color, (e) => e.bg(alpha(t.accent, "1a")))
+      .child(div().w(40).h_full().pr(6).flex_none().text_right().when(Boolean(color), (e) => e.bg(color + "55")).when(Boolean(mark), (e) => e.border_l(3).border_color(t.accent))
         .text_color(color ?? t.dim).child(number === undefined ? "" : String(number)))
-      .child(div().flex_1().min_w(0).truncate().child(text));
+      // Unwrapped, the text moves sideways under a fixed number column (diffX).
+      .child(this.wrapLines || !this.diffX ? div().flex_1().min_w(0).truncate().child(text)
+        : div().flex_1().min_w(0).h_full().overflow_hidden().child(div().ml(-this.diffX).whitespace_nowrap().child(text)));
   },
 
 };

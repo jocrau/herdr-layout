@@ -121,7 +121,7 @@ export const LABEL = { CHAR: 6.6, PAD: 5, ICON: 13, GAP: 6, MAX: 30, FONT: 11 };
 const fit = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 // Local change: ref names lose their middle, not their end: branches often share a long
 // prefix (team/project-…) and differ only at the end. The first path part stays when it's
-// short (origin/, carbide/), and the end starts at a word when one is near.
+// short (origin/, feature/), and the end starts at a word when one is near.
 // "origin/feat/x" as { remote: "origin", branch: "feat/x" }: the remote is matched against the known ones (longest
 // first), so a remote named "team/eu" isn't split at its first slash; unknown, at the first slash.
 export function splitRemote(name, remotes = []) {
@@ -642,6 +642,44 @@ export function rangeFileArgs(from, to) {
 export function rangeDiffArgs(from, to, path) {
   return ["diff", "--no-color", "--no-ext-diff", "--no-textconv", ...rangeOf(from, to), "--", path];
 }
+
+// Local change: diff rows with lines longer than `chars` broken into rows of that width (tabs as four
+// spaces); a continuation row has no number. Hunk heads and notes (kind "F") stay as they are.
+export function wrapDiff(rows, chars) {
+  const out = [];
+  for (const r of rows) {
+    if (r.kind === "@" || r.kind === "F" || r.text.length <= chars) { out.push(r); continue; }
+    const text = r.text.replace(/\t/g, "    ");
+    for (let i = 0; i < text.length; i += chars) out.push(i === 0 ? { ...r, text: text.slice(0, chars) } : { kind: r.kind, text: text.slice(i, i + chars), cont: true });
+  }
+  return out;
+}
+
+// Local change: a file as it is at a commit, as diff rows: every line numbered, the lines the change added or
+// changed marked "+" (the first of each run `start`, for ] [), and where lines went a "r" row saying how many.
+// `diff` is `git diff -U0` of the same change. Up to 3000 lines.
+export function fileRows(text, diff) {
+  const added = new Set(), removed = new Map(); // new-side line → lines removed just before it
+  for (const m of diff.matchAll(/^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
+    const gone = m[1] === undefined ? 1 : Number(m[1]), from = Number(m[2]), n = m[3] === undefined ? 1 : Number(m[3]);
+    for (let i = 0; i < n; i++) added.add(from + i);
+    // Only removed (n 0): the hunk names the line they followed; else they stood where the new lines are.
+    if (gone > 0 && (gone > n || n === 0)) { const at = n === 0 ? from + 1 : from; removed.set(at, (removed.get(at) ?? 0) + (n === 0 ? gone : gone - n)); }
+  }
+  const lines = text.replace(/\n$/, "").split("\n").slice(0, 3000), out = [];
+  lines.forEach((line, i) => {
+    const n = i + 1, gone = removed.get(n);
+    if (gone) out.push({ kind: "r", text: `⋯ ${gone} line${gone === 1 ? "" : "s"} removed here`, start: true });
+    const plus = added.has(n);
+    out.push({ kind: plus ? "+" : " ", number: n, text: (line.length > 2000 ? line.slice(0, 2000) + "…" : line) || " ", start: plus && !added.has(n - 1) && !gone });
+  });
+  const tail = removed.get(lines.length + 1);
+  if (tail) out.push({ kind: "r", text: `⋯ ${tail} line${tail === 1 ? "" : "s"} removed here`, start: true });
+  return out;
+}
+
+// Local change: `git diff -w` (whitespace ignored) for the same comparison.
+export const ignoringSpace = (args) => [args[0], "-w", ...args.slice(1)];
 
 // Numbers each diff line once, so a frame only draws the rows on screen.
 export function diffRows(text) {

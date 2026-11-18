@@ -80,10 +80,15 @@ cost), sharing one selection:
   one what it waits for, and when beads wait on each other the critical path (the longest chain,
   which bounds when the epic can finish) sits above the queued ones, its ids in the accent colour. A
   finished epic opens with a recap: totals, agent time, the costliest, longest and most-fixed beads.
+  Once every bead of the run is closed, an Epic card says what the epic itself is at: the epic
+  check on the epic branch (running, passed, or failed with its log), how many of the epic's beads
+  are done, the follow-ups agents filed that wait for your triage, and the PR to main or `propose`.
+  While a wave does nothing but the epic check, its pill says `epic check · 3m`.
 - **Lanes** draws every bead's steps over time: a full bar where an agent works (blue implement
   and fix, violet review), a thin line for a check (grey) or the merge (green), red only where
   something was sent back or the fleet waited for you, with the agents at work and wave boundaries
-  underneath. It fits the whole run to the width; `[ ]` zoom from 1 hour to 7 days.
+  underneath. It opens on the last hour; `]` zooms out to 7 days, `[` in to the whole run fitted to
+  the width, and the zoom is remembered.
 
 **A bead's details** (⏎ or click; one row is open at a time, and the details follow `j k`):
 
@@ -108,7 +113,10 @@ question.
 **The tail.** `t` shows the open bead's `fleet tail` at the bottom of the pane and follows it
 while it runs. Lines stay on one line; hover shows a line whole, a click wraps it, **wrap**
 wraps them all. (agent-fleet itself shortens long lines unless it has `fleet tail --full`,
-which the board uses when it's there.)
+which the board uses when it's there.) Drag its top edge to make it taller or shorter, or press
+`-` / `=` for three lines at a time; a double-click on the edge puts it back to 14 lines. The
+height is remembered. Every resize handle in the boards (the tail, git-graph's review and PR
+splits and its columns) looks and works the same way.
 
 **Runs.** Click the board's title (the epic), or press `e`, for every run, each epic of each repository:
 "Active" (a wave running, beads waiting for you, or unfinished with activity in the last two
@@ -126,6 +134,7 @@ pane is hidden (it then looks every 2 minutes); clicking it shows the pane.
 | `space` | the bead's first action (answer, resume, tail) |
 | `/` | filter by id or title; `⌫` clears |
 | `t` `b` `d` | tail, beads view, fold the done beads |
+| `-` `=` | the tail three lines shorter or taller |
 | `[ ]` | zoom the lanes |
 | `r` | read again |
 | ⌘← ⌘→ | previous or next run |
@@ -146,23 +155,42 @@ public yet; without it the pane says so and the rest of the layout works as befo
 what to do (decide, fix, post your comments, answer feedback, review, merge, get ready), each in
 three lines: what it is (number, title, repository), who's in it (author → reviewers, ✓ approved,
 ✗ changes requested, dimmer: not reviewed yet, and when it was last pushed) and the next step in one
-sentence. **Waiting on others** is one line per PR: on whom, since when. Later and dormant PRs are
+sentence. A PR whose Claude tab stopped to ask (a "go?", a permission) is your move too, first:
+answer its agent (space brings the tab forward). **Waiting on others** is one line per PR: on whom,
+since when; an agent there is one still working. Later and dormant PRs are
 folded. Red means a real problem: a review loop, failing CI, conflicts. ⏎ opens a PR's details and
 the actions possible in its state: the next step first, its alternatives, then the PR view, its
 Claude tab and GitHub.
 
 **The PR view** (`d`, ⌘⌥R) is the git graph as a dialog on the PR's range in your local clone (its
-branch fetched when needed), with the queue on the left (⌘↑ ⌘↓, or a click, switch PRs; its edge
-drags). Above the changed files, pr-flow's notes: why it's in the queue, the findings (a click opens
-one and goes to its line; `n` `N` step through them), where to spend your time, what it changes.
+branch fetched when needed). The PR's name in its bar (or `p`) opens the queue under it to switch
+PRs (type to filter; ⌘↑ ⌘↓ step without it; `⇧L` shows it as a list on the left). Above the changed
+files, pr-flow's notes: why it's in the queue, the findings as cards (a click opens one, with its fix
+and code, and goes to its line), where to spend your time with the code at each place, what it
+changes, and the open review threads. `n` `N` step through all of them in the files' order; `m` marks a
+file viewed until a later push changes it. Deleted, lockfile and generated files fold into one row, a
+straight PR's graph into one line (`z`); `w` ignores whitespace; long lines scroll sideways under fixed line numbers (or wrap, `⇧W`) and hunk headers stay at the top. Esc steps back
+to the plain graph of the repository.
 Findings are marked in the file list and shown under their line in the diff. `c` switches between
 the whole PR and only what changed since your last review. In every graph, a branch with a tracked
-PR carries its stage, and `p` opens its PR view; a PR badge in the sidebar opens it too.
+PR carries its stage, and `p` turns the dialog into its PR view; reviewing its head since base shows
+the PR's notes in the plain graph too. A PR badge in the sidebar opens the PR view.
+When pr-flow has drafted your review (pr-flow 0.33.0), the notes start with it: its summary, and
+each comment on its line in the diff, marked Draft. Post it (asks first, `⌘⏎`), approve with it,
+copy it (`y`), have it reworded shorter, softer or with more detail (a new version, `⇧V` switches),
+reword it in your own words in the PR's Claude tab, or discard it, all without leaving the view.
 
 **Acting.** Actions that need a model (review, fix, post, ready, merge…) go to the PR's own Claude
 tab, named after it (`api#506`) in the space set as `pr_space` (default "PR Reviews"): a new tab
 starts Claude Code in your clone, an existing one gets the command typed in, so each PR keeps one
 conversation. The others run through pr-flow directly; approve and hand back ask first.
+
+**A job's log.** A review or self-check pr-flow runs in the background shows on the PR's row and in
+its details; **log ↗** (**output ↗** while it runs, or `w`) opens the same tail as the fleet board's
+at the bottom of the pane: what the agent said, each command and file it read, what failed or was
+denied in red, and how it ended ("done · 4m 35s · $2.15"), followed every few seconds while it runs.
+**terminal** there shows pr-flow's own `job show` in a terminal below. Its height is remembered on
+its own.
 
 | Key | |
 |---|---|
@@ -172,6 +200,7 @@ conversation. The others run through pr-flow directly; approve and hand back ask
 | `d` | the PR view |
 | `t` | its Claude tab |
 | `o` | the PR on GitHub |
+| `w` | its pr-flow job's log in the tail at the bottom (`-` `=` its height, esc closes it) |
 | `s` | sync with GitHub now |
 | `/` | filter |
 | `?` | every key |

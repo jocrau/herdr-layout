@@ -69,6 +69,34 @@ export function normalize(raw, cwd) {
   };
 }
 
+// The epic-level phase, from the run's epic.* events (events.jsonl; `fleet status --json` carries neither):
+//   check: the last epic check on the epic branch: { state: "running", head, since } or { state: "pass" | "fail",
+//     head, at, log }; null before the first.
+//   status: the last epic.status: { closed, total, followups: [ids], pr } (pr: the epic's PR to main, or null).
+export function epicPhase(lines) {
+  let check = null, status = null;
+  for (const line of lines) {
+    let ev;
+    try { ev = JSON.parse(line); } catch { continue; }
+    const d = ev?.detail ?? {};
+    if (ev?.type === "epic.check") {
+      check = d.status === "started" ? { state: "running", head: d.head ?? null, since: ms(ev.ts) }
+        : { state: d.status === "pass" ? "pass" : "fail", head: d.head ?? null, at: ms(ev.ts), log: d.log ?? null };
+    } else if (ev?.type === "epic.status") {
+      status = { closed: d.closed ?? 0, total: d.total ?? 0, followups: Array.isArray(d.followups) ? d.followups : [], pr: prOf(d.pr) };
+    }
+  }
+  return { check, status };
+}
+// The PR to main as { url, label }: a URL, a number, or an object with url/number (null when none).
+function prOf(pr) {
+  if (!pr) return null;
+  if (typeof pr === "string") return { url: /^https?:/.test(pr) ? pr : null, label: pr.replace(/^https?:\/\/github\.com\/[^/]+\/([^/]+)\/pull\//, "$1#") };
+  if (typeof pr === "number") return { url: null, label: `#${pr}` };
+  const n = pr.number ?? null, url = pr.url ?? null;
+  return { url, label: n ? `#${n}${pr.state ? ` ${String(pr.state).toLowerCase()}` : ""}` : url ?? "PR" };
+}
+
 // The folder whose changes mean the snapshot changed: the repo's state directory
 // (<state>/<repo>), which holds run.lock and every epic. Paths under it that matter:
 export const RELEVANT = /(\/events\.jsonl|\/wave\.json|\/run\.json|\/state\.json|\/run\.lock|\/current|\/gates\/[^/]+\.json|\/merge\.json)$/;

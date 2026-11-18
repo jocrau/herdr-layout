@@ -200,3 +200,19 @@ test("a merge of HEAD below the uncommitted changes draws a solid line to HEAD, 
   assert.equal(intoM[5], false, "the line into HEAD is solid below the merge");
   assert.equal(rows[1].segments.find(([a, ya, b, yb]) => a === 0 && b === 0 && ya === 0 && yb === 1)[5], true, "above it stays dashed");
 });
+
+test("long diff lines wrap to the width, the rest of the line without a number; hunk heads and notes don't", async () => {
+  const { wrapDiff, ignoringSpace } = await import("../../mods/git-graph/git.js");
+  const rows = [{ kind: "@", text: "@@ -1 +1 @@ a very long hunk head" }, { kind: "+", number: 7, text: "abcdefghij\tk" }, { kind: "F", text: "a finding note longer than ten" }, { kind: " ", number: 8, text: "short" }];
+  assert.deepEqual(wrapDiff(rows, 10), [rows[0], { kind: "+", number: 7, text: "abcdefghij" }, { kind: "+", text: "    k", cont: true }, rows[2], rows[3]]);
+  assert.deepEqual(ignoringSpace(["diff", "--no-color", "a", "b"]), ["diff", "-w", "--no-color", "a", "b"]);
+});
+
+test("a file as it is after a change: every line numbered, added lines marked, removed lines noted where they were", async () => {
+  const { fileRows } = await import("../../mods/git-graph/git.js");
+  // Line 2 changed (1 for 1), lines 4-5 added, 2 lines removed after line 6, the old last line removed.
+  const diff = "@@ -2 +2 @@\n-b\n+B\n@@ -3,0 +4,2 @@\n+x\n+y\n@@ -5,2 +6,0 @@\n-p\n-q\n@@ -9 +8,0 @@\n-z\n";
+  const rows = fileRows("a\nB\nc\nx\ny\nd\ne\nf\n", diff);
+  assert.deepEqual(rows.map((r) => `${r.kind}${r.number ?? ""}${r.start ? "*" : ""}`), [" 1", "+2*", " 3", "+4*", "+5", " 6", "r*", " 7", " 8", "r*"]);
+  assert.equal(rows[6].text, "⋯ 2 lines removed here");
+});

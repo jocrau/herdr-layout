@@ -41,7 +41,7 @@ test("a PR waiting on others says on whom and since when", () => {
 });
 
 test("titles lose their [tag] to a chip; times read 5m, 3h, 2d", () => {
-  assert.deepEqual(splitTitle("[Feature] Carbide Data model"), { tag: "Feature", title: "Carbide Data model" });
+  assert.deepEqual(splitTitle("[Feature] Login form"), { tag: "Feature", title: "Login form" });
   assert.deepEqual(splitTitle("feat(cml): x"), { tag: null, title: "feat(cml): x" });
   assert.equal(ago(5 * 60000), "5m");
   assert.equal(ago(3 * 3600000), "3h");
@@ -55,6 +55,21 @@ test("a PR offers only what's possible now: no post, copy or approve before your
   assert.equal(actionsFor(row("WAITING", { detail: "2 findings not posted" })).main, "post");
   assert.equal(actionsFor(row("MY_MERGE", { role: "author" })).main, "merge");
   assert.equal(actionsFor(row("MY_BUSY", { role: "author" })).main, null, "an agent is at it");
+});
+
+test("an agent that stopped to ask is your move; one still working waits", () => {
+  assert.equal(moveOf(row("MY_BUSY", { role: "author", tab: "working" }))[0], "waiting", "working: waiting on it");
+  assert.equal(moveOf(row("REVIEWING"))[0], "waiting", "no tab (a background job): waiting");
+  for (const tab of ["done", "idle", "blocked"]) {
+    const r = row("MY_BUSY", { role: "author", tab, detail: "pre-merge check" });
+    assert.deepEqual(moveOf(r).slice(0, 2), ["you", "Answer its agent"], tab);
+    assert.equal(actionsFor(r).main, null, "the answer goes in its tab");
+  }
+  assert.equal(nextStep(row("REVIEWING", { tab: "done" })).text, "Its agent stopped and waits for you: answer in its tab");
+  assert.equal(moveOf(row("WAITING", { tab: "idle" }))[0], "waiting", "an idle tab beside a PR waiting on its author");
+  assert.equal(moveOf(row("WAITING", { tab: "blocked" }))[1], "Answer its agent", "a blocked tab waits on you whatever the stage");
+  const blocks = arrange([row("READY", { n: 1 }), row("LOOP_ALARM", { n: 2 }), row("REVIEWING", { n: 3, tab: "done" })]);
+  assert.equal(blocks[0].label, "Answer its agent", "first in Your move");
 });
 
 // herdr-prboard.facts: the queue from pr-flow's listing facts (0.30.0) or, before, from its records.
@@ -114,4 +129,16 @@ test("a new PR tab starts from pr-flow's prompt when there is one, else from the
     { name: "api#7", space: "s1", folder: "/c/api", argv: ["claude", prompt], focus: true });
   assert.deepEqual(newTab("acme/api#7", { space: null, folder: null, text: "/pr-flow:inbox fix api#7", start: null }),
     { name: "api#7", argv: ["claude"], task: "/pr-flow:inbox fix api#7", focus: true });
+});
+
+test("a tab to talk about a PR starts from its context and takes no action", async () => {
+  const { talkPrompt } = await import("../../lib/prflow.js");
+  const row = { title: "Login form", url: "https://github.com/acme/acme-api/pull/506", role: "reviewer", rec: { headRef: "login-form", baseRef: "main" } };
+  const p = talkPrompt("acme/acme-api#506", row, "/c/acme-api");
+  assert.match(p, /^Let's talk about pull request acme-api#506: "Login form" \(https:\/\/github.com\/acme\/acme-api\/pull\/506\)\./);
+  assert.match(p, /I'm a reviewer on it\.\nIts branch is login-form, into main\.\nThis folder is a checkout of acme\/acme-api/);
+  assert.match(p, /gh pr view 506 --comments, gh pr diff 506/);
+  assert.match(p, /conversation only: don't post/);
+  const bare = talkPrompt("acme/acme-api#7", { role: "author" }, null);
+  assert.match(bare, /\(https:\/\/github.com\/acme\/acme-api\/pull\/7\)\.\nIt's my PR\.\nThere's no local checkout of acme\/acme-api; use gh \(`--repo acme\/acme-api`\)\./);
 });
