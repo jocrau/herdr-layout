@@ -627,17 +627,23 @@ export default class PrBoard extends View {
       if (!rows.length) continue;
       const open = isOpen(g);
       // The group's heading (Your move · 5); in Your move, each action's too (Review · 2).
-      out.push(h_flex().id(`pr-grp-${g}`).px(10).pt(out.length ? 18 : 10).pb(2).gap(6).items_center().cursor_pointer()
+      // Section heading: a full-width band, accent bar on the left, so sections read apart at a glance.
+      out.push(h_flex().id(`pr-grp-${g}`).mt(out.length ? 20 : 0).px(10).py(7).gap(8).items_center().cursor_pointer()
+        .bg(t.raised).border_t_1().border_b_1().border_color(t.border)
         .on_click((_e, cx) => { this.fold.set(g, !open); cx.notify(); })
-        .child(div().text_size(10.5).font_semibold().text_color(t.muted).child(label.toUpperCase()))
-        .child(div().text_size(11).text_color(t.dim).child(String(rows.length)))
-        .child(div().flex_1()).child(div().text_size(10).text_color(t.dim).child(open ? "▾" : "▸")));
+        .child(div().w(3).h(16).rounded(2).bg(t.accent))
+        .child(div().text_size(15).font_bold().text_color(t.foreground).child(label.toUpperCase()))
+        .child(div().text_size(13).font_semibold().text_color(t.accent).child(String(rows.length)))
+        .child(div().flex_1()).child(div().text_size(13).text_color(t.muted).child(open ? "▾" : "▸")));
       if (!open) {
         out.push(div().pl(8 + 2 + 8 + GAP).pr(10).pb(2).truncate().font_family(mono).text_size(11).text_color(t.dim).child(rows.map((r) => `#${r.key.split("#")[1]}`).join("  ")));
         continue;
       }
       for (const blk of mine) {
-        if (g === "you") out.push(h_flex().px(10).pl(8 + 2 + 8 + GAP + numW + GAP).pt(8).pb(1).gap(5).text_size(11).text_color(t.dim).child(blk.label).child(div().child(String(blk.rows.length))));
+        // Your move's per-action heading (Review · 5): left-aligned, bold, underlined by a rule.
+        if (g === "you") out.push(h_flex().mx(10).mt(14).mb(4).pt(2).pb(4).gap(8).items_center().border_b_1().border_color(t.border)
+          .child(div().text_size(14).font_bold().text_color(t.foreground).child(blk.label))
+          .child(div().text_size(12.5).font_semibold().text_color(t.accent).child(String(blk.rows.length))));
         for (const r of blk.rows) {
           this.order.push(r.key);
           this.drawn.set(r.key, out.length);
