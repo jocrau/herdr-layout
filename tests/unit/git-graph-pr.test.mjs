@@ -222,7 +222,7 @@ test("a view's row keeps the queue row's own fields, takes pr-flow's judgment fr
   const r = viewRow(PR_VIEW, base);
   assert.equal(r.detail, "draft"); assert.equal(r.size, "M"); assert.equal(r.tab, "idle");
   assert.equal(r.stage, "MY_DRAFT"); assert.equal(r.next_step.text, PR_VIEW.next_step.text); assert.equal(r.actions.length, 4);
-  assert.equal(viewRow(PR_VIEW, null, "blocked").tab, "blocked", "not in the queue: the Claude tab's status passed in");
+  assert.equal(viewRow(PR_VIEW, null, "blocked").tab, "blocked", "not in the queue: the agent tab's status passed in");
   // A colleague's PR shows its author; a job holding a REVIEWING PR is the row's job, as the listing's `job`.
   const busy = viewRow({ ...PR_VIEW, role: "reviewer", stage: "REVIEWING", jobs: [{ id: "j9", state: "running", key: PR_VIEW.key }] });
   assert.equal(busy.author, "me"); assert.equal(busy.job, "j9");

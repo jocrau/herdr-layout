@@ -1,6 +1,6 @@
 // Copied from lib/prflow.js by lib/sync.mjs: edit it there, then run `node lib/sync.mjs`.
 // pr-flow from a mod: where it is, its queue, one PR's record and findings, its actions (the `act` shorthand),
-// and the two things the workbench adds: your local checkout of a PR's repository and the PR's own Claude tab.
+// and the two things the workbench adds: your local checkout of a PR's repository and the PR's own agent tab.
 // Only pr-flow's published interface (its ENGINE.md, schema 1) is used; pr-flow keeps all the state.
 import { exec, home, readTextFile, shared, setShared, spaces, terminals, run, openOverlay } from "herdr";
 import { readSettings, settingPath, codeDir } from "./settings.js";
@@ -440,8 +440,8 @@ export async function prView(key) {
 const BUSY = new Set(["REVIEWING", "MY_BUSY"]);
 // A view as a queue row (queueRows' shape), so the PR view's bar reads it with pr-board's own helpers (moveOf,
 // nextStep, actionsFor, verbPlan, jobFor, jobText, jobLabel): the same next step, labels and actions as the PR's
-// card. `base`: the PR's queue row, if it's in the queue (its detail, size, section and Claude tab stay); `tab`:
-// the Claude tab's status when it isn't. `job` as the listing has it: a running job's id on a REVIEWING or
+// card. `base`: the PR's queue row, if it's in the queue (its detail, size, section and agent tab stay); `tab`:
+// the agent tab's status when it isn't. `job` as the listing has it: a running job's id on a REVIEWING or
 // MY_BUSY PR. null for no view (an older pr-flow, or a PR pr-flow doesn't know).
 export function viewRow(view, base = null, tab = null) {
   if (!view?.key || !view.move || !view.next_step || !Array.isArray(view.actions)) return null;
@@ -599,7 +599,7 @@ export async function prRange(key, rec) {
   return { root, head, base, baseName: rec?.baseRef ? `origin/${rec.baseRef}` : undefined, title: k.short };
 }
 
-// ---------- the PR's own Claude tab
+// ---------- the PR's own agent tab
 
 // The tab's name: the PR's short key ("acme-api#506").
 export const tabName = (key) => parseKey(key)?.short ?? key;
@@ -627,7 +627,7 @@ export async function prSpace() {
 // The pr-flow command an agent runs for `verb` on the PR: the inbox command takes every verb.
 export const agentCommand = (verb, key) => `/pr-flow:inbox ${verb} ${parseKey(key)?.short ?? key}`;
 
-// Sends `text` to the PR's Claude tab, opening one (named after the PR, in its checkout) if it has none.
+// Sends `text` to the PR's agent tab, opening one (named after the PR, in its checkout) if it has none.
 // `fresh`: what a new tab starts from instead (pr-flow's self-contained prompt, as `claude "<prompt>"`); a tab
 // that's there already has its context and gets `text`. Returns what happened: "sent", "opened", or an error.
 export async function toPrTab(key, text, { fresh = null } = {}) {
@@ -675,7 +675,7 @@ export function talkPrompt(key, row, folder) {
   ].filter(Boolean).join("\n");
 }
 
-// The PR's Claude tab to talk about it: shown when there is one, else a new one (named after the PR, in its
+// The PR's agent tab to talk about it: shown when there is one, else a new one (named after the PR, in its
 // checkout, in the PR space) started from talkPrompt. Later actions on the PR go to the same tab.
 export async function talkTab(key, row) {
   if (showPrTab(key)) return "shown";
@@ -713,8 +713,8 @@ export function openPrView(key) {
 export const ASK_FIRST = new Set(["approve", "handback"]);
 
 // How a verb runs on a row: { kind, confirm, disabled, label }. With pr-flow's view model (row.actions) from its
-// action: kind script (act), job (a background job; the PR's Claude tab while pr-flow has no job definition) or
-// session (the PR's Claude tab, as "agent"); confirm: the question to ask first (an outward script or job verb;
+// action: kind script (act), job (a background job; the PR's agent tab while pr-flow has no job definition) or
+// session (the PR's agent tab, as "agent"); confirm: the question to ask first (an outward script or job verb;
 // a session's own conversation asks there); disabled: why it can't run now. Else from the listing's verbs and
 // ASK_FIRST, as before.
 export function verbPlan(row, verb, verbs) {
@@ -737,7 +737,7 @@ export function verbsFor(row, verbs) {
 export const shorthandFor = (verb, short, now = new Date()) =>
   verb !== "later" ? `${verb} ${short}` : `later ${short} ${now.getDay() === 5 || now.getDay() === 6 ? "mon" : "tomorrow"}`;
 
-// Does `verb` on the PR: an agent's verb in the PR's Claude tab, `open` in the browser, the rest through
+// Does `verb` on the PR: an agent's verb in the PR's agent tab, `open` in the browser, the rest through
 // pr-flow's `act` (a result that still needs an agent goes to the tab too). { ok, message }.
 export async function doVerb(verb, key, { url, kind } = {}) {
   const short = parseKey(key)?.short ?? key;
@@ -747,11 +747,11 @@ export async function doVerb(verb, key, { url, kind } = {}) {
   }
   const toTab = async () => {
     const how = await toPrTab(key, agentCommand(verb, key), { fresh: () => promptFor(key, verb) });
-    return { ok: how === "sent" || how === "opened", message: how === "opened" ? `${verb}: a new Claude tab ${tabName(key)}` : how === "sent" ? `${verb}: sent to ${tabName(key)}` : how };
+    return { ok: how === "sent" || how === "opened", message: how === "opened" ? `${verb}: a new agent tab ${tabName(key)}` : how === "sent" ? `${verb}: sent to ${tabName(key)}` : how };
   };
   if (kind === "agent") return toTab();
   // A job verb (pr-flow's view): in the background when pr-flow has a job definition for it (`job start` refuses
-  // one it hasn't, changing nothing), else in the PR's Claude tab as before.
+  // one it hasn't, changing nothing), else in the PR's agent tab as before.
   if (kind === "job") {
     if ((await capabilities()).has("jobs")) {
       const j = json(await prflow(["job", "start", verb, key, "--json"], { timeout: 30000 }))?.job;

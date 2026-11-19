@@ -17,7 +17,7 @@ move, not by pr-flow's stage (mods/pr-board/model.js maps one to the other):
 │   fleet-bot → you, carol           pushed 2h   │  who: author → reviewers (✓ ✗, dim: not yet)
 │   ⚠ 3 review rounds already: talk to the author · 1 high │  the next step (space does it)
 │ Review · 6                                               │
-│ ● #506 feat/job-stamp                     acme-api  │  ● its Claude tab
+│ ● #506 feat/job-stamp                     acme-api  │  ● its agent tab
 │   alice → you, bob               pushed 2h   │
 │   ▶ Re-review what changed since 5a3fd56 · 1 high open   │
 │ WAITING ON OTHERS 16                                     │
@@ -26,21 +26,27 @@ move, not by pr-flow's stage (mods/pr-board/model.js maps one to the other):
 └──────────────────────────────────────────────────────────┘
 ```
 
-- **Your move:** sub-grouped by action, most urgent first: answer its agent (the PR's Claude tab stopped to ask,
-  "go?" or a permission, though pr-flow still counts it as at work; space brings the tab forward), decide (a review loop), fix (CI, conflicts), post your
-  comments, answer feedback, review, merge, get ready. Each PR is three lines: what (number, title, its tag,
-  repo), who (author → reviewers, when it was last pushed), and the next step in one sentence.
-- **Waiting on others:** one line each, saying on whom (the author, your reviewers, CI and bots, an agent still
-  working) and since when.
+- **Your move:** sub-grouped by action, most urgent first: answer its agent (the PR's agent tab stopped to ask,
+  "go?" or a permission, though pr-flow still counts it as at work; space brings the tab forward), decide (a review loop), fix (CI, conflicts), review (every step of
+  reviewing a colleague's PR: review it, post your comments, finish your review), answer feedback, merge, get
+  ready; in each, one order by repository and number. A PR whose agent you started stays where it was while the
+  agent works. Each PR is three lines: what (number, title, its tag, repo), who (author → reviewers, when it
+  was last pushed), and the next step in one sentence.
+- **Waiting on others:** one line each, saying on whom (the author, your reviewers, CI and bots) and since when,
+  the shortest wait first (the longest at the bottom, next to Dormant).
+- **Stable while you work:** the order holds while the pointer is over the pane (or just after a key or click,
+  or with a question or menu open). A card that's handed over says where it goes in place and moves when the
+  pointer leaves, highlighted there; new PRs wait ("+1 new"). An action's question opens under its card.
 - **Later** and **Dormant** start folded.
-- **Red** only for real problems: a review loop, failing CI, conflicts. Counts are plain.
+- **Red** only for real problems that are yours: a review loop; failing CI or conflicts on your own PR (on a
+  colleague's, the author's to fix: said, not red). Counts are plain.
 - **Details (⏎):** each thing once. Under the row's context line, the PR's own facts (branch → base, GitHub's
   verdict, open threads, conflicts) and "Changes:", pr-flow's summary of what it changes. Then what the last
   pr-flow job did ("Self-check found 2 low findings · 32m ago"; running: its phase with output and stop; cost,
   model and id in its tooltip), pr-flow's reasons the row doesn't already say, and one row of buttons: the next
   step's action, the alternatives that can run now (the one the last job ran says "again"), **draft ↗** when
   pr-flow drafted comments; housekeeping on the right (one quiet word, or ⋯ with several: discard, hand back, …).
-  Apart, under them: the PR view, its Claude tab, GitHub. The row counts open findings ("6 findings", red with
+  Apart, under them: the PR view, its agent tab, GitHub. The row counts open findings ("6 findings", red with
   a high one, amber with a medium; the kinds in its tooltip).
 
 **The PR view (`d`, ⏎ on a finding, ⌘⌥R)**: git-graph's review dialog, opened on the PR.
@@ -111,8 +117,8 @@ move, not by pr-flow's stage (mods/pr-board/model.js maps one to the other):
     **Approve with it…** (when pr-flow offers approve) asks, then `approve <pr> --draft <v>`. **Copy** runs
     `copy <pr> --draft <v> --json` and puts the summary and comments on the clipboard (`y`); pr-flow counts it
     as handed over. **Shorter**, **Softer**, **More** start a reword job (`job start reword <pr> --tone …`) on
-    the current version; the panel shows its phase and, when it's done, the new version. **Reword in Claude ↗**
-    opens the PR's Claude tab on pr-flow's post flow, to say in your own words what to change (it posts only
+    the current version; the panel shows its phase and, when it's done, the new version. **Reword in its tab ↗**
+    opens the PR's agent tab on pr-flow's post flow, to say in your own words what to change (it posts only
     when you say so). **Discard…** asks, then `act "discard <pr>"`. The bar's Post comments and Copy as text
     act on the draft shown too.
 
@@ -134,7 +140,7 @@ notes, findings, threads and viewed marks as the PR view does, without its bar.
 - **Outward actions** (`approve`, `merge`, `close`) ask first, in the confirm bar the fleet board uses. pr-flow
   still runs its own readiness checks.
 - **Actions that need a model** (`review`, `fix`, `post`, `copy`, `ready`, `ping`, `nudge`, `split`, and
-  `merge`'s checklist) go to **the PR's own Claude tab**:
+  `merge`'s checklist) go to **the PR's own agent tab**:
   - The tab is named after the PR (`acme-api#506`). It lives in the "PR Reviews" space, set by `pr_space` in
     the settings, and opens in your local checkout of the repository when there is one.
   - A new tab starts from pr-flow's own opening message for a fresh session (`pr-flow prompt <pr> <verb>
@@ -172,7 +178,7 @@ notes, findings, threads and viewed marks as the PR view does, without its bar.
 | `p` | — | every PR, under the PR's name (type to filter) |
 | `⇧L` | — | the queue as a list on the left |
 | `o` | the PR on GitHub | the PR on GitHub |
-| `t` | its Claude tab, or a new one to talk about the PR | its Claude tab |
+| `t` | its agent tab, or a new one to talk about the PR | its agent tab |
 | `w` | its pr-flow job's log in the tail panel at the bottom (followed while it runs; the wheel scrolls smoothly (up stops following, "↓ newest" follows again), shift-wheel or a sideways swipe scrolls sideways; **terminal** there: `job show --follow`) | — |
 | `-` `=` | the tail three lines shorter / taller (drag its top edge; double-click: 14 lines) | — |
 | `esc` | the tail closed, then the details, then the column | — |
@@ -204,14 +210,14 @@ pr-board uses only pr-flow's published interface (ENGINE.md, schema 1):
   dates), its actions in its labels (Re-review, Ping reviewers), the primary first, alternatives, then
   housekeeping. An outward one asks first with pr-flow's question (a session verb, which goes to the PR's Claude
   tab, asks there instead); one with a `disabled_reason` is drawn dimmed, its tooltip says why, and a click only
-  says it. The PR's Claude tab still outranks pr-flow (an agent that stopped to ask is your move). Without the
+  says it. The PR's agent tab still outranks pr-flow (an agent that stopped to ask is your move). Without the
   capability, the board's own tables (lib/prmodel.js: MOVES, the next-step sentences, the section actions,
   ASK_FIRST) decide, as before. A shim adds the reason ("CI failing", "conflicts") that pr-flow 0.32.1 leaves
   out of some red next steps (fixed in 0.32.2; the shim does nothing once the text names it).
 - **Jobs** (the `jobs` capability): each read of the queue also reads `job list --json`, and a PR's job shows on
   its row (◷ review 40% · its phase; a failed one in red with why, for an hour). A job verb (`kind: job`: review,
   check, post, copy, ping, …) runs `job start <verb> <pr>`; while pr-flow has no job definition for it, that
-  refuses and changes nothing, and the verb goes to the PR's Claude tab as before. The PR's details show its job
+  refuses and changes nothing, and the verb goes to the PR's agent tab as before. The PR's details show its job
   (the row's, else its latest, ended ones too) on one line that keeps its height: what it's doing (verb, %, the
   current phase, how long), what a finished review or self-check found, a failed one's reason in full; runtime,
   model, effort, cost and id in its tooltip.

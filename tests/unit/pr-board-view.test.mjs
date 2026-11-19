@@ -37,11 +37,11 @@ const snoozed = {
 };
 
 test("with pr-flow's view model the pane groups by its move, in its order, and says its next step", () => {
-  assert.deepEqual(moveOf(ready), ["you", "Review", "review", 4]);
-  // The order comes from move.order: Review (4) before Merge (5) whatever the listing's order.
+  assert.deepEqual(moveOf(ready), ["you", "Review", "review", 2]);
+  // The order comes from move.order (every step of a review: 2): Review before Merge (5) whatever the listing's order.
   assert.deepEqual(arrange([merge, ready, pending, snoozed]).map((b) => `${b.group}:${b.label}`), ["you:Review", "you:Merge", "waiting:Waiting on others", "later:Later"]);
   assert.deepEqual(nextStep(merge), { text: "Merge · 1 approved · CI green", problem: false });
-  // Its Claude tab still outranks pr-flow: a blocked tab is your move.
+  // Its agent tab still outranks pr-flow: a blocked tab is your move.
   assert.deepEqual(moveOf({ ...pending, tab: "blocked" }).slice(0, 2), ["you", "Answer its agent"]);
 });
 
@@ -73,7 +73,7 @@ test("shim for pr-flow 0.32.1: a problem the text doesn't name gets its reason f
 test("without the view model (an older pr-flow) the board's own tables still decide", () => {
   const old = { key: "a/b#1", short: "b#1", stage: "READY", rec: { reviewedSha: "abcdef1234" }, detail: "" };
   assert.equal(viewOf(old), null);
-  assert.deepEqual(moveOf(old), ["you", "Review", "review", 5]);
+  assert.deepEqual(moveOf(old), ["you", "Review", "review", 2]);
   assert.equal(nextStep(old).text, "Re-review what changed since abcdef1");
   assert.equal(actionsFor(old).main, "review");
   assert.equal(verbPlan(old, "approve", {}).confirm, "Approve b#1? pr-flow checks it's ready first, then approves under your account.");
@@ -213,4 +213,28 @@ test("a job on your own PR is a self-check, its phase in words, and it doesn't m
   assert.equal(agentWaits({ ...own, job: null }), true);
   const view = { ...own, move: { group: "waiting", label: "x" }, actions: [], next_step: { text: "job-20260301-101500-review-42-a1b2 working since 19:53 · 2 check findings open", problem: false } };
   assert.equal(nextStep(view).text.startsWith("a job working since 19:53"), true);
+});
+
+test("every step of reviewing a colleague's PR is one block, Review, in one order by repository and number", () => {
+  const step = (n, label, order, repo = "o/r") => ({ key: `${repo}#${n}`, stage: "X", role: "reviewer", move: { group: "you", label, order, waiting_on: null }, next_step: { text: "", problem: false }, actions: [] });
+  const rows = [step(9, "Post your comments", 2), step(3, "Review", 5), step(5, "Finish your review", 3), step(1, "Merge", 6), step(2, "Review", 5, "a/z")];
+  assert.deepEqual(arrange(rows).map((b) => [b.label, b.rows.map((r) => r.key)]), [["Review", ["a/z#2", "o/r#3", "o/r#5", "o/r#9"]], ["Merge", ["o/r#1"]]]);
+  // A review going on (posted comments wait, then it's finished) keeps its place.
+  const later = rows.map((r) => (r.key === "o/r#3" ? { ...r, move: { ...r.move, label: "Post your comments", order: 2 } } : r));
+  assert.deepEqual(arrange(later)[0].rows.map((r) => r.key), ["a/z#2", "o/r#3", "o/r#5", "o/r#9"]);
+});
+
+test("on a colleague's PR Hand back is a button, and its failing CI isn't red; on your own PR both stay as they were", () => {
+  const base = { key: "o/r#7", stage: "READY", move: { group: "you", label: "Review", order: 5, waiting_on: null }, next_step: { text: "First review · CI failing", problem: true },
+    actions: [act("review", "job", "primary"), act("handback", "script", "housekeeping"), act("later", "script", "housekeeping"), act("open", "script", "housekeeping")] };
+  assert.deepEqual(actionsFor({ ...base, role: "reviewer" }), { main: "review", also: ["handback"], keep: ["later"] });
+  assert.deepEqual(nextStep({ ...base, role: "reviewer" }), { text: "First review · CI failing", problem: false });
+  assert.deepEqual(actionsFor({ ...base, role: "author" }).keep, ["handback", "later"]);
+  assert.equal(nextStep({ ...base, role: "author" }).problem, true);
+});
+
+test("Waiting on others: the shortest wait first, an unknown one last; ties by repository and number", () => {
+  const w = (n, since) => ({ key: `o/r#${n}`, stage: "WAITING", role: "reviewer", move: { group: "waiting", label: "author", order: null, waiting_on: { kind: "author", who: ["vic"], since } }, next_step: { text: "", problem: false }, actions: [] });
+  const rows = [w(1, "2026-11-01T00:00:00Z"), w(2, null), w(3, "2026-11-18T00:00:00Z"), w(4, "2026-11-10T00:00:00Z"), w(5, "2026-11-18T00:00:00Z")];
+  assert.deepEqual(arrange(rows)[0].rows.map((r) => r.key), ["o/r#3", "o/r#5", "o/r#4", "o/r#1", "o/r#2"]);
 });

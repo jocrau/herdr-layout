@@ -7,6 +7,24 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status`, `preview-plus` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- `pr-board`: cards stay put when you act. A PR whose agent you started (a review, a self-check) stays in Your
+  move where it was, its second line saying what the agent does, instead of moving to Waiting on others. The
+  order holds while you work in the pane (the pointer over it, a key or click just now, a question or menu
+  open): a card that's handed over fades in place and says where it goes ("→ Waiting on alice", "→ Later"),
+  then moves when the pointer leaves and is highlighted in its new place; new PRs wait ("+1 new" in the
+  header). An action's question opens under its card, and "review #42…" sits in the footer, so nothing above
+  the list moves.
+- `pr-board`: every step of reviewing a colleague's PR (review it, post your comments, finish your review) is
+  one Review block; in each block PRs keep one order, by repository and number. Waiting on others lists the
+  shortest wait first, the longest at the bottom, next to Dormant.
+- `pr-board`: **Hand back** is a button on a colleague's PR (no longer under ⋯); with pr-flow 0.35+ the PR then
+  waits on its author until they push or CI turns green. A colleague's failing CI or conflicts are said, not
+  red: red is for review loops and your own PRs.
+- `pr-board`: a card closes after an action that needs no follow-up (hand back, later, ignore, approve, post,
+  copy, discard, close).
+- `pr-board`, PR view: the PR's tab is its agent tab (**Agent tab ↗**, **Reword in its tab ↗**), not named after
+  one tool.
+
 - `pr-board`, `fleet-board`: the tail panel scrolls smoothly (a wrapped line scrolls through as the lines it
   takes): a turn up stops following the newest line, "↓ newest" in its header starts it again; sideways (a
   sideways swipe or shift-wheel) with the labels staying put. An ended job whose log read found nothing (a

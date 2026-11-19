@@ -4,15 +4,19 @@
 // (no Herdr calls), so tests can run them.
 //
 // The pane is grouped by your next move, not by pr-flow's stage:
-//   your move     the PRs that wait on you, by what to do (decide, fix, post, answer, review, merge, get ready)
-//   waiting       on whom: the author, your reviewers, CI and bots, an agent at work
-//                 (an agent that stopped to ask, "go?" or a permission, is your move: agentWaits)
+//   your move     the PRs that wait on you, by what to do (decide, fix, review, answer, merge, get ready); a
+//                 colleague's PR at any step of your review (review it, post your comments, finish your review)
+//                 is under one "Review", so it stays there as the review goes on (REVIEW_STEPS)
+//   waiting       on whom: the author, your reviewers, CI and bots
+//                 (an agent you started is still yours: while it works the PR stays in Your move, where it was,
+//                 agentAtWork; one that stopped to ask, "go?" or a permission, is your move too: agentWaits)
 //   later, dormant
-// Red is kept for real problems (a review loop, CI failing, conflicts); counts are plain.
+// Red is kept for real problems that are yours (a review loop; CI failing or conflicts on your own PR): on a
+// colleague's PR they're its author's to fix, said in the text but not red (yoursToFix); counts are plain.
 //
 // With pr-flow's view model (pr-flow 0.32, capability `view`; ENGINE.md "View") each listing item carries `move`,
 // `next_step` and `actions`, and these functions read them; the tables below (MOVES, nextStep's sentences,
-// actionsFor's sections) are only the fallback for an older pr-flow. The PR's Claude tab still outranks both
+// actionsFor's sections) are only the fallback for an older pr-flow. The PR's agent tab still outranks both
 // (agentWaits): pr-flow can't see that an agent stopped to ask.
 
 // Each stage: [group, action or whom it waits on, the verb for space, order within "your move"].
@@ -20,10 +24,10 @@ export const MOVES = {
   AGENT_WAITS: ["you", "Answer its agent", null, -1],
   LOOP_ALARM: ["you", "Decide", "nudge", 0],
   MY_BLOCKED: ["you", "Fix", "fix", 1],
-  NEEDS_YOU: ["you", "Post your comments", "post", 2],
-  REVIEWED: ["you", "Finish your review", "approve", 3], // pr-flow 0.33.2: clean but not approved, findings not sent
+  NEEDS_YOU: ["you", "Review", "post", 2],
+  REVIEWED: ["you", "Review", "approve", 2], // pr-flow 0.33.2: clean but not approved, findings not sent
   MY_FEEDBACK: ["you", "Answer feedback", "fix", 4],
-  READY: ["you", "Review", "review", 5],
+  READY: ["you", "Review", "review", 2],
   MY_MERGE: ["you", "Merge", "merge", 6],
   MY_ASK: ["you", "Ask for review", "ready", 7], // pr-flow 0.33.2: your PR nobody is asked to review
   MY_DRAFT: ["you", "Get ready", "ready", 8],
@@ -37,9 +41,13 @@ export const MOVES = {
   MY_DORMANT: ["dormant", "dormant"],
 };
 
+// pr-flow's labels for the steps of reviewing a colleague's PR: one block, "Review", where "Post your comments" was.
+const REVIEW_STEPS = new Set(["Review", "Post your comments", "Finish your review"]);
+const REVIEW_ORDER = 2;
+
 export const GROUPS = [["you", "Your move"], ["waiting", "Waiting on others"], ["later", "Later"], ["dormant", "Dormant"]];
 
-// The PR's Claude tab outranks pr-flow's stage. pr-flow says an agent is at it (REVIEWING, MY_BUSY) until the job
+// The PR's agent tab outranks pr-flow's stage. pr-flow says an agent is at it (REVIEWING, MY_BUSY) until the job
 // is recorded, but an agent that finished its turn to ask ("go?", "post these?") or stopped at a permission
 // prompt waits on you. row.tab: the tab's status (working, blocked, done, idle; null without a tab). A blocked
 // tab waits on you whatever the stage; a finished one only where pr-flow thinks it's still working.
@@ -50,12 +58,37 @@ export const agentWaits = (row) => row.tab === "blocked" || (AGENT_AT_WORK.has(r
 // pr-flow's view model on a row, or null (an older pr-flow): { move, next_step, actions }.
 export const viewOf = (row) => (row?.move && row.next_step && Array.isArray(row.actions) ? row : null);
 
+// An agent at work on the PR (a review or self-check job, a session holding it) that hasn't stopped to ask. You
+// started it, so the PR stays yours: it doesn't move to Waiting on others while the agent works.
+export const agentAtWork = (row) => !agentWaits(row) && (AGENT_AT_WORK.has(row.stage) || viewOf(row)?.move?.waiting_on?.kind === "agent");
+
+// Where a PR stays while its agent works: `row.held`, the place the pane last drew it in Your move (pr-board keeps
+// it, so a card you act on stays where it is); else a review of a colleague's PR under Review, the rest under
+// "Agents at work" at the end of Your move.
+function atWorkPlace(row) {
+  if (row.held?.[0] === "you") return [row.held[1], row.held[3] ?? 9];
+  const verb = /^job-\d{8}-\d{6}-([a-z]+)-/.exec(row.job ?? "")?.[1];
+  const own = row.role === "author" || /^MY_/.test(row.stage ?? "");
+  return !own && (verb === "review" || row.stage === "REVIEWING") ? ["Review", REVIEW_ORDER] : ["Agents at work", 9];
+}
+
 // [group, label, the verb for space, order within "your move"].
 export function moveOf(row) {
   if (agentWaits(row)) return MOVES.AGENT_WAITS;
   const v = viewOf(row);
-  if (v) return [v.move.group, v.move.label, v.actions.find((a) => a.role === "primary" && !a.disabled_reason)?.verb ?? null, v.move.order ?? 9];
+  const verb = v ? v.actions.find((a) => a.role === "primary" && !a.disabled_reason)?.verb ?? null : null;
+  if (agentAtWork(row)) { const [label, order] = atWorkPlace(row); return ["you", label, verb, order]; }
+  if (v) return v.move.group === "you" && REVIEW_STEPS.has(v.move.label) ? ["you", "Review", verb, REVIEW_ORDER] : [v.move.group, v.move.label, verb, v.move.order ?? 9];
   return MOVES[row.stage] ?? ["waiting", "others"];
+}
+
+// Where a PR goes, in a few words, for a card that's moving there: "Waiting on vic", "Merge",
+// "Later", "Dormant". (`me`: the person using the pane.)
+export function placeText(row, me) {
+  const [g, label] = moveOf(row);
+  if (g === "you") return label;
+  if (g === "waiting") return `Waiting on ${waitingOn(row, me).who}`;
+  return label[0].toUpperCase() + label.slice(1);
 }
 
 // pr-flow's texts give times as ISO (ENGINE.md: hosts format them): "2026-11-30T17:50:00.000Z" → "30 Nov"
@@ -114,8 +147,16 @@ export function people(row, me) {
   return { author: you(rec.author ?? row.author) || "?", others: [...seen].map(([who, v]) => ({ who: you(who), ...v })) };
 }
 
+// Whether a problem on the PR is yours to fix: on your own PR, yes; on a colleague's, only a review loop (talking
+// to the author is yours); its failing CI or conflicts are its author's (said in the text, not red).
+const yoursToFix = (row) => row.role !== "reviewer" || row.stage === "LOOP_ALARM" || viewOf(row)?.move.label === "Decide";
+
 // The one sentence under a PR whose move is yours: what to do, and what matters for it. { text, problem }.
 export function nextStep(row) {
+  const step = stepOf(row);
+  return step.problem && !yoursToFix(row) ? { ...step, problem: false } : step;
+}
+function stepOf(row) {
   const rec = row.rec ?? {}, detail = row.detail ?? "", f = openFindings(rec.open);
   const join = (...xs) => xs.filter(Boolean).join(" · ");
   if (agentWaits(row)) return { text: join(row.tab === "blocked" ? "Its agent needs you: answer in its tab" : "Its agent stopped and waits for you: answer in its tab", detail), problem: false };
@@ -140,6 +181,13 @@ export function nextStep(row) {
   }
 }
 
+// Since when a PR waits (ms, NaN when unknown): pr-flow's waiting_on.since (the last push, the handback, the
+// agent's start), else the record's last update or push.
+export function waitingSince(row) {
+  const w = !agentWaits(row) ? viewOf(row)?.move.waiting_on : null, rec = row.rec ?? {};
+  return Date.parse((w ? w.since : null) ?? rec.updated ?? rec.lastPush ?? "");
+}
+
 // For a PR waiting on others: who it waits on, by name, and since when. { who, since }.
 export function waitingOn(row, me, now = Date.now()) {
   const rec = row.rec ?? {}, [, whom] = moveOf(row), p = people(row, me);
@@ -162,10 +210,18 @@ export function waitingOn(row, me, now = Date.now()) {
   return { who: whom, since };
 }
 
+// Within a block, PRs keep one order whatever happens to them (a new push, a step of the review): by repository,
+// then number.
+const byPr = (a, b) => {
+  const [ra, na] = a.key.split("#"), [rb, nb] = b.key.split("#");
+  return ra < rb ? -1 : ra > rb ? 1 : Number(na) - Number(nb);
+};
+
 // The pane's rows in order: [{ group, label, rows }] for the groups that have any; "your move" split by
-// action (in MOVES' order), the rest one block each.
+// action (in MOVES' order), the rest one block each; in each, by repository and number (byPr).
 export function arrange(rows) {
   const out = [];
+  rows = [...rows].sort(byPr);
   const you = rows.filter((r) => moveOf(r)[0] === "you");
   // In each action's order (pr-flow's move.order, else MOVES'), from the rows that have it.
   const orderOf = (a) => moveOf(you.find((r) => moveOf(r)[1] === a))[3] ?? 9;
@@ -173,6 +229,9 @@ export function arrange(rows) {
   for (const a of actions) out.push({ group: "you", label: a, rows: you.filter((r) => moveOf(r)[1] === a) });
   for (const [g, label] of GROUPS.slice(1)) {
     const rs = rows.filter((r) => moveOf(r)[0] === g);
+    // Waiting: the shortest wait first, the longest at the bottom, next to Dormant where it goes in time; an
+    // unknown wait last. The rest keep byPr.
+    if (g === "waiting") rs.sort((a, b) => (waitingSince(b) || 0) - (waitingSince(a) || 0) || byPr(a, b));
     if (rs.length) out.push({ group: g, label, rows: rs });
   }
   return out;
@@ -190,8 +249,10 @@ export function actionsFor(row) {
   if (agentWaits(row)) return { main: null, also: [], keep: [] }; // the answer goes in its tab (space, t)
   const v = viewOf(row);
   if (v) {
-    const by = (role) => v.actions.filter((a) => a.role === role && a.verb !== "open").map((a) => a.verb);
-    return { main: by("primary")[0] ?? null, also: by("alternative"), keep: by("housekeeping") };
+    // Hand back is a real choice on a colleague's PR (it's the author's to fix first), not housekeeping: a button.
+    const shown = (a) => a.role === "alternative" || (a.verb === "handback" && row.role === "reviewer");
+    const by = (pick) => v.actions.filter((a) => pick(a) && a.verb !== "open").map((a) => a.verb);
+    return { main: by((a) => a.role === "primary")[0] ?? null, also: by((a) => a.role !== "primary" && shown(a)), keep: by((a) => a.role === "housekeeping" && !shown(a)) };
   }
   const rec = row.rec ?? {}, unposted = /not posted|finding/.test(row.detail ?? "");
   const A = {

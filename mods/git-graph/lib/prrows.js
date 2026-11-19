@@ -1,6 +1,6 @@
 // Copied from lib/prrows.js by lib/sync.mjs: edit it there, then run `node lib/sync.mjs`.
 // The PR queue's rows as pr-board's pane and the PR view (the git graph's dialog) both draw them: pr-flow's
-// sections, a row per PR, the PR's Claude tab as a dot. Pure drawing: the caller says what's selected.
+// sections, a row per PR, the PR's agent tab as a dot. Pure drawing: the caller says what's selected.
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { STAGE, prTab, parseKey } from "./prflow.js";
@@ -14,7 +14,7 @@ export const alpha = (c, hex) => (/^#[0-9a-f]{6}$/i.test(c ?? "") ? c + hex : c)
 export const SEVERITIES = ["blocker", "high", "medium", "low"];
 export const sevColor = (t, s) => ({ blocker: t.ansi1, high: t.ansi1, medium: t.ansi3, low: t.dim })[s] ?? t.dim;
 
-// The PR's Claude tab, drawn as the Agents pane draws an agent (Herdr's status colours): a spinner while it
+// The PR's agent tab, drawn as the Agents pane draws an agent (Herdr's status colours): a spinner while it
 // works, a dot when it needs you (blocked) or finished while you weren't looking (done), a ring once seen (idle).
 export function tabDot(t, key) {
   const tab = prTab(key), st = tab?.status ?? null;

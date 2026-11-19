@@ -152,15 +152,19 @@ review and the PRs you wrote, and does the review, fix and merge work through ag
 public yet; without it the pane says so and the rest of the layout works as before.
 
 **The pane (⌘⇧R)** is grouped by your next move. **Your move** lists the PRs waiting on you, by
-what to do (decide, fix, post your comments, answer feedback, review, merge, get ready), each in
+what to do (decide, fix, review, answer feedback, merge, get ready; review covers every step of a
+review, posting your comments too), in one order by repository and number, each in
 three lines: what it is (number, title, repository), who's in it (author → reviewers, ✓ approved,
 ✗ changes requested, dimmer: not reviewed yet, and when it was last pushed) and the next step in one
-sentence. A PR whose Claude tab stopped to ask (a "go?", a permission) is your move too, first:
-answer its agent (space brings the tab forward). **Waiting on others** is one line per PR: on whom,
-since when; an agent there is one still working. Later and dormant PRs are
-folded. Red means a real problem: a review loop, failing CI, conflicts. ⏎ opens a PR's details and
-the actions possible in its state: the next step first, its alternatives, then the PR view, its
-Claude tab and GitHub.
+sentence. A PR whose agent tab stopped to ask (a "go?", a permission) is your move too, first:
+answer its agent (space brings the tab forward). A PR whose agent you started stays in Your move,
+where it was, while the agent works. **Waiting on others** is one line per PR: on whom, since when,
+the shortest wait first. Later and dormant PRs are folded. Red means a real problem of yours: a
+review loop, failing CI or conflicts on your own PR (on a colleague's they're said, not red). ⏎ opens
+a PR's details and the actions possible in its state: the next step first, its alternatives (hand
+back on a colleague's PR), then the PR view, its agent tab and GitHub; an action that needs no
+follow-up closes them. The cards hold still while you work in the pane: one that's handed over says
+where it goes ("→ Waiting on alice") and moves when the pointer leaves.
 
 **The PR view** (`d`, ⌘⌥R) is the git graph as a dialog on the PR's range in your local clone (its
 branch fetched when needed). The PR's name in its bar (or `p`) opens the queue under it to switch
@@ -178,7 +182,7 @@ the PR's notes in the plain graph too. A PR badge in the sidebar opens the PR vi
 When pr-flow has drafted your review (pr-flow 0.33.0), the notes start with it: its summary, and
 each comment on its line in the diff, marked Draft. Post it (asks first, `⌘⏎`), approve with it,
 copy it (`y`), have it reworded shorter, softer or with more detail (a new version, `⇧V` switches),
-reword it in your own words in the PR's Claude tab, or discard it, all without leaving the view.
+reword it in your own words in the PR's agent tab, or discard it, all without leaving the view.
 
 **Acting.** Actions that need a model (review, fix, post, ready, merge…) go to the PR's own Claude
 tab, named after it (`api#506`) in the space set as `pr_space` (default "PR Reviews"): a new tab
@@ -198,7 +202,7 @@ its own.
 | ⏎ `l` `h` | open or close the details |
 | `space` | the next step |
 | `d` | the PR view |
-| `t` | its Claude tab |
+| `t` | its agent tab |
 | `o` | the PR on GitHub |
 | `w` | its pr-flow job's log in the tail at the bottom (`-` `=` its height, esc closes it) |
 | `s` | sync with GitHub now |
@@ -279,7 +283,7 @@ The layout works without settings. These can be set in `~/.config/herdr-app/data
   `~/Code`, searched 4 levels deep). A home folder (`"~"`) is searched only 2 levels deep, and its
   Desktop, Documents, Downloads, Library and media folders are skipped.
 - `fleet`: the `fleet` command the fleet board runs (default: `fleet` on your PATH).
-- `pr_space`: the space the PR board opens each PR's Claude tab in (default `"PR Reviews"`; without such a
+- `pr_space`: the space the PR board opens each PR's agent tab in (default `"PR Reviews"`; without such a
   space, the one shown).
 - `pr_flow`: the `pr-flow.mjs` the PR board runs (default: the newest installed pr-flow plugin);
   `pr_flow_state`: another pr-flow state folder (the demo uses its own copy).

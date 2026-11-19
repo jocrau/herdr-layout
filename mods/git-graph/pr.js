@@ -522,7 +522,7 @@ export const PrMethods = {
 
   // The PR as a row (queueRows' shape) for the bar: with pr-flow's view (`view <pr> --json`, read when the PR opens and
   // on the refresh beats) its stage, next step, actions and jobs as pr-flow says them now, the queue's row under it
-  // (detail, size, Claude tab); without, the queue's row. Built at most once a second, as the queue's rows are.
+  // (detail, size, agent tab); without, the queue's row. Built at most once a second, as the queue's rows are.
   prRow() {
     const pr = this.pr, base = this.prQueueRows().find((r) => r.key === pr?.key) ?? null;
     if (!pr?.view) return base;
@@ -546,7 +546,7 @@ export const PrMethods = {
   },
 
   // The queue's rows, read at most once a second: reading them parses the whole queue from shared state and looks
-  // up each PR's Claude tab, and the graph's rows ask for them per row (PR chips): every frame, the drawing ran
+  // up each PR's agent tab, and the graph's rows ask for them per row (PR chips): every frame, the drawing ran
   // over Herdr's time and the list came up blank.
   prQueueRows() {
     const now = Date.now();
@@ -592,7 +592,7 @@ export const PrMethods = {
           const p = verbPlan(r, v, verbs), again = last?.state === "done" && last.verb === v;
           return this.prButton(`pr-v-${v}`, again ? `${p.label} again` : p.label, i === 0 && !p.disabled, (_e, cx) => this.prVerb(v, cx), t, `${verbs[v]?.help ?? v}${p.disabled ? `\nNot now: ${p.disabled}` : ""}`).when(Boolean(p.disabled), (x) => x.opacity(0.5));
         })); })
-      .child(this.prButton("pr-tab", prTab(pr.key) ? "tab ↗" : "tab", Boolean(r) && agentWaits(r), () => { if (!showPrTab(pr.key)) notify({ title: `${tabName(pr.key)} has no Claude tab yet`, body: "An agent's action (review, fix, …) opens one.", level: "info", timeout: 4000 }); }, t, "Its Claude tab: agent actions run there (t)"))
+      .child(this.prButton("pr-tab", prTab(pr.key) ? "tab ↗" : "tab", Boolean(r) && agentWaits(r), () => { if (!showPrTab(pr.key)) notify({ title: `${tabName(pr.key)} has no agent tab yet`, body: "An agent's action (review, fix, …) opens one.", level: "info", timeout: 4000 }); }, t, "Its agent tab: agent actions run there (t)"))
       .child(this.prButton("pr-gh", "GitHub ↗", false, (_e, cx) => this.prVerb("open", cx), t, r?.url));
   },
 
@@ -607,7 +607,7 @@ export const PrMethods = {
   prVerb(verb, cx) {
     const pr = this.pr, r = this.prRow();
     if (!pr) return;
-    // With a stored draft, post and copy are the draft's (the version shown), not a Claude tab's.
+    // With a stored draft, post and copy are the draft's (the version shown), not a agent tab's.
     if (pr.draft && verb === "post") return this.prDraftAsk("post", cx);
     if (pr.draft && verb === "copy") return this.prDraftCopy(cx);
     if (pr.draft && verb === "discard") return this.prDraftAsk("discard", cx);
@@ -637,7 +637,7 @@ export const PrMethods = {
 
   // ---------- the comment draft (pr-flow 0.33.0, capability `draft`): its summary in the notes, each comment on
   // its line in the diff; post (asked first), approve with it, copy, shorter / softer / more (reword jobs: a new
-  // version), discard; free-text rewording in the PR's Claude tab. Only pr-flow's view, post|approve|copy --draft,
+  // version), discard; free-text rewording in the PR's agent tab. Only pr-flow's view, post|approve|copy --draft,
   // job start reword and act discard: without the capability draftView is null and none of this shows.
 
   // Takes `view --json`: the current draft, its versions, and every version's text seen (here or before: a version is
@@ -756,7 +756,7 @@ export const PrMethods = {
     });
   },
 
-  // Reword in your own words: the PR's Claude tab on pr-flow's post flow (it shows the draft, you say what to
+  // Reword in your own words: the PR's agent tab on pr-flow's post flow (it shows the draft, you say what to
   // change, it posts only when you say so).
   prDraftSession(cx) {
     const pr = this.pr, r = this.prRow();
@@ -767,7 +767,7 @@ export const PrMethods = {
     });
   },
 
-  // The draft read again (after an action, a reword, or now and then: a reword from the board or a Claude tab). With
+  // The draft read again (after an action, a reword, or now and then: a reword from the board or a agent tab). With
   // pr-flow's view that one read is the bar's too (stage, next step, actions, jobs); a read that failed keeps the last.
   async prDraftReload(pr, cx) {
     const view = pr.viewCap ? await prView(pr.key) : await draftView(pr.key);
@@ -836,7 +836,7 @@ export const PrMethods = {
         .child(btn("copy", "Copy", "This version as text on the clipboard (y); pr-flow counts it as handed over", (cx) => this.prDraftCopy(cx)))
         .child(div().w(4))
         .children(TONES.map(([tone, tip]) => btn(tone, tone[0].toUpperCase() + tone.slice(1), `${tip}: a new version of v${pr.draft.v}, in the background`, (cx) => this.prDraftReword(tone, cx))))
-        .child(btn("session", "Reword in Claude ↗", "Say in your own words how to change it: the PR's Claude tab, on pr-flow's post flow (it posts only when you say so)", (cx) => this.prDraftSession(cx)))
+        .child(btn("session", "Reword in its tab ↗", "Say in your own words how to change it: the PR's agent tab, on pr-flow's post flow (it posts only when you say so)", (cx) => this.prDraftSession(cx)))
         .when(Boolean(pr.dActions?.some((x) => x.verb === "discard")), (e) => e.child(btn("discard", "Discard…", "Drop the draft (asks first); pr-flow keeps its versions' files", (cx) => this.prDraftAsk("discard", cx)))));
   },
 

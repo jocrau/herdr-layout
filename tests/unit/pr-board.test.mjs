@@ -1,7 +1,7 @@
 // pr-board's model: grouping by your next move, the next-step sentence, who's involved.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { arrange, nextStep, people, waitingOn, splitTitle, moveOf, ago, actionsFor } from "../../mods/pr-board/model.js";
+import { arrange, nextStep, people, waitingOn, splitTitle, moveOf, ago, actionsFor, agentAtWork, placeText } from "../../mods/pr-board/model.js";
 
 const row = (stage, over = {}, rec = {}) => ({ key: `o/r#${over.n ?? 1}`, stage, role: "reviewer", title: "t", detail: "", ...over, rec });
 
@@ -17,7 +17,9 @@ test("the next step says what to do; red only for real problems", () => {
   assert.equal(nextStep(row("READY", {}, { reviewedSha: "5a3fd56d950e", open: { high: 1 } })).text, "Re-review what changed since 5a3fd56 · 1 high open");
   assert.equal(nextStep(row("READY", {}, { files: 33 })).text, "First review");
   assert.equal(nextStep(row("READY", {}, {})).problem, false);
-  assert.equal(nextStep(row("READY", {}, { conflicts: true })).problem, true);
+  assert.equal(nextStep(row("READY", {}, { conflicts: true, ci: "FAILURE" })).problem, false, "a colleague's CI and conflicts are the author's to fix");
+  assert.equal(nextStep(row("READY", {}, { ci: "FAILURE" })).text, "First review", "said, not red");
+  assert.equal(nextStep(row("MY_DRAFT", { role: "author" }, { conflicts: true })).problem, true, "on your own PR they're yours");
   const alarm = nextStep(row("LOOP_ALARM", { detail: "3 review rounds already" }));
   assert.equal(alarm.text, "3 review rounds already: talk to the author");
   assert.equal(alarm.problem, true);
@@ -57,9 +59,13 @@ test("a PR offers only what's possible now: no post, copy or approve before your
   assert.equal(actionsFor(row("MY_BUSY", { role: "author" })).main, null, "an agent is at it");
 });
 
-test("an agent that stopped to ask is your move; one still working waits", () => {
-  assert.equal(moveOf(row("MY_BUSY", { role: "author", tab: "working" }))[0], "waiting", "working: waiting on it");
-  assert.equal(moveOf(row("REVIEWING"))[0], "waiting", "no tab (a background job): waiting");
+test("an agent you started keeps the PR in Your move, where it was; one that stopped to ask is your move too", () => {
+  assert.deepEqual(moveOf(row("MY_BUSY", { role: "author", tab: "working" })).slice(0, 2), ["you", "Agents at work"], "working: still yours");
+  assert.deepEqual(moveOf(row("REVIEWING")).slice(0, 2), ["you", "Review"], "a background review of a colleague's PR: under Review");
+  assert.deepEqual(moveOf(row("REVIEWING", { held: ["you", "Decide", "nudge", 0] })), ["you", "Decide", null, 0], "where the pane last drew it");
+  assert.deepEqual(moveOf(row("MY_BUSY", { role: "author", job: "job-20260301-101500-review-42-a1b2", held: ["you", "Get ready", "ready", 8] })).slice(0, 2), ["you", "Get ready"]);
+  assert.equal(agentAtWork(row("REVIEWING")), true);
+  assert.equal(agentAtWork(row("REVIEWING", { tab: "done" })), false, "stopped to ask: waits on you instead");
   for (const tab of ["done", "idle", "blocked"]) {
     const r = row("MY_BUSY", { role: "author", tab, detail: "pre-merge check" });
     assert.deepEqual(moveOf(r).slice(0, 2), ["you", "Answer its agent"], tab);
@@ -141,4 +147,12 @@ test("a tab to talk about a PR starts from its context and takes no action", asy
   assert.match(p, /conversation only: don't post/);
   const bare = talkPrompt("acme/acme-api#7", { role: "author" }, null);
   assert.match(bare, /\(https:\/\/github.com\/acme\/acme-api\/pull\/7\)\.\nIt's my PR\.\nThere's no local checkout of acme\/acme-api; use gh \(`--repo acme\/acme-api`\)\./);
+});
+
+test("where a moving card goes, in a few words", () => {
+  assert.equal(placeText(row("WAITING", {}, { author: "vic" }), "me"), "Waiting on vic");
+  assert.equal(placeText(row("NEEDS_YOU"), "me"), "Review", "every step of a review is under Review");
+  assert.equal(placeText(row("MY_MERGE", { role: "author" }), "me"), "Merge");
+  assert.equal(placeText(row("SNOOZED"), "me"), "Later");
+  assert.equal(placeText(row("MY_PENDING", { role: "author" }, { author: "me", requested: ["ann"] }), "me"), "Waiting on ann");
 });
