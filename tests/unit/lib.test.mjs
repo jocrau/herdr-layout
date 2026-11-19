@@ -72,3 +72,15 @@ test("removing a worktree: the repository's command quoted; an unmerged branch o
   assert.deepEqual(commandsFor(a, { branchForce: true }, ctx)[1], ["branch", "-D", "fix"], "ticking only the force box deletes it too");
   assert.equal(commandsFor(a, {}, ctx).length, 1);
 });
+
+test("the layout's header and footer rows are as tall as lib/bars.js says (they line up with the boards')", async () => {
+  const { HEADER_H, FOOTER_H } = await import("../../lib/bars.js");
+  const root = fileURLToPath(new URL("../..", import.meta.url));
+  const layout = JSON.parse(readFileSync(`${root}layouts/workbench.json`, "utf8"));
+  const find = (n, id) => n?.id === id ? n : (n?.children ?? []).map((c) => find(c, id)).find(Boolean);
+  assert.equal(find(layout, "brand").size.px, HEADER_H);
+  assert.equal(find(layout, "tabs").size.px, HEADER_H);
+  assert.equal(find(layout, "panel-body").header.height, HEADER_H);
+  assert.equal(find(layout, "sidebar-footer").size.px, FOOTER_H);
+  assert.equal(find(layout, "status").size.px, FOOTER_H);
+});

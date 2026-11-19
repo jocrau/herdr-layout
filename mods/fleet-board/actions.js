@@ -40,8 +40,10 @@ export const ActionsMethods = {
     cx.notify();
   },
 
-  // The wave pill's click: stop the running wave, or start the next one in a terminal below the tab.
+  // The wave pill's click: stop the running wave, or start the next one in a terminal below the tab. Asked first;
+  // a second click on the pill takes the question back (as Esc or Cancel do).
   waveAction() {
+    if (this.confirm?.from === "wave") { this.confirm = null; return; }
     const e = this.s.epic, wave = e.wave;
     if (wave.running) {
       this.ask(`Stop wave ${wave.number}?`, "The steps running now are interrupted; the next wave resumes them.", "Stop",
@@ -50,6 +52,7 @@ export const ActionsMethods = {
       this.ask(`Start the next wave of ${e.id}?`, "It runs in a terminal below the tab (Ctrl-C there stops it); this pane follows it.", "Start",
         (_cx, cwd) => this.inTerminal(["fleet", "run", e.id], `wave ${e.id}`, cwd), `fleet run ${e.id}`);
     }
+    this.confirm.from = "wave";
   },
 
   async copy(cmd, what) {
@@ -88,12 +91,12 @@ export const ActionsMethods = {
     return b.review?.base && b.review?.head ? { ...b.review, title: `${b.id}: ${b.merged_ref ? "what merged" : "what merges"}` } : null;
   },
 
-  // The beads view (⌘B) on this bead: its tree unfolded to it, its details open.
+  // The beads view (⌘⇧B) on this bead: its tree unfolded to it, its details open.
   inBeads(b) {
     openOverlay({ mod: "beads", kind: "popup", width: 1, height: 1, frame: "none", props: { select: b.id, folder: this.cwd } });
   },
 
-  // The git graph as a dialog (like ⌘G), reviewing the range: changed files beside their diff.
+  // The git graph as a dialog (like ⌘⇧G), reviewing the range: changed files beside their diff.
   openDiff(range) {
     openOverlay({ mod: "git-graph", kind: "dialog", width: 0.92, height: 0.9, props: { folder: this.cwd, review: range } });
   },

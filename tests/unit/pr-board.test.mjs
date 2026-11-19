@@ -99,13 +99,13 @@ test("with facts and --no-save, the board reads the queue quietly and takes each
   assert.deepEqual(Object.keys(got.records), ["o/r#1"], "unknown facts: no record");
   assert.deepEqual(got.records["o/r#1"], {
     headRef: "login-form", baseRef: "main", headSha: "abc123", ci: "FAILURE", decision: "CHANGES_REQUESTED", draft: false, conflicts: true,
-    threads: { unresolved: 2, awaitingReviewer: 1, awaitingAuthor: 1 }, reviewedSha: "def456", open: { high: 1, low: 2 }, reasons: ["new commits"],
+    threads: { unresolved: 2, awaitingReviewer: 1, awaitingAuthor: 1 }, reviewedSha: "def456", open: { high: 1, low: 2 }, old: {}, findingsSha: null, reasons: ["new commits"],
     author: "vic", requested: ["ann", "qa"], reviewers: [{ who: "bob", state: "APPROVED" }], lastPush: "2026-11-16T09:00:00Z",
     updated: "2026-11-16T10:00:00Z", rounds: 2, about: "Adds a login form.", files: 7,
   });
   assert.deepEqual(recordOf({ draft: null, threads: null }), {
     headRef: null, baseRef: null, headSha: null, ci: null, decision: null, draft: false, conflicts: false, threads: null, reviewedSha: null,
-    open: {}, reasons: [], author: null, requested: [], reviewers: [], lastPush: null, updated: null, rounds: 0, about: null, files: null,
+    open: {}, old: {}, findingsSha: null, reasons: [], author: null, requested: [], reviewers: [], lastPush: null, updated: null, rounds: 0, about: null, files: null,
   }, "nulls where pr-flow doesn't know");
   assert.deepEqual(fromListing({ sections: [] }), { records: {}, me: null, warnings: [] }, "an empty queue needs no records either");
 });

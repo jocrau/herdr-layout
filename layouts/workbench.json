@@ -17,7 +17,7 @@
             "mod": "workspace-chrome"
           },
           "size": {
-            "px": 46
+            "px": 42
           },
           "window_drag": true
         },
@@ -56,7 +56,7 @@
             "mod": "sidebar-footer"
           },
           "size": {
-            "px": 41
+            "px": 28
           }
         }
       ],
@@ -130,14 +130,14 @@
                         "stack": "panel-body"
                       }
                     },
-                    "height": 40
+                    "height": 42
                   },
                   "children": [
                     {
                       "id": "files",
                       "type": "block",
                       "content": {
-                        "mod": "preview-plus"
+                        "mod": "file-browser"
                       }
                     },
                     {

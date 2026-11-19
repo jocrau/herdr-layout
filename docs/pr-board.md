@@ -125,7 +125,7 @@ move, not by pr-flow's stage (mods/pr-board/model.js maps one to the other):
 **In the normal git graph:** a branch with a tracked PR carries a small pr-flow stage label ("review",
 "merge", "waiting"). A click on the label opens the PR view.
 
-**From the git graph (⌘G):** `p` on a branch with a tracked PR turns the dialog into that PR's view, and esc
+**From the git graph (⌘⇧G):** `p` on a branch with a tracked PR turns the dialog into that PR's view, and esc
 steps back to the plain graph. Reviewing such a branch's head since base (`c`) in the plain graph shows the PR's
 notes, findings, threads and viewed marks as the PR view does, without its bar.
 

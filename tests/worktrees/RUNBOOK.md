@@ -22,7 +22,7 @@ to start over. It contains:
 | `done-dirty`, the same with an uncommitted file | Clean up warns that the change is lost |
 | On `main`: a modified, a staged, a deleted, a new and an untracked file | Per-file reset |
 
-Then open a space in `~/Code/wt-sandbox` (⌘N) and press **⌘G** there.
+Then open a space in `~/Code/wt-sandbox` (⌘N) and press **⌘⇧G** there.
 
 ## 1. Per-file reset (`r`)
 
@@ -40,14 +40,14 @@ Then open a space in `~/Code/wt-sandbox` (⌘N) and press **⌘G** there.
 - [ ] Double-click it. The graph closes, and a new tab "In Tree" opens in
       `.claude/worktrees/in-tree` in the space you opened the graph from (double-click again
       later: it shows that tab instead of opening another). Go back to the first tab and
-      reopen ⌘G.
+      reopen ⌘⇧G.
 - [ ] Right-click `in-tree`. The menu starts with **Open its worktree here (in-tree)** and has
       **Copy worktree path**. It has no Checkout and no Delete.
 - [ ] In the header, **Fast-forward N** doesn't count `in-tree`. In that same menu,
       **Fast-forward to origin/in-tree** works:
       `git -C ~/Code/wt-sandbox/.claude/worktrees/in-tree log -1 --oneline` shows
       "upstream moved on".
-- [ ] Open ⌘G inside the worktree (a terminal in `.claude/worktrees/in-tree`). The header reads
+- [ ] Open ⌘⇧G inside the worktree (a terminal in `.claude/worktrees/in-tree`). The header reads
       **wt-sandbox worktree in-tree**, and `main` has a folder icon.
 
 ## 3. Here or a new worktree, and the branch picker
@@ -114,7 +114,7 @@ Then open a space in `~/Code/wt-sandbox` (⌘N) and press **⌘G** there.
 
 ## 5. On a real repo
 
-- [ ] Open ⌘G in one of your repositories with worktrees. Their branches (and any
+- [ ] Open ⌘⇧G in one of your repositories with worktrees. Their branches (and any
       `.claude/worktrees/*` ones) have folder icons, and double-clicking one goes to that
       worktree instead of failing.
 

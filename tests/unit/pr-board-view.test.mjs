@@ -196,6 +196,16 @@ test("findingsText: open findings in a few words, most severe first", async () =
   assert.equal(findingsText({ low: 2, high: 1, medium: 0 }), "1 high, 2 low");
   assert.equal(findingsText({}), "");
   assert.equal(findingsText(null), "");
+  assert.equal(findingsText({ low: 1, blocker: 2 }), "2 blocker, 1 low", "pr-flow's blocker is the most severe");
+});
+
+test("findings from an older head say where they were made (pr-flow 0.41 old_findings)", async () => {
+  const { recordOf, oldFindingsText } = await import("../../lib/prflow.js");
+  const rec = recordOf({ open_findings: {}, old_findings: { high: 1 }, findings_sha: "2f684b0aa" });
+  assert.deepEqual([rec.open, rec.old, rec.findingsSha], [{}, { high: 1 }, "2f684b0aa"]);
+  assert.equal(oldFindingsText(rec), "1 high at 2f684b0, head moved");
+  assert.equal(oldFindingsText({ old: { low: 2 }, findingsSha: null }, true), "2 low findings at an older head, head moved");
+  assert.equal(oldFindingsText(recordOf({})), "", "none, or an older pr-flow");
 });
 
 test("a job on your own PR is a self-check, its phase in words, and it doesn't make an idle tab wait on you", async () => {

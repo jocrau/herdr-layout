@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { dur, timeline, graph, shortener, natural, wordsOf, readOnly, shq, gateText, fixRounds, tipText, fleetTailLines } from "../../mods/fleet-board/model.js";
-import { normalize, gatesOf, summarize, runKey, parseRuns, parseSnapshot, failure, changedRepos, relevant, stateRoot, epicPhase } from "../../mods/fleet-board/snapshot.js";
+import { normalize, gatesOf, summarize, runKey, parseRuns, parseSnapshot, failure, changedRepos, relevant, stateRoot, epicPhase, statusOf, currentStatus, followupCounts } from "../../mods/fleet-board/snapshot.js";
 
 const T = (min) => new Date(Date.UTC(2026, 10, 16, 10, min)).toISOString();
 const raw = (over = {}) => ({
@@ -159,7 +159,7 @@ test("the epic phase: the last epic check (running, passed, failed) and the last
   const status = ev("epic.status", "2026-11-17T22:44:09+00:00", { closed: 5, total: 6, followups: ["e.7", "e.8"], pr: null });
   const p = epicPhase([status, passed, started, "not json"]);
   assert.deepEqual(p.check, { state: "running", head: "69074e2596f3", since: Date.parse("2026-11-17T22:44:18Z") });
-  assert.deepEqual(p.status, { closed: 5, total: 6, followups: ["e.7", "e.8"], pr: null });
+  assert.deepEqual(p.status, { closed: 5, total: 6, followups: ["e.7", "e.8"], untriaged: null, pr: null });
   assert.equal(epicPhase([started, passed]).check.state, "pass");
   const failed = ev("epic.check", "2026-11-17T23:00:00+00:00", { head: "abc", status: "fail", log: "/l" });
   assert.deepEqual(epicPhase([failed]).check, { state: "fail", head: "abc", at: Date.parse("2026-11-17T23:00:00Z"), log: "/l" });
@@ -168,6 +168,27 @@ test("the epic phase: the last epic check (running, passed, failed) and the last
   assert.deepEqual(pr("https://github.com/acme/api/pull/42"), { url: "https://github.com/acme/api/pull/42", label: "api#42" });
   assert.deepEqual(pr(42), { url: null, label: "#42" });
   assert.deepEqual(pr({ number: 42, url: "https://github.com/acme/api/pull/42", state: "OPEN" }), { url: "https://github.com/acme/api/pull/42", label: "#42 open" });
+});
+
+test("the epic status: the current one from fleet status --json first, else the last wave's event", () => {
+  const live = { closed: 55, total: 62, followups: ["e.1", "e.2", "e.3"], untriaged: [], pr: "https://github.com/acme/api/pull/9" };
+  const snap = normalize({ epic: { id: "e", status: live }, beads: [] }, "/r");
+  assert.deepEqual(snap.epic.status, { closed: 55, total: 62, followups: ["e.1", "e.2", "e.3"], untriaged: [], pr: { url: live.pr, label: "api#9" } });
+  const event = { status: statusOf({ closed: 50, total: 62, followups: ["e.1"] }) };
+  assert.equal(currentStatus(snap, event), snap.epic.status, "the tracker's, read now, wins");
+  // An older agent-fleet (no epic.status in the JSON) or a tracker that can't say (null): the event's.
+  assert.equal(currentStatus(normalize({ epic: { id: "e" }, beads: [] }, "/r"), event), event.status);
+  assert.equal(currentStatus(normalize({ epic: { id: "e", status: null }, beads: [] }, "/r"), event), event.status);
+  assert.equal(currentStatus(normalize({ epic: { id: "e" }, beads: [] }, "/r"), { status: null }), null);
+});
+
+test("follow-ups: only the untriaged wait for triage; without untriaged (fleet < 0.39) no triage claim", () => {
+  // An epic with 16 open follow-ups, none waiting for triage.
+  const ids = Array.from({ length: 16 }, (_, i) => `e.${i + 1}`);
+  assert.deepEqual(followupCounts(statusOf({ followups: ids, untriaged: [] })), { triage: [], rest: 16, known: true });
+  assert.deepEqual(followupCounts(statusOf({ followups: ids, untriaged: ["e.3", "e.9"] })), { triage: ["e.3", "e.9"], rest: 14, known: true });
+  assert.deepEqual(followupCounts(statusOf({ followups: ids })), { triage: [], rest: 16, known: false });
+  assert.deepEqual(followupCounts(null), { triage: [], rest: 0, known: false });
 });
 
 test("a resize handle's drag: the pointer's move in layout units, bigger upward where the sign says so", async () => {

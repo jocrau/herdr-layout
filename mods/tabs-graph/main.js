@@ -159,7 +159,7 @@ export default class Tabs extends View {
       .hover(s => s.bg(t.hover).text_color(t.foreground)).on_mouse_down("left", stop).tooltip(tip)
       .on_click(action).child(svg(`mods/tabs-graph/icons/${id}.svg`).size(15));
     const visible = (id) => { const n = find(root, id); return Boolean(n && !n.hidden); };
-    // No link for the side panel (Preview, Changes): the file browser and the git graph cover them; ⌘⇧O still opens it.
+    // No link for the side panel (Preview, Changes): the file browser and the git graph cover them; ⌘⌥O still opens it.
     const sides = [["prs", "prs", "PR board"], ["fleet", "fleet", "Fleet board"]]
       .filter(([, id]) => find(root, id));
     return h_flex().size_full().min_w(0).px(10).pl(lightsPadding).gap(3).items_center().bg(t.chrome).border_b(1).border_color(t.border)
@@ -171,9 +171,9 @@ export default class Tabs extends View {
         .children(shown.map(item))
         .child(button("tab-new", "+", () => openOverlay({ mod: "new-menu", kind: "popup", width: 250, height: 512 }))))
       .child(div().w(8).flex_none())
-      .child(link("files", "File browser (⌘O)", () => run("mod.open", { name: "file-browser" })))
-      .child(link("git", "Git graph (⌘G)", () => run("mod.open", { name: "git-graph" })))
-      .child(link("beads", "Beads (⌘B)", () => run("mod.open", { name: "beads" })))
+      .child(link("files", "File browser (⌘⇧O)", () => run("mod.open", { name: "file-browser" })))
+      .child(link("git", "Git graph (⌘⇧G)", () => run("mod.open", { name: "git-graph" })))
+      .child(link("beads", "Beads (⌘⇧B)", () => run("mod.open", { name: "beads" })))
       .when(sides.length > 0, el => el.child(div().w(1).h(16).mx(4).flex_none().bg(t.border)))
       .children(sides.map(([icon, id, name]) => link(icon, `${name} (${SHORTCUTS[id]})`, () => run("layout.toggle", { id }), visible(id))))
       .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/tabs-graph/win-min.svg").size(16) : "−", () => run("window.minimize")))

@@ -19,6 +19,7 @@ import { VIEWS, SPANS, HIDDEN_CHECK, dur, shortener, graph, tipText } from "./mo
 import { closeSide } from "./lib/sidecolumn.js";
 import { splitTarget } from "./env.js";
 import { boardHeader, boardTop } from "./lib/boardheader.js";
+import { footerBar } from "./lib/bars.js";
 import { TailSize } from "./lib/tailpanel.js";
 
 export default class FleetBoard extends View {
@@ -222,12 +223,12 @@ export default class FleetBoard extends View {
       .when(Boolean(this.pinned) && !this.help, (el) => el.child(this.pinned))
       .child(v_flex().id(`fb-${this.view}`).flex_1().min_h(0).pb(8).overflow_y_scrollbar().track_scroll(this.scroll).children(body))
       .when(this.tailOn, (el) => el.child(this.tailPanel(t, mono, short, now)))
-      .child(h_flex().id("footer").px(10).py(5).border_t_1().border_color(t.border).gap(6).items_center()
+      .child(footerBar(h_flex().id("footer"), t).px(10).gap(6)
         .tooltip(tipText(elsewhere ? `No run could be read in ${missed}: ${this.problem.message}` : `${this.cwd}\nupdated ${new Date(this.last).toLocaleTimeString()}`))
-        .child(div().min_w(0).truncate().text_size(11).text_color(elsewhere ? t.ansi3 : t.dim).child(elsewhere ? `${repo} · ${missed.split("/").pop()} has no run` : repo))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(`· ${dur(now - this.last)} ago`))
+        .child(div().min_w(0).truncate().text_color(elsewhere ? t.ansi3 : t.dim).child(elsewhere ? `${repo} · ${missed.split("/").pop()} has no run` : repo))
+        .child(div().flex_none().child(`· ${dur(now - this.last)} ago`))
         .child(div().flex_1())
-        .child(div().flex_none().text_size(11).text_color(t.dim).child("j k · ⏎ details · space act · / · ? keys")));
+        .child(div().flex_none().child("j k · ⏎ details · space act · / · ? keys")));
   }
 }
 

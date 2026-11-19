@@ -7,6 +7,32 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status`, `preview-plus` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- Header and footer rows line up across the window: every header is 42 px (the brand row, the tab bar, the side
+  panel's and every board's header) and every footer 28 px with 12 px text (Settings, the status bar, the fleet
+  board's, the PR board's and the file browser's footer), from one place (`lib/bars.js`).
+- Keys: ⌘⇧ and a letter opens what you'd expect for it (the file browser and beads as dialogs, the PR and fleet
+  boards as panes), ⌘⌥ and that letter the other form (the side panel, the PR view, the fleet dialog). The file
+  browser dialog moves from ⌘O to ⌘⇧O, the side panel from ⌘⇧O to ⌘⌥O, beads from ⌘B to ⌘⇧B, and ⌘B hides or
+  shows the sidebar.
+- The side panel (⌘⌥O) shows the file browser in place of Preview Plus: one column, the tree or the file it
+  shows (⏎ or a click opens it, esc or ← goes back to the tree, esc again closes the panel), following the
+  focused terminal to another repository. Its tab is "Files".
+- `fleet-board`: a second click on the wave pill takes its question back (stop this wave? / start the next?), as
+  Esc does; the pill shows pressed while its question is open.
+- `pr-board`: findings made before the last push (pr-flow 0.41's `old_findings`) show dim with the head they were
+  made at ("2 findings at 2f684b0"; "Review found 1 high at 2f684b0, head moved"), instead of disappearing; a
+  re-review says which still hold. A blocker finding is red and listed first, as a high one.
+- `pr-board`: section headings stand out from the cards (Samuel Skinner, PR #3): each group (Your move, Waiting on
+  others, …) is in the foreground colour with a rule under it and its count in the accent colour, and Your move's
+  action headings (Fix, Review, Merge, …) are a step bolder, in the board's own type sizes.
+- `pr-board`: one type scale, three sizes: a card's title 13 px; what to do next, a waiting PR's title, the action
+  headings and the details 12.5 px; PR numbers, context lines, who and since, section headings and buttons 12 px
+  (were 10–11.5 px). A board header's facts are 12 px, as the footers.
+- `fleet-board`: the Epic card says "N wait for your triage" only for the follow-ups `fleet triage` lists (open,
+  unassigned; agent-fleet 0.39's `untriaged`); the decided ones show as a quiet "M open follow-ups (decided;
+  listed in the PR to main)", and an older agent-fleet gets "N open follow-ups" without a triage claim. The
+  status comes from `fleet status --json` (read from the tracker on every read, every minute while the pane
+  shows), so a triage or close shows without a wave; the last wave's epic.status event is the fallback.
 - `pr-board`: cards stay put when you act. A PR whose agent you started (a review, a self-check) stays in Your
   move where it was, its second line saying what the agent does, instead of moving to Waiting on others. The
   order holds while you work in the pane (the pointer over it, a key or click just now, a question or menu

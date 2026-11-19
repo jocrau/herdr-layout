@@ -1,7 +1,7 @@
 import { View, div } from "gpui-kit";
 import { focused, terminals, hc, exec, home, appHome, openOverlay, closeOverlay, props, shared, setShared, notify } from "herdr";
 
-// cmd+b (`mod.open:beads`): toggle beads-view for the focused terminal's repo
+// cmd+shift+b (`mod.open:beads`): toggle beads-view for the focused terminal's repo
 // as a dialog over the tab, with the keyboard on it.
 // This mod is only a launcher: it starts beads-view, shows it and closes itself.
 // Esc / q in beads-view ends the program, which closes the dialog too.
@@ -39,10 +39,10 @@ async function showWhenSeen(cx, terminal) {
     }
     await cx.sleep(50);
   }
-  // Not seen: end it, so it doesn't run on unseen and the next ⌘B doesn't spend a press closing it.
+  // Not seen: end it, so it doesn't run on unseen and the next ⌘⇧B doesn't spend a press closing it.
   await hc(["kill", terminal]).catch(() => {});
   if (shared(KEY)?.terminal === terminal) setShared(KEY, null);
-  notify({ title: "Beads", body: `beads-view (${terminal}) didn't show up: try ⌘B again.`, level: "error" });
+  notify({ title: "Beads", body: `beads-view (${terminal}) didn't show up: try ⌘⇧B again.`, level: "error" });
 }
 
 async function toggle() {

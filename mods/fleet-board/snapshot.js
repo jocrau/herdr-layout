@@ -58,6 +58,8 @@ export function normalize(raw, cwd) {
       beads: { total: 0, done: 0, dropped: 0, parked: 0, running: 0, ...(e.beads ?? {}) },
       wave: { running: false, ...e.wave, started: ms(e.wave?.started), last_ended: e.wave?.last_ended ? { ...e.wave.last_ended, at: ms(e.wave.last_ended.at) } : null },
       usage: e.usage ? { ...e.usage, reset_5h: ms(e.usage.reset_5h), reset_7d: ms(e.usage.reset_7d) } : null,
+      // The epic's status now, read from the tracker on every call (fleet 0.39); null before, or when it can't say.
+      status: e.status ? statusOf(e.status) : null,
     },
     beads,
     gauges: {
@@ -72,7 +74,7 @@ export function normalize(raw, cwd) {
 // The epic-level phase, from the run's epic.* events (events.jsonl; `fleet status --json` carries neither):
 //   check: the last epic check on the epic branch: { state: "running", head, since } or { state: "pass" | "fail",
 //     head, at, log }; null before the first.
-//   status: the last epic.status: { closed, total, followups: [ids], pr } (pr: the epic's PR to main, or null).
+//   status: the last epic.status: statusOf's shape (pr: the epic's PR to main, or null).
 export function epicPhase(lines) {
   let check = null, status = null;
   for (const line of lines) {
@@ -83,11 +85,32 @@ export function epicPhase(lines) {
       check = d.status === "started" ? { state: "running", head: d.head ?? null, since: ms(ev.ts) }
         : { state: d.status === "pass" ? "pass" : "fail", head: d.head ?? null, at: ms(ev.ts), log: d.log ?? null };
     } else if (ev?.type === "epic.status") {
-      status = { closed: d.closed ?? 0, total: d.total ?? 0, followups: Array.isArray(d.followups) ? d.followups : [], pr: prOf(d.pr) };
+      status = statusOf(d);
     }
   }
   return { check, status };
 }
+// An epic status (an epic.status event's detail, or `fleet status --json`'s epic.status): { closed, total,
+// followups: [ids] (the agents' follow-ups not closed, decided or not), untriaged: [ids] (those waiting for
+// `fleet triage`) or null when this agent-fleet doesn't say (before 0.39), pr }.
+export function statusOf(d) {
+  const ids = (v) => (Array.isArray(v) ? v : []);
+  return { closed: d.closed ?? 0, total: d.total ?? 0, followups: ids(d.followups),
+    untriaged: Array.isArray(d.untriaged) ? d.untriaged : null, pr: prOf(d.pr) };
+}
+
+// The follow-ups as the board says them: `triage` (ids waiting for `fleet triage`), `rest` (open ones decided
+// already, or, when this agent-fleet doesn't say which wait (`known` false), every open one, with no triage claim).
+export function followupCounts(st) {
+  const fu = st?.followups ?? [], un = st?.untriaged;
+  if (!Array.isArray(un)) return { triage: [], rest: fu.length, known: false };
+  const waiting = new Set(un);
+  return { triage: un, rest: fu.filter((id) => !waiting.has(id)).length, known: true };
+}
+
+// The status to show: the current one from `fleet status --json`, else the last wave's epic.status event.
+export const currentStatus = (snap, phase) => snap?.epic?.status ?? phase?.status ?? null;
+
 // The PR to main as { url, label }: a URL, a number, or an object with url/number (null when none).
 function prOf(pr) {
   if (!pr) return null;

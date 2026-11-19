@@ -5,6 +5,7 @@ import { v_flex, h_flex, Textarea } from "gpui-base";
 import { theme, run } from "herdr";
 import { STEPS, VIEWS, SPANS, fleetTailLines, SECTIONS, ROW, OK, PHASES, phaseOf, dur, spanLabel, AGENT_STEPS, hm, timeline, gateText, asks, fixRounds, fixSessions, natural, mergedAt, tipText } from "./model.js";
 import { phaseColor, shaped, swatch } from "./ui.js";
+import { followupCounts } from "./snapshot.js";
 import { shown } from "./env.js";
 import { boardHeader, boardTop } from "./lib/boardheader.js";
 import { tailPanel } from "./lib/tailpanel.js";
@@ -188,10 +189,14 @@ export const ViewsMethods = {
     else if (chk?.state === "fail") rows.push(row("✗", t.ansi1, `Epic check failed at ${sha(chk.head)} · ${dur(now - (chk.at ?? now))} ago`, t.ansi1,
       chk.log ? btn("epic-log", "log", chk.log, () => this.inTerminal(["less", "+G", chk.log], `epic check ${e.id}`)) : null));
     if (st) {
-      const open = Math.max(0, st.total - st.closed), fu = st.followups.length;
+      const open = Math.max(0, st.total - st.closed), { triage, rest, known } = followupCounts(st);
       rows.push(row(open ? "○" : "✓", open ? t.dim : t.ansi2, `${st.closed} of ${st.total} epic beads done${open ? ` · ${open} open` : ""}`, t.muted));
-      if (fu) rows.push(row("!", t.ansi3, `${fu} follow-up${fu === 1 ? "" : "s"} wait for your triage`, t.foreground,
-        btn("epic-triage", "triage", `fleet triage ${e.id}: the follow-ups agents filed, and the changes they proposed. No run takes them before you decide; they don't hold the PR to main.\n${st.followups.join(" ")}`, () => this.inTerminal(["fleet", "triage", e.id], `triage ${e.id}`))));
+      const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+      // Only open, unassigned follow-ups wait for triage (fleet 0.39's untriaged); accepted or deferred ones stay
+      // open until they reach main. An agent-fleet that doesn't say which gets no triage claim.
+      if (triage.length) rows.push(row("!", t.ansi3, `${n(triage.length, "follow-up waits", "follow-ups wait")} for your triage`, t.foreground,
+        btn("epic-triage", "triage", `fleet triage ${e.id}: the follow-ups agents filed, and the changes they proposed. No run takes them before you decide; they don't hold the PR to main.\n${triage.join(" ")}`, () => this.inTerminal(["fleet", "triage", e.id], `triage ${e.id}`))));
+      if (rest) rows.push(row("·", t.dim, `${n(rest, "open follow-up", "open follow-ups")}${known ? " (decided; listed in the PR to main)" : ""}`, t.muted));
     }
     const pr = st?.pr;
     if (pr) rows.push(row("↗", t.accent, `PR to main: ${pr.label}`, t.foreground,
@@ -226,16 +231,18 @@ export const ViewsMethods = {
     const br = e.epic_branch, chk = s.epicPhase?.check;
     // A wave doing only the epic check (no bead at work) says so, instead of looking idle.
     const checking = wave.running && chk?.state === "running" && !counts.running;
+    const asking = this.confirm?.from === "wave"; // its question is open: the pill shows pressed, a click takes it back
     const wavePill = wave.running
-      ? h_flex().id("wave").flex_none().gap(4).items_center().px(6).h(18).rounded(9).bg(t.hover)
-        .hover((x) => x.bg(t.border)).on_click((_e, cx) => { this.waveAction(); cx.notify(); })
-        .tooltip(`Wave ${wave.number} running (pid ${wave.pid}) since ${wave.started ? new Date(wave.started).toLocaleTimeString() : "?"}${checking ? `\nChecking the epic branch at ${String(chk.head ?? "").slice(0, 7)} since ${chk.since ? new Date(chk.since).toLocaleTimeString() : "?"}` : ""}\nClick to stop it (asks first)`)
+      ? h_flex().id("wave").flex_none().gap(4).items_center().px(6).h(18).rounded(9).bg(asking ? t.border : t.hover)
+        .when(asking, (x) => x.border_1().border_color(t.accent)).hover((x) => x.bg(t.border)).on_click((_e, cx) => { this.waveAction(); cx.notify(); })
+        .tooltip(`Wave ${wave.number} running (pid ${wave.pid}) since ${wave.started ? new Date(wave.started).toLocaleTimeString() : "?"}${checking ? `\nChecking the epic branch at ${String(chk.head ?? "").slice(0, 7)} since ${chk.since ? new Date(chk.since).toLocaleTimeString() : "?"}` : ""}\n${asking ? "Click again or esc: don't stop it" : "Click to stop it (asks first)"}`)
         .child(div().size(6).rounded(3).bg(t.ansi2).loop("opacity", { from: 0.35, to: 1, period: 1400 }))
         .child(div().text_size(11.5).text_color(t.foreground).child(checking ? `epic check · ${dur(now - (chk.since ?? now))}`
           : wave.started ? `wave ${wave.number} · ${dur(now - wave.started)}` : `wave ${wave.number ?? ""}`.trim()))
-      : h_flex().id("wave").flex_none().gap(4).items_center().px(6).h(18).rounded(9).border_1().border_color(t.border)
+      : h_flex().id("wave").flex_none().gap(4).items_center().px(6).h(18).rounded(9).border_1().border_color(asking ? t.accent : t.border)
+        .when(asking, (x) => x.bg(t.hover))
         .hover((x) => x.bg(t.hover)).on_click((_e, cx) => { this.waveAction(); cx.notify(); })
-        .tooltip(tipText(`${wave.last_ended ? `Wave ${wave.number} ended: ${wave.last_ended.reason}, ${new Date(wave.last_ended.at).toLocaleString()}` : "No wave running"}\nClick to start the next one (asks first)`))
+        .tooltip(tipText(`${wave.last_ended ? `Wave ${wave.number} ended: ${wave.last_ended.reason}, ${new Date(wave.last_ended.at).toLocaleString()}` : "No wave running"}\n${asking ? "Click again or esc: don't start it" : "Click to start the next one (asks first)"}`))
         .child(div().size(6).rounded(3).bg(t.dim))
         .child(div().max_w(150).truncate().text_size(11.5).text_color(t.muted).child(wave.last_ended?.at ? `${wave.last_ended.reason} · ${dur(now - wave.last_ended.at)} ago` : "no wave"));
     const head = boardHeader(t, {

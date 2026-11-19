@@ -11,15 +11,20 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle, Popup } from "gpui-base";
 import { theme, settings, nextCommand, props, layout, notify, watchFolder, checking, closeOverlay } from "herdr";
-import { readQueue, lastQueue, queueRows, stateDir, doVerb, verbPlan, jobFor, jobText, jobLabel, detailJob, jobActive, jobDetail, findingsText, jobShow, jobStop, jobTerminal, jobLog, openPrView, talkTab, prTab, tabName, parseKey, draftReady, storedDraft, capabilities } from "./lib/prflow.js";
+import { readQueue, lastQueue, queueRows, stateDir, doVerb, verbPlan, jobFor, jobText, jobLabel, detailJob, jobActive, jobDetail, findingsText, oldFindingsText, jobShow, jobStop, jobTerminal, jobLog, openPrView, talkTab, prTab, tabName, parseKey, draftReady, storedDraft, capabilities } from "./lib/prflow.js";
 import { tabDot, alpha, numWidth } from "./lib/prrows.js";
 import { GROUPS, arrange, moveOf, nextStep, people, waitingOn, splitTitle, ago, actionsFor, agentWaits, agentAtWork, placeText } from "./model.js";
 import { tipText } from "./lib/tiptext.js";
 import { closeSide } from "./lib/sidecolumn.js";
 import { boardHeader, boardTop } from "./lib/boardheader.js";
+import { footerBar } from "./lib/bars.js";
 import { tailPanel, TailSize } from "./lib/tailpanel.js";
 
 const LINE = 20, GAP = 6; // a row's first line, and the gap between its columns
+// The board's type scale: one size per kind of text, so text of the same kind reads the same in every group and card.
+// title: a card's title; body: what to do next, a waiting PR's title, Your move's action headings, the details' text;
+// meta: PR numbers, context lines, who and since, facts, section headings, buttons and links. Nothing below meta.
+const TYPE = { title: 13, body: 12.5, meta: 12 };
 // Where a row's text column starts: the row's padding and border, the dot, the number column.
 const textAt = (numW) => 8 + 2 + 8 + GAP + numW + GAP;
 const SYNC_EVERY = 600000; // with GitHub (only what changed), while shown
@@ -359,19 +364,19 @@ export default class PrBoard extends View {
         buttons: [{ id: "pr-sync", label: "↻", tip: tipText("Sync with GitHub now (s)"), color: this.loading ? t.accent : null,
           pulse: Boolean(this.loading), onClick: (cx) => this.read(cx, "force") }],
       }),
-      this.err ? div().w_full().text_size(11.5).text_color(t.ansi1).child(this.err) : null,
-      ...warnings.map((w) => div().w_full().text_size(11).text_color(t.ansi3).child(w)));
+      this.err ? div().w_full().text_size(TYPE.meta).text_color(t.ansi1).child(this.err) : null,
+      ...warnings.map((w) => div().w_full().text_size(TYPE.meta).text_color(t.ansi3).child(w)));
   }
 
   // The question before an outward action: under its PR (rows below make room; nothing above moves), else, when the
   // PR isn't drawn (folded, filtered), at the top.
   confirmBar(t, numW = null) {
     const c = this.confirm;
-    const btn = (id, label, primary, go) => div().id(id).px(10).py(3).rounded(5).text_size(12).cursor_pointer()
+    const btn = (id, label, primary, go) => div().id(id).px(10).py(3).rounded(5).text_size(TYPE.meta).cursor_pointer()
       .bg(primary ? t.solid ?? t.accent : t.raised).text_color(primary ? t.solid_foreground ?? t.background : t.foreground)
       .hover((e) => e.opacity(0.85)).on_click(go).child(label);
     return v_flex().px(10).py(8).gap(6).bg(t.raised).when(numW === null, (e) => e.border_b_1().border_color(t.border)).when(numW !== null, (e) => e.pl(textAt(numW)))
-      .child(div().text_size(12).text_color(t.foreground).child(c.text))
+      .child(div().text_size(TYPE.body).text_color(t.foreground).child(c.text))
       .child(h_flex().gap(6)
         .child(btn("pr-confirm-yes", `${c.verb[0].toUpperCase()}${c.verb.slice(1)} ⏎`, true, (_e, cx) => this.runVerb(c.verb, c.row, cx)))
         .child(btn("pr-confirm-no", "Cancel esc", false, (_e, cx) => { this.confirm = null; cx.notify(); })));
@@ -398,7 +403,7 @@ export default class PrBoard extends View {
     // reason that only names the section ("draft").
     const said = `${r.detail ?? ""} ${r.title ?? ""} ${nextStep(r).text}`.toLowerCase();
     const reasons = (rec.reasons ?? []).filter((x) => /\s/.test(x.trim()) && !/\bjob-\d{8}-/.test(x) && !said.includes(x.toLowerCase().replace(/^re-review: head moved since/, "re-review what changed since")));
-    const pill = (id, label, tip, primary, go) => div().id(id).px(7).py(2).rounded(5).text_size(11.5).cursor_pointer()
+    const pill = (id, label, tip, primary, go) => div().id(id).px(7).py(2).rounded(5).text_size(TYPE.meta).cursor_pointer()
       .border_1().border_color(primary ? t.accent : t.border).text_color(primary ? t.accent : t.foreground)
       .hover((e) => e.bg(t.hover)).tooltip(tipText(tip)).on_click(go).child(label);
     // Only what's possible now (actionsFor in model.js, pr-flow's labels): the next step's action, its
@@ -417,21 +422,21 @@ export default class PrBoard extends View {
       const p = verbPlan(r, v, verbs);
       return pill(`pr-${r.key}-${v}`, again(v) ? `${p.label} again` : p.label, tip(v), primary && !p.disabled, (_e, cx) => this.runVerb(v, r, cx)).when(Boolean(p.disabled), (e) => e.opacity(0.5));
     };
-    const quiet = (v) => div().id(`pr-${r.key}-${v}`).px(5).py(2).text_size(11.5).text_color(t.dim).cursor_pointer().hover((e) => e.text_color(t.foreground))
+    const quiet = (v) => div().id(`pr-${r.key}-${v}`).px(5).py(2).text_size(TYPE.meta).text_color(t.dim).cursor_pointer().hover((e) => e.text_color(t.foreground))
       .tooltip(tipText(tip(v))).on_click((_e, cx) => this.runVerb(v, r, cx)).child(verbPlan(r, v, verbs).label.toLowerCase());
     // A quiet text link (where to look; the job's output and stop).
-    const link = (id, label, tip, go, hot = false) => div().id(id).px(5).py(2).text_size(11.5).cursor_pointer()
+    const link = (id, label, tip, go, hot = false) => div().id(id).px(5).py(2).text_size(TYPE.meta).cursor_pointer()
       .text_color(hot ? t.accent : t.muted).hover((e) => e.text_color(t.foreground)).tooltip(tipText(tip)).on_click(go).child(label);
     // Housekeeping on the right of the buttons: one as a quiet word, more under ⋯.
     const menuOpen = this.moreOpen === r.key;
     const more = acts.keep.length <= 1 ? acts.keep.map(quiet)
-      : [Popup.new(`pr-${r.key}-more`, div().id(`pr-${r.key}-more-btn`).px(6).py(2).rounded(4).text_size(12).cursor_pointer()
+      : [Popup.new(`pr-${r.key}-more`, div().id(`pr-${r.key}-more-btn`).px(6).py(2).rounded(4).text_size(TYPE.meta).cursor_pointer()
           .text_color(menuOpen ? t.foreground : t.dim).hover((e) => e.text_color(t.foreground)).tooltip(tipText(acts.keep.map((v) => verbPlan(r, v, verbs).label).join(", ")))
           .on_click((_e, cx) => { this.moreOpen = menuOpen ? null : r.key; cx.notify(); }).child("⋯"))
         .anchor("top_right")
         .when(menuOpen, (e) => e.content(v_flex().id(`pr-${r.key}-more-menu`).mt(4).py(4).min_w(140).rounded(6).bg(t.raised ?? t.background).border_1().border_color(t.border).shadow_lg()
           .on_mouse_down_out((_e, cx) => { this.moreOpen = null; cx.notify(); })
-          .children(acts.keep.map((v) => div().id(`pr-${r.key}-more-${v}`).px(10).py(3).text_size(11.5).text_color(t.foreground).cursor_pointer()
+          .children(acts.keep.map((v) => div().id(`pr-${r.key}-more-${v}`).px(10).py(3).text_size(TYPE.meta).text_color(t.foreground).cursor_pointer()
             .hover((e) => e.bg(t.hover)).tooltip(tipText(tip(v))).on_click((_e, cx) => { this.moreOpen = null; this.runVerb(v, r, cx); }).child(verbPlan(r, v, verbs).label)))))];
     const actions = h_flex().gap(4).items_start()
       .child(h_flex().flex_1().min_w(0).gap(4).flex_wrap().items_center()
@@ -448,7 +453,7 @@ export default class PrBoard extends View {
     return v_flex().pl(textAt(numW)).pr(10).pt(2).pb(8).gap(10).bg(alpha(t.raised, "aa"))
       .child(v_flex().gap(5)
         .when(Boolean(job), (e) => e.child(this.jobLine(t, r, job, link)))
-        .children(reasons.filter((x) => !(draft && /draft ready/i.test(x))).slice(0, 3).map((x) => div().text_size(11.5).text_color(t.foreground).child(x)))
+        .children(reasons.filter((x) => !(draft && /draft ready/i.test(x))).slice(0, 3).map((x) => div().text_size(TYPE.body).text_color(t.foreground).child(x)))
         .child(actions))
       .child(where);
   }
@@ -462,11 +467,11 @@ export default class PrBoard extends View {
     const ended = j.ended_at ? `${ago(Date.now() - Date.parse(j.ended_at))} ago` : null;
     const text = active ? `◷ ${d.state}`
       : failed ? `${label} failed${ended ? ` ${ended}` : ""}: ${d.error}`
-      : j.state === "done" && j.artifact?.kind === "findings" ? `${label} found ${findingsText(r.rec?.open, true) || "nothing open"}${ended ? ` · ${ended}` : ""}`
+      : j.state === "done" && j.artifact?.kind === "findings" ? `${label} found ${findingsText(r.rec?.open, true) || oldFindingsText(r.rec, true) || "nothing open"}${ended ? ` · ${ended}` : ""}`
       : `${d.state}${ended ? ` · ${ended}` : ""}`;
     const cost = typeof j.cost === "number" ? `$${j.cost.toFixed(2)}` : null;
     return h_flex().gap(2).items_start()
-      .child(div().id(`pr-${r.key}-job`).flex_1().min_w(0).when(!failed, (e) => e.truncate()).py(2).text_size(11.5)
+      .child(div().id(`pr-${r.key}-job`).flex_1().min_w(0).when(!failed, (e) => e.truncate()).py(2).text_size(TYPE.body)
         .text_color(failed ? t.ansi1 : active ? t.accent : t.foreground)
         .tooltip(tipText([d.state, d.meta, cost].filter(Boolean).join("\n"))).child(text))
       .child(link(`pr-${r.key}-job-out`, active ? "output ↗" : "log ↗",
@@ -506,8 +511,8 @@ export default class PrBoard extends View {
       ["s", "sync with GitHub now"], ["r", "read the queue again"], ["/", "filter (esc clears)"], ["?", "this list"],
     ];
     return v_flex().px(10).py(10).gap(3)
-      .child(div().pb(4).text_size(11).font_semibold().text_color(t.dim).child("KEYS"))
-      .children(rows.map(([k, w]) => h_flex().gap(10).child(div().w(80).flex_none().text_size(11.5).child(k)).child(div().flex_1().text_size(11.5).text_color(t.muted).child(w))));
+      .child(div().pb(4).text_size(TYPE.meta).font_semibold().text_color(t.dim).child("KEYS"))
+      .children(rows.map(([k, w]) => h_flex().gap(10).child(div().w(80).flex_none().text_size(TYPE.body).child(k)).child(div().flex_1().text_size(TYPE.body).text_color(t.muted).child(w))));
   }
 
   // ---------- the list, by your next move (model.js)
@@ -522,7 +527,7 @@ export default class PrBoard extends View {
       .when(sel, (e) => e.bg(t.hover)).when(flash, (e) => e.bg(alpha(t.accent, "22"))).hover((e) => e.bg(t.hover))
       .when(Boolean(away), (e) => e.opacity(0.55))
       .child(h_flex().w(8).h(LINE).flex_none().items_center().child(tabDot(t, r.key)))
-      .child(div().w(numW).h(LINE).flex_none().flex().items_center().justify_end().font_family(mono).text_size(11.5).text_color(color ?? t.dim).child(`#${k?.n ?? "?"}`))
+      .child(div().w(numW).h(LINE).flex_none().flex().items_center().justify_end().font_family(mono).text_size(TYPE.meta).text_color(color ?? t.dim).child(`#${k?.n ?? "?"}`))
       .child(text);
   }
 
@@ -535,20 +540,21 @@ export default class PrBoard extends View {
     // The second line: where it goes; else, while a job runs, what the agent does (the next step waits for it); else the next step.
     const working = jobActive(job) && !open;
     const pushed = rec.lastPush ? ago(now - Date.parse(rec.lastPush)) : "";
-    const nFound = Object.values(rec.open ?? {}).reduce((a, n) => a + (n > 0 ? n : 0), 0);
+    const count = (o) => Object.values(o ?? {}).reduce((a, n) => a + (n > 0 ? n : 0), 0);
+    const nFound = count(rec.open), nOld = nFound ? 0 : count(rec.old); // findings at the head; else from an older one
     const mark = (m) => (m === "✓" ? t.ansi2 : m === "✗" ? t.ansi1 : t.dim);
     const sep = () => div().flex_none().text_color(t.dim).child("·");
     const text = v_flex().flex_1().min_w(0).gap(1)
       .child(h_flex().min_h(LINE).gap(6).items_center()
-        .child(div().flex_1().min_w(0).when(!open, (e) => e.truncate()).text_size(12.5).font_semibold().text_color(t.foreground).child(title))
-        .when(Boolean(tag), (e) => e.child(div().flex_none().px(4).rounded(3).bg(alpha(t.muted, "1a")).text_size(10).text_color(t.dim).child(tag))))
-      .child(div().min_w(0).when(!open, (e) => e.truncate()).text_size(12)
+        .child(div().flex_1().min_w(0).when(!open, (e) => e.truncate()).text_size(TYPE.title).font_semibold().text_color(t.foreground).child(title))
+        .when(Boolean(tag), (e) => e.child(div().flex_none().px(4).rounded(3).bg(alpha(t.muted, "1a")).text_size(TYPE.meta).text_color(t.dim).child(tag))))
+      .child(div().min_w(0).when(!open, (e) => e.truncate()).text_size(TYPE.body)
         .text_color(leaving ? t.muted : working ? t.accent : step.problem ? t.ansi1 : t.accent)
         .child(leaving ? `→ ${leaving}` : working ? `◷ ${jobText(job, r)}` : step.text))
-      .when(Boolean(job) && !working && !open, (e) => e.child(div().min_w(0).truncate().text_size(11.5).text_color(job.state === "failed" ? t.ansi1 : t.muted).child(`◷ ${jobText(job, r)}`)))
+      .when(Boolean(job) && !working && !open, (e) => e.child(div().min_w(0).truncate().text_size(TYPE.meta).text_color(job.state === "failed" ? t.ansi1 : t.muted).child(`◷ ${jobText(job, r)}`)))
       // A draft or reword job stored a comment draft: it's ready to read, post or reword in the PR view.
-      .when(!job && Boolean(ready), (e) => e.child(div().min_w(0).when(!open, (x) => x.truncate()).text_size(11.5).text_color(t.ansi6 ?? t.accent).child(`✎ draft v${ready.v} ready: read it in the PR view (d)`)))
-      .child(h_flex().min_w(0).gap(4).items_center().overflow_hidden().text_size(11).text_color(t.dim)
+      .when(!job && Boolean(ready), (e) => e.child(div().min_w(0).when(!open, (x) => x.truncate()).text_size(TYPE.meta).text_color(t.ansi6 ?? t.accent).child(`✎ draft v${ready.v} ready: read it in the PR view (d)`)))
+      .child(h_flex().min_w(0).gap(4).items_center().overflow_hidden().text_size(TYPE.meta).text_color(t.dim)
         .child(div().flex_none().max_w(130).truncate().child(k?.repo ?? "")).child(sep())
         .child(div().flex_none().text_color(p.author === "you" ? t.muted : t.dim).child(p.author))
         .when(p.others.length > 0, (e) => e.child(div().flex_none().child("→"))
@@ -561,10 +567,14 @@ export default class PrBoard extends View {
         .when(Boolean(r.size), (e) => e.child(sep()).child(div().flex_none().child(r.size)))
         // Open findings as a count ("6 findings", red with a high one, amber with a medium), the kinds in its tooltip.
         .when(nFound > 0, (e) => e.child(sep()).child(div().id(`pr-${r.key}-found`).flex_none().tooltip(tipText(findingsText(rec.open, true)))
-          .text_color(rec.open?.critical || rec.open?.high ? t.ansi1 : rec.open?.medium ? t.ansi3 : t.muted).child(`${nFound} finding${nFound === 1 ? "" : "s"}`))))
+          .text_color(rec.open?.blocker || rec.open?.critical || rec.open?.high ? t.ansi1 : rec.open?.medium ? t.ansi3 : t.muted).child(`${nFound} finding${nFound === 1 ? "" : "s"}`)))
+        // Findings from before the last push: dim, with the head they were made at; a re-review says which still hold.
+        .when(nOld > 0, (e) => e.child(sep()).child(div().id(`pr-${r.key}-old`).flex_none()
+          .tooltip(tipText(`${oldFindingsText(rec, true)}: a re-review says which still hold`))
+          .child(`${nOld} finding${nOld === 1 ? "" : "s"} at ${rec.findingsSha ? String(rec.findingsSha).slice(0, 7) : "an older head"}`))))
       // Open: the PR's own facts (its branch → base, …) and what it changes, right under its context line.
-      .when(open && this.prFacts(r).length > 0, (e) => e.child(div().min_w(0).truncate().text_size(11).text_color(t.dim).child(this.prFacts(r).join(" · "))))
-      .when(open && Boolean(rec.about), (e) => e.child(div().min_w(0).pt(2).text_size(11.5).text_color(t.muted).child(`Changes: ${rec.about}`)));
+      .when(open && this.prFacts(r).length > 0, (e) => e.child(div().min_w(0).truncate().text_size(TYPE.meta).text_color(t.dim).child(this.prFacts(r).join(" · "))))
+      .when(open && Boolean(rec.about), (e) => e.child(div().min_w(0).pt(2).text_size(TYPE.meta).text_color(t.muted).child(`Changes: ${rec.about}`)));
     return this.cols(t, mono, r, numW, text, { sel: this.sel === r.key, problem: step.problem && !leaving, away })
       .on_click((_e, cx) => { this.touched(); this.sel = r.key; this.h.focus(); this.openKey = open || r.gone ? null : r.key; this.moreOpen = false; cx.notify(); });
   }
@@ -574,9 +584,9 @@ export default class PrBoard extends View {
     const { title } = splitTitle(r.title), w = waitingOn(r, me, now), sel = this.sel === r.key, job = jobFor(this.q, r, now);
     const who = leaving ? `→ ${leaving}` : job ? `◷ ${jobText(job, r)}` : w.who;
     const text = h_flex().flex_1().min_w(0).h(LINE).gap(6).items_center()
-      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(title))
-      .child(div().flex_none().max_w(job || leaving ? 200 : 130).truncate().text_size(11).text_color(leaving ? t.accent : job ? (job.state === "failed" ? t.ansi1 : t.accent) : t.dim).child(who))
-      .child(div().flex_none().w(28).text_right().text_size(11).text_color(t.dim).child(w.since));
+      .child(div().flex_1().min_w(0).truncate().text_size(TYPE.body).text_color(t.muted).child(title))
+      .child(div().flex_none().max_w(job || leaving ? 200 : 130).truncate().text_size(TYPE.meta).text_color(leaving ? t.accent : job ? (job.state === "failed" ? t.ansi1 : t.accent) : t.dim).child(who))
+      .child(div().flex_none().w(32).text_right().text_size(TYPE.meta).text_color(t.dim).child(w.since));
     return this.cols(t, mono, r, numW, text, { sel, h: 24 })
       .tooltip(tipText(`${r.short} · ${r.title}\n${nextStep(r).text || r.detail || ""}${job ? `\n${jobText(job, r)}` : ""}`))
       .on_click((_e, cx) => { this.touched(); this.sel = r.key; this.h.focus(); this.openKey = this.openKey === r.key || r.gone ? null : r.key; this.moreOpen = false; cx.notify(); });
@@ -585,7 +595,7 @@ export default class PrBoard extends View {
   body(t, mono) {
     const q = this.q, out = [], now = Date.now();
     this.order = []; this.drawn = new Map(); this.newCount = 0;
-    if (!q) return [div().p(14).text_size(12).text_color(t.dim).child(this.err ?? "Reading pr-flow's queue…")];
+    if (!q) return [div().p(14).text_size(TYPE.body).text_color(t.dim).child(this.err ?? "Reading pr-flow's queue…")];
     const me = q.me ?? null, all = this.rows(), numW = numWidth(all), byKey = new Map(all.map((r) => [r.key, r]));
     const live = arrange(all.filter((r) => this.match(r)));
     // Each PR's place in Your move, kept while an agent you started works on it (rows(), moveOf's row.held).
@@ -627,29 +637,38 @@ export default class PrBoard extends View {
       if (!rows.length) continue;
       const open = isOpen(g);
       // The group's heading (Your move · 5); in Your move, each action's too (Review · 2).
-      out.push(h_flex().id(`pr-grp-${g}`).px(10).pt(out.length ? 18 : 10).pb(2).gap(6).items_center().cursor_pointer()
+      // Section heading: in the board's own type (as its header's facts, a little bolder), the foreground colour and a
+      // rule under it, so sections read apart without outshouting the cards or the header above them.
+      out.push(h_flex().id(`pr-grp-${g}`).mx(10).mt(out.length ? 16 : 8).pb(4).gap(6).items_center().cursor_pointer()
+        .border_b_1().border_color(t.border)
         .on_click((_e, cx) => { this.fold.set(g, !open); cx.notify(); })
-        .child(div().text_size(10.5).font_semibold().text_color(t.muted).child(label.toUpperCase()))
-        .child(div().text_size(11).text_color(t.dim).child(String(rows.length)))
-        .child(div().flex_1()).child(div().text_size(10).text_color(t.dim).child(open ? "▾" : "▸")));
+        .child(div().text_size(TYPE.meta).font_semibold().text_color(t.foreground).child(label.toUpperCase()))
+        .child(div().text_size(TYPE.meta).font_semibold().text_color(t.accent).child(String(rows.length)))
+        .child(div().flex_1()).child(div().text_size(11).text_color(t.dim).child(open ? "▾" : "▸")));
       if (!open) {
-        out.push(div().pl(8 + 2 + 8 + GAP).pr(10).pb(2).truncate().font_family(mono).text_size(11).text_color(t.dim).child(rows.map((r) => `#${r.key.split("#")[1]}`).join("  ")));
+        out.push(div().pl(8 + 2 + 8 + GAP).pr(10).pb(2).truncate().font_family(mono).text_size(TYPE.meta).text_color(t.dim).child(rows.map((r) => `#${r.key.split("#")[1]}`).join("  ")));
         continue;
       }
       for (const blk of mine) {
-        if (g === "you") out.push(h_flex().px(10).pl(8 + 2 + 8 + GAP + numW + GAP).pt(8).pb(1).gap(5).text_size(11).text_color(t.dim).child(blk.label).child(div().child(String(blk.rows.length))));
+        // Your move's per-action heading (Review · 5): flush left under the section heading, a step below it.
+        if (g === "you") out.push(h_flex().px(10).pt(10).pb(2).gap(5).items_center()
+          .child(div().text_size(TYPE.body).font_semibold().text_color(t.muted).child(blk.label))
+          .child(div().text_size(TYPE.body).text_color(t.accent).child(String(blk.rows.length))));
         for (const r of blk.rows) {
           this.order.push(r.key);
           this.drawn.set(r.key, out.length);
           const to = leaving(r, blk);
           out.push(g === "you" ? this.card(t, mono, r, me, now, numW, to, Boolean(to) && (r.gone || moveOf(r)[0] !== "you")) : this.line(t, mono, r, me, now, numW, to));
-          if (this.openKey === r.key && !r.gone) out.push(this.details(t, mono, r, numW));
-          if (this.confirm?.row.key === r.key) { out.push(this.confirmBar(t, numW)); this.confirmDrawn = true; }
+          // The card's left edge (red for a problem of yours, accent when selected) runs on down its details and question.
+          const edge = g === "you" && nextStep(r).problem && !to ? t.ansi1 : this.sel === r.key ? t.accent : null;
+          const edged = (el) => (edge ? el.pl(textAt(numW) - 2).border_l_2().border_color(edge) : el);
+          if (this.openKey === r.key && !r.gone) out.push(edged(this.details(t, mono, r, numW)));
+          if (this.confirm?.row.key === r.key) { out.push(edged(this.confirmBar(t, numW))); this.confirmDrawn = true; }
         }
       }
     }
     if (!this.order.includes(this.sel)) this.sel = this.order[0] ?? null;
-    if (!out.length) out.push(div().p(14).text_size(12).text_color(t.dim).child(this.filter ? "No PR matches." : "Nothing in pr-flow's queue."));
+    if (!out.length) out.push(div().p(14).text_size(TYPE.body).text_color(t.dim).child(this.filter ? "No PR matches." : "Nothing in pr-flow's queue."));
     return out;
   }
 
@@ -675,14 +694,14 @@ export default class PrBoard extends View {
       .child(this.header(t))
       .when(Boolean(this.confirm) && !this.confirmDrawn, (e) => e.child(this.confirmBar(t)))
       .when(this.filtering || Boolean(this.filter), (e) => e.child(h_flex().px(10).py(4).gap(6).items_center().border_b_1().border_color(t.border)
-        .child(div().text_size(12).text_color(this.filtering ? t.accent : t.dim).child("/"))
-        .child(Input.new(this.filterState).flex_1().text_size(12))))
+        .child(div().text_size(TYPE.meta).text_color(this.filtering ? t.accent : t.dim).child("/"))
+        .child(Input.new(this.filterState).flex_1().text_size(TYPE.meta))))
       .child(v_flex().id("pr-list").flex_1().min_h(0).pb(8).overflow_y_scrollbar().track_scroll(this.scroll).children(body))
       .when(this.tailOn, (e) => e.child(this.tailView(t, mono)))
-      .child(h_flex().px(10).py(5).border_t_1().border_color(t.border).gap(6).items_center()
+      .child(footerBar(h_flex(), t).px(10).gap(6)
         // What the pane is doing for you ("review #42…"), down here so nothing above the list moves.
-        .child(this.busy ? div().flex_1().min_w(0).truncate().text_size(11).text_color(t.accent).loop("opacity", { from: 0.4, to: 1, period: 900 }).child(`${this.busy}…`)
-          : div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(this.q?.data?.nextSweep ? `next sweep ${hhmm(new Date(this.q.data.nextSweep))}` : ""))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child("j k · ⏎ details · space act · d diff · ? keys")));
+        .child(this.busy ? div().flex_1().min_w(0).truncate().text_color(t.accent).loop("opacity", { from: 0.4, to: 1, period: 900 }).child(`${this.busy}…`)
+          : div().flex_1().min_w(0).truncate().child(this.q?.data?.nextSweep ? `next sweep ${hhmm(new Date(this.q.data.nextSweep))}` : ""))
+        .child(div().flex_none().child("j k · ⏎ details · space act · d diff · ? keys")));
   }
 }

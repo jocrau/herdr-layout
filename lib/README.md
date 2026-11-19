@@ -16,8 +16,9 @@ several mods need lives here, and `lib/sync.mjs` copies each file into the mods 
 | `names.js` | a branch as a space or tab name (`feat/csv-export` → "Csv Export") | git-graph, worktree-actions, worktree-support |
 | `settings.js` | `<appHome>/data/workbench.json`: `code_dir`, `fleet` | fleet-board, git-graph, new-space |
 | `repos.js` | finding repositories with one `find` (a code folder of `~` only two levels down) | git-graph, new-space |
-| `boardheader.js` | the header of every board in a side column: one 40 px row (title, facts, buttons, ×), the board's own rows below | fleet-board, pr-board, side-header |
-| `sidecolumn.js` | closing a side column the same way everywhere: the header's ×, Esc, its keys.json toggle | fleet-board, pr-board, preview-plus, side-header, tabs-graph |
+| `bars.js` | one height for every header row (`HEADER_H`, 42 px) and footer row (`FOOTER_H`, 28 px, `FOOTER_TEXT` 12), `footerBar` for a footer; the layout's own rows use the same numbers | file-browser, fleet-board, pr-board, side-header, sidebar-footer, usage-status |
+| `boardheader.js` | the header of every board in a side column: one `HEADER_H` row (title, facts, buttons, ×), the board's own rows below | fleet-board, pr-board, side-header |
+| `sidecolumn.js` | closing a side column the same way everywhere: the header's ×, Esc, its keys.json toggle | file-browser, fleet-board, pr-board, preview-plus, side-header, tabs-graph |
 | `splitter.js` | every resize handle in the boards: one look (6 px band, 1 px line, accent while dragging, tinted on hover), double-click back to the default, and the drag's arithmetic | fleet-board, git-graph, pr-board |
 | `tailpanel.js` | the tail panel at the bottom of a board: the splitter on its top edge, TAIL · title · following/ended · wrap · terminal · ✕, the newest lines (a dim label, text / command / error / mark), a click wraps one; `TailSize` keeps its height under the board's own shared key | fleet-board, pr-board |
 | `worktree.js` | removing a worktree and its branch; `herdr.worktreeRemove` | git-graph, worktree-actions, worktree-support |

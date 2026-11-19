@@ -3,7 +3,7 @@
 A keyboard-first Herdr layout for agents working across many git repositories. Herdr's `main`
 layout with a worktree-aware spaces list, an agents list with space avatars, a tab bar with
 icon links to these mods (Files, Git, Beads; PRs, Fleet), a status bar with Claude usage, three full-size
-dialogs on ⌘O, ⌘G and ⌘B (a file browser, a git graph and a beads issue tree), and on ⌘⇧F a
+dialogs on ⌘⇧O, ⌘⇧G and ⌘⇧B (a file browser, a git graph and a beads issue tree), and on ⌘⇧F a
 fleet board for agent-fleet runs, all driven by one set of keys.
 
 ![workbench](preview.png)
@@ -40,13 +40,13 @@ Left to right:
    - An agents row shows the agent's space avatar instead of the program logo.
 2. **Work column**: the **tab bar** (`tabs-graph`, 42 px: the tabs with + right after them, then icon links that
    open the file browser, git graph and beads and show or hide the PR and fleet columns); the terminal area; on the right a
-   hidden **side panel** (368 px, 280–900; ⌘⇧O or the `tabs-graph.files` / `.changes` commands; a `side-header`
+   hidden **side panel** (368 px, 280–900; ⌘⌥O or the `tabs-graph.files` / `.changes` commands; a `side-header`
    header with Preview · Changes tabs and a ×) stacking `preview-plus` (linziyanleo, MIT) and Herdr's `changes`; the
    **status bar** (`usage-status`, 28 px) with Claude usage on the right when available.
 Side columns (the side panel, the PR column, the fleet column) are open one at a time: opening one closes the
 other. They close the same three ways: the × at the right of
 their header (its tooltip names the key), Esc once nothing in them is left to clear (a filter, a question, an open
-item), and their key (⌘⇧O, ⌘⇧R, ⌘⇧F), which opens them too, as the PR and fleet columns' links in the tab bar do
+item), and their key (⌘⌥O, ⌘⇧R, ⌘⇧F), which opens them too, as the PR and fleet columns' links in the tab bar do
 (highlighted while open). `lib/sidecolumn.js` holds the ×, and which key goes with which column.
 
 3. **Fleet column** (`fleet`, 400 px, hidden until ⌘⇧F): `fleet-board`, full height. Top to
@@ -74,7 +74,7 @@ The three dialogs open over the tab at 92 % × 90 % of the window:
   field, the tree with git marks A/M/D, a key hint footer) beside the viewer: rendered
   Markdown with Mermaid diagrams, JSON as a foldable tree, CSV/TSV as a table, images and PDF
   with zoom, everything else as source in an editor (⌘S saves).
-- **⌘G Git graph** (`git-graph`): header with the branch, its upstream and ↑/↓, and buttons
+- **⌘⇧G Git graph** (`git-graph`): header with the branch, its upstream and ↑/↓, and buttons
   for Fast-forward N, Push, fetch and refresh; a toolbar (all branches / current, remotes, the
   search field, a key hint); the graph table; below it, when a commit is reviewed, a resizable
   split of the commit's header and changed files (left, 34 %, 300–560 px) beside the selected
@@ -315,7 +315,7 @@ Screenshots: `tests/demo/make-demo.sh` (a second window: `HERDR_APP_HOME`, `HC_S
 - ⌘O opens the dialog on the focused terminal's repository; `j`/`k` move and preview; a
   Markdown file with a ` ```mermaid ` flowchart draws the diagram; `/` then a few letters
   finds a file anywhere in the repository.
-- ⌘G opens the graph at HEAD; `j`/`k` move; `⏎` shows the files beside the first file's
+- ⌘⇧G opens the graph at HEAD; `j`/`k` move; `⏎` shows the files beside the first file's
   diff; `J` moves to the next commit with the review open; `/fix` highlights matches and `n`
   steps through them; `b` then `⏎` jumps to a branch.
 - With a branch one commit behind its upstream after `f`, the header shows "Fast-forward 1"

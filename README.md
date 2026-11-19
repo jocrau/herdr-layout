@@ -11,13 +11,16 @@ agent-fleet runs.
 
 | Key | Opens | What it does |
 |---|---|---|
-| ⌘O | **File browser** (dialog) | The focused terminal's repository as a tree on the left, the file under the cursor rendered on the right: Markdown with Mermaid diagrams, JSON and CSV tables, images, PDF, source with editing. `/` filters the whole repository. |
-| ⌘G | **Git graph** (dialog) | The history of every branch. Fetch, fast-forward every branch that is only behind its upstream, push, commit. Checking out a branch asks: here, or in a new worktree (`.worktrees/<branch>`, opened as a tab in this space); `⇧B` starts a new branch the same way. A branch checked out in another worktree shows a folder icon, and double-clicking it opens that worktree as a tab in the space you opened the graph from. Merging makes a merge commit by default (untick it to fast-forward). Right-click a commit to reset the current branch to it (soft, mixed or hard) or, as in Fork, to move another branch there ("Reset a branch to this commit…": it asks which, and only that branch moves). `/` searches commits, `b` picks a branch (with ahead/behind and its pull request; `⌃O` worktree, `⌃D` delete, `⌃X` remove its worktree), `⇧R` switches to another repository (or click its name), ⏎ reviews a commit as changed files beside their diff (`c` switches to everything since the base branch, as a PR shows it; ← goes back out, ⏎ or ⇥ again closes it), `v` views a file as it was at that commit in the file browser, `o` opens it in your editor, `d` shows the change in your diff tool, and on the uncommitted changes `r` resets a file (unstage it or discard its change, after asking). |
-| ⌘B | **Beads** (dialog) | The [beads](https://github.com/steveyegge/beads) issues of the focused repository as a foldable tree, with details, editing and labels. |
+| ⌘⇧O | **File browser** (dialog; ⌘⌥O docks it in the side panel) | The focused terminal's repository as a tree on the left, the file under the cursor rendered on the right: Markdown with Mermaid diagrams, JSON and CSV tables, images, PDF, source with editing. `/` filters the whole repository. |
+| ⌘⇧G | **Git graph** (dialog) | The history of every branch. Fetch, fast-forward every branch that is only behind its upstream, push, commit. Checking out a branch asks: here, or in a new worktree (`.worktrees/<branch>`, opened as a tab in this space); `⇧B` starts a new branch the same way. A branch checked out in another worktree shows a folder icon, and double-clicking it opens that worktree as a tab in the space you opened the graph from. Merging makes a merge commit by default (untick it to fast-forward). Right-click a commit to reset the current branch to it (soft, mixed or hard) or, as in Fork, to move another branch there ("Reset a branch to this commit…": it asks which, and only that branch moves). `/` searches commits, `b` picks a branch (with ahead/behind and its pull request; `⌃O` worktree, `⌃D` delete, `⌃X` remove its worktree), `⇧R` switches to another repository (or click its name), ⏎ reviews a commit as changed files beside their diff (`c` switches to everything since the base branch, as a PR shows it; ← goes back out, ⏎ or ⇥ again closes it), `v` views a file as it was at that commit in the file browser, `o` opens it in your editor, `d` shows the change in your diff tool, and on the uncommitted changes `r` resets a file (unstage it or discard its change, after asking). |
+| ⌘⇧B | **Beads** (dialog) | The [beads](https://github.com/steveyegge/beads) issues of the focused repository as a foldable tree, with details, editing and labels. |
 | ⌘N | **New space** (dialog) | Asks for a name and a folder: type to filter the git repositories under your code folder (`~/Code`, or `code_dir` in the [settings](#settings)), with the one you're in first, then recent ones; or Home, or Browse… for any folder. Opens a space there with that name, its first tab named the same, and Claude Code running there as the Remote Control session of that name (`claude --remote-control <name>`). All from the keyboard: Enter right after the name opens it in the repository you're in; Tab moves to the folder, ↑↓ pick, Enter opens. The + in the spaces list and a worktree's "Open as space" ask the same way. |
-| ⌘⇧O | Side panel | [Preview Plus](https://github.com/linziyanleo/herdr-mods) (the file tree with a rendered preview; Escape goes back) and Herdr's Changes panel. |
+| ⌘⌥O | Side panel | The file browser in one column (the tree, or the file you open: ⏎ or a click opens it, Escape goes back), following the focused terminal's repository, and Herdr's Changes panel. |
 | ⌘⇧R | **PR board** (pane on the right; ⌘⌥R opens the PR view) | Your [pr-flow](#pr-board) queue of pull requests, grouped by your next move: what each PR is, who's in it, and the next step; the PR view reviews one in the git graph with its findings. See [PR board](#pr-board). |
 | ⌘⇧F | **Fleet board** (pane on the right; ⌘⌥F as a large dialog) | An [agent-fleet](#fleet-board) run beside your agents: what needs you first, where every bead is, where its time went, and the gate's answer or resume right there. See [Fleet board](#fleet-board). |
+| ⌘B | Sidebar | Hides or shows the spaces and agents on the left. |
+
+⌘⇧ and a letter opens what you would expect for it: the file browser and beads as dialogs, the PR and fleet boards as panes beside the terminals. ⌘⌥ and the same letter opens the other form: the file browser docked in the side panel, the PR view, the fleet board as a large dialog.
 
 ![The git graph](docs/git-graph.png)
 
@@ -82,7 +85,10 @@ cost), sharing one selection:
   finished epic opens with a recap: totals, agent time, the costliest, longest and most-fixed beads.
   Once every bead of the run is closed, an Epic card says what the epic itself is at: the epic
   check on the epic branch (running, passed, or failed with its log), how many of the epic's beads
-  are done, the follow-ups agents filed that wait for your triage, and the PR to main or `propose`.
+  are done, the follow-ups agents filed that wait for your triage (with agent-fleet 0.39 or newer: the
+  open, unassigned ones `fleet triage` lists; the decided ones show as a quiet count, listed in the PR
+  to main), and the PR to main or `propose`. The status is the tracker's as of the last read (every
+  minute while the pane shows), so a triage or close shows without waiting for a wave.
   While a wave does nothing but the epic check, its pill says `epic check · 3m`.
 - **Lanes** draws every bead's steps over time: a full bar where an agent works (blue implement
   and fix, violet review), a thin line for a check (grey) or the merge (green), red only where
@@ -243,7 +249,7 @@ herdr-app do layout.switch '{"name":"workbench"}'
 |---|---|
 | Everything | The [Herdr desktop app](https://herdr.dev) (macOS), `git` |
 | Pull requests in the sidebar and the worktree menu | [`gh`](https://cli.github.com), logged in |
-| ⌘B beads | [`bd`](https://github.com/steveyegge/beads), [`fzf`](https://github.com/junegunn/fzf) 0.59 or later, `python3` |
+| ⌘⇧B beads | [`bd`](https://github.com/steveyegge/beads), [`fzf`](https://github.com/junegunn/fzf) 0.59 or later, `python3` |
 | ⌘⇧F fleet board | agent-fleet's `fleet` 0.37 or later (not public yet; see [Fleet board](#fleet-board)) |
 | ⌘⇧R PR board | The pr-flow Claude Code plugin (not public yet; see [PR board](#pr-board)), Node 20+ and `gh` |
 | `o` and `d` in the git graph | Git's editor and diff tool, set in git so Herdr finds them however it was started: `git config --global core.editor "code --wait"` and `git config --global diff.tool vscode`. Without an editor, `o` uses the system's app for the file type |

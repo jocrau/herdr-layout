@@ -1,12 +1,12 @@
 // Copied from lib/sidecolumn.js by lib/sync.mjs: edit it there, then run `node lib/sync.mjs`.
-// The side columns (the side panel with Preview and Changes, the PR board, the fleet board) close the same way:
+// The side columns (the side panel with Files and Changes, the PR board, the fleet board) close the same way:
 // a × at the right of their header, Esc once nothing in them is left to clear, and their keys.json toggle,
 // which the × names. Opened as an overlay instead, they close that.
 import { div, svg } from "gpui-kit";
 import { layout, run, props, closeOverlay } from "herdr";
 
 // The closable columns (layout ids) and the keys that toggle them (keys.json).
-export const SHORTCUTS = { panel: "⌘⇧O", prs: "⌘⇧R", fleet: "⌘⇧F" };
+export const SHORTCUTS = { panel: "⌘⌥O", prs: "⌘⇧R", fleet: "⌘⇧F" };
 
 // The closable column `mod` sits in (as a block's content or a stack's header), or null.
 export function columnOf(mod) {

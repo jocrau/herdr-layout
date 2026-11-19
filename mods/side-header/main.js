@@ -1,11 +1,11 @@
 // The side panel's header (the panel-body stack's "header" in the workbench layout): its views as tabs
-// (Preview, Changes) and a × that closes the panel, as the PR and fleet boards' headers have.
+// (Files, Changes) and a × that closes the panel, as the PR and fleet boards' headers have.
 import { View, div } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { theme, layout, run, props } from "herdr";
 import { closeButton } from "./lib/sidecolumn.js";
 
-const NAMES = { files: "Preview", changes: "Changes" };
+const NAMES = { files: "Files", changes: "Changes" };
 
 function find(node, id) {
   if (node?.id === id) return node;

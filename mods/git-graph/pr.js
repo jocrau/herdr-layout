@@ -492,7 +492,7 @@ export const PrMethods = {
       .child(div().w(numW).flex_none().text_right().font_family(mono).text_size(12).text_color(needs ? (nextStep(r).problem ? t.ansi1 : t.accent) : t.muted).when(needs, (e) => e.font_semibold()).child(`#${r.key.split("#")[1]}`))
       .child(div().w(repoW).flex_none().truncate().text_size(11.5).text_color(t.dim).child(parseKey(r.key)?.repo ?? ""))
       .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(needs || here ? t.foreground : t.muted).when(here, (e) => e.font_semibold()).child(r.title ?? ""))
-      .child(findingsBadge(t, r.rec?.open));
+      .child(findingsBadge(t, r.rec));
   },
 
   // The dropdown under the PR's name.
@@ -583,7 +583,7 @@ export const PrMethods = {
       // A pr-flow job at work on it (or one that failed lately): what it's doing.
       .when(Boolean(job), (e) => e.child(div().flex_none().max_w(220).truncate().text_size(11).text_color(job.state === "failed" ? t.ansi1 : t.muted).tooltip(tipText(jobText(job, r))).child(`◷ ${jobText(job, r)}`)))
       .when(Boolean(rec.ci), (e) => e.child(ciGlyph(t, rec.ci)))
-      .child(findingsBadge(t, rec.open))
+      .child(findingsBadge(t, rec))
       // Only what's possible now, as the pane's card offers it: the next step first (dimmed when it can't run now, its
       // tooltip says why), then the alternatives that can run, in pr-flow's words with its view model; the verb the
       // last job ran, done, says "again" (Self-check again).

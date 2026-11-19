@@ -3,7 +3,7 @@
 
 import { exec } from "herdr";
 import { readSettings, settingPath, codeDir } from "./lib/settings.js";
-import { failure, parseSnapshot, parseRuns, epicPhase } from "./snapshot.js";
+import { failure, parseSnapshot, parseRuns, epicPhase, currentStatus } from "./snapshot.js";
 
 // Which `fleet` to run: "fleet" from the person's PATH, or the one named in the layout's settings,
 // <appHome>/data/workbench.json ({"fleet": "/path/to/fleet"}), e.g. a checkout's scripts/fleet.
@@ -33,7 +33,11 @@ export async function readSnapshot(cwd, epic = null) {
   }
   if (r.code !== 0) return failure(r.code, r.stderr, bin);
   const out = parseSnapshot(r.stdout, cwd);
-  if (out.ok) out.snap.epicPhase = await readEpicPhase(out.snap.runDir);
+  if (out.ok) {
+    const phase = await readEpicPhase(out.snap.runDir);
+    // The status as the tracker has it now (fleet 0.39), so a triage or close shows without a wave; else the event's.
+    out.snap.epicPhase = { ...phase, status: currentStatus(out.snap, phase) };
+  }
   return out;
 }
 

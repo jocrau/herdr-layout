@@ -12,6 +12,8 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, Scrollbar, VirtualListScrollHandle, v_virtual_list } from "gpui-base";
 import { focused, panes, spaces, exec, home, props, closeOverlay, setShared } from "herdr";
+import { footerBar } from "./lib/bars.js";
+import { closeSide } from "./lib/sidecolumn.js";
 import Viewer from "./viewer.js";
 import { Tree } from "./tree.js";
 import { join, normalize, kind, richText, basename, dirname } from "./paths.js";
@@ -70,7 +72,12 @@ export default class FileBrowser extends Viewer {
   init(p, cx) {
     const s = start();
     this.opener = props() ?? {};
+    // Docked in the side panel (⌘⌥O) rather than opened as a dialog (⌘⇧O): one column, the tree or the file it
+    // shows, and it follows the focused terminal to another repository.
+    this.docked = !this.opener.overlay;
+    this.showing = false; // docked: the file in place of the tree
     this.place = { mode: "browser", spaceId: s.spaceId, cwd: s.cwd, on: s.on };
+    this.followKey = `${s.cwd}|${s.on}`;
     this.root = null; this.nav = null;
     this.at = 0; this.atPath = null;
     this.filter = ""; this.filtering = false; this.files = null; this.matchCache = null;
@@ -85,6 +92,11 @@ export default class FileBrowser extends Viewer {
     this.treeFocus.focus();
     // The dialog takes the keyboard a moment after it opens.
     cx.timer.after(300, () => { if (!this.filtering && !this.viewFocus.is_focused()) this.treeFocus.focus(); });
+    this.load(s, cx);
+  }
+
+  // The tree of the repository (or folder) `s.cwd` is in, opened down to it; a file from props shown.
+  load(s, cx) {
     cx.spawn(async (cx) => {
       // The top folder and where the terminal is inside it, as git sees them (symlinks resolved: a terminal in
       // /tmp/x is in /private/tmp/x, so comparing path strings would miss it).
@@ -92,7 +104,7 @@ export default class FileBrowser extends Viewer {
       const [topDir, prefix = ""] = top?.code === 0 ? top.stdout.split("\n") : [];
       this.root = top?.code === 0 ? topDir.trim() : s.cwd;
       this.git = top?.code === 0;
-      this.nav = new Tree({ cwd: this.root, on: s.on }, () => !this.closed);
+      const nav = this.nav = new Tree({ cwd: this.root, on: s.on }, () => !this.closed && this.nav === nav);
       this.nav.refresh(cx); this.nav.watch(cx);
       // Open the tree down to where the terminal is.
       const rel = top?.code === 0 ? prefix.trim().replace(/\/$/, "") : this.relative(s.cwd);
@@ -110,6 +122,39 @@ export default class FileBrowser extends Viewer {
   }
 
   context() { return this.place ?? { mode: "browser" }; }
+
+  // Docked: the focused terminal moved to another folder. Another repository gets its tree; a folder in the same
+  // one keeps the tree as it is. A focus with no folder (the panel itself) changes nothing.
+  follow(cx) {
+    const f = focused();
+    if (!f?.cwd && !f?.pane) return;
+    const s = start(), key = `${s.cwd}|${s.on}`;
+    if (key === this.followKey) return;
+    this.followKey = key;
+    cx.spawn(async (cx) => {
+      const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd: s.cwd, on: s.on }).catch(() => null);
+      const root = top?.code === 0 ? top.stdout.trim() : s.cwd;
+      if (this.closed || this.followKey !== key || (root === this.root && s.on === this.place.on)) return;
+      this.place = { mode: "browser", spaceId: s.spaceId, cwd: s.cwd, on: s.on };
+      this.root = null; this.nav = null; this.files = null; this.matchCache = null; this.filter = ""; this.input.set_value("");
+      this.at = 0; this.atPath = null; this.showing = false;
+      this.load(s, cx);
+      cx.notify();
+    });
+  }
+
+  // Docked: the file shown in place of the tree, or the tree again.
+  showFile(on, cx) {
+    if (!this.docked) return;
+    this.showing = on;
+    (on ? this.viewFocus : this.treeFocus).focus();
+    cx.notify();
+  }
+
+  back(cx) {
+    if (this.docked && this.showing && !this.history.length) return this.showFile(false, cx);
+    return super.back(cx);
+  }
 
   relative(path) {
     const root = normalize(this.root), p = normalize(path);
@@ -176,7 +221,7 @@ export default class FileBrowser extends Viewer {
     this.at = Math.max(0, Math.min(rows.length - 1, i));
     this.atPath = rows[this.at].path;
     this.list.scroll_to_item(this.at);
-    if (preview) this.schedulePreview(rows[this.at], cx);
+    if (preview && !this.docked) this.schedulePreview(rows[this.at], cx);
     cx.notify();
   }
 
@@ -204,6 +249,7 @@ export default class FileBrowser extends Viewer {
     this.previewToken = null;
     this.openFile(row.path, cx);
     this.viewFocus.focus();
+    this.showFile(true, cx);
     cx.notify();
   }
 
@@ -243,9 +289,15 @@ export default class FileBrowser extends Viewer {
     if (k === "pageup") { done(); return this.select(this.at - 30, rows, cx); }
     if (k === "ctrl-d") { done(); return this.select(this.at + 15, rows, cx); }
     if (k === "ctrl-u") { done(); return this.select(this.at - 15, rows, cx); }
-    // Esc never arrives: the app closes the dialog on it before any mod sees it.
+    // Esc never arrives in the dialog: the app closes it before any mod sees it. Docked, it clears the filter,
+    // then closes the side panel.
+    if (k === "escape" && this.docked) {
+      done();
+      if (typing || this.filter) return this.clearFilter(cx);
+      return closeSide("file-browser");
+    }
     if (k === "tab" && typing) { done(); this.treeFocus.focus(); return cx.notify(); }
-    if (k === "tab") { done(); if (this.selected) this.viewFocus.focus(); return cx.notify(); }
+    if (k === "tab") { done(); if (this.selected) { this.viewFocus.focus(); this.showFile(true, cx); } return cx.notify(); }
     if (typing) return;
     if (k === "backspace" && this.filter) { done(); return this.clearFilter(cx); } // Enter arrives as the input's submit; letters are the filter's.
     if (k === "enter") { done(); return this.enter(cx); }
@@ -262,7 +314,7 @@ export default class FileBrowser extends Viewer {
       done();
       if (row.dir && !row.open) this.nav.toggle(row.path, cx);
       else if (row.dir) this.select(this.at + 1, rows, cx);
-      else { this.previewToken = null; this.openFile(row.path, cx); }
+      else { this.previewToken = null; this.openFile(row.path, cx); this.showFile(true, cx); }
       return;
     }
     if (k === "left" || k === "h") {
@@ -277,7 +329,8 @@ export default class FileBrowser extends Viewer {
   keyDown(e, cx) {
     if (this.helpKey(e, cx)) return;
     const k = e.keystroke, file = this.selected?.file, type = file ? kind(file) : null;
-    const toTree = () => { cx.stop_propagation(); this.treeFocus.focus(); cx.notify(); };
+    const toTree = () => { cx.stop_propagation(); this.treeFocus.focus(); if (this.docked) this.showing = false; cx.notify(); };
+    if (k === "escape" && this.docked) { cx.stop_propagation(); return this.history.length ? this.back(cx) : toTree(); }
     if (k === "tab" || k === "shift-tab") return toTree();
     if (k === "cmd-s" || k === "ctrl-s") return super.keyDown(e, cx);
     const editor = Boolean(this.code) && (this.source || !richText(type)) && type !== "image" && type !== "pdf";
@@ -341,14 +394,14 @@ export default class FileBrowser extends Viewer {
             if (!r) return;
             this.treeFocus.focus();
             if (r.dir) { this.select(i, rows, cx, false); this.nav.toggle(r.path, cx); }
+            else if (this.docked) { this.select(i, rows, cx, false); this.openFile(r.path, cx); this.showFile(true, cx); }
             else this.select(i, rows, cx);
           }))
         .child(Scrollbar.vertical("fb-tree").absolute().right(0).top(0).bottom(0)))
-      .child(div().flex_none().px(12).py(7).border_t(0.5).border_color(colors.border).text_size(11).text_color(colors.dim)
-        .child(this.viewFocus.is_focused()
+      .child(footerBar(h_flex(), colors).px(12).child(div().min_w(0).truncate().child(this.viewFocus.is_focused()
           ? "h ← ⇥ tree · J K files · [ ] headings · s source · ? help"
           : (this.filter ? `${this.filesCapped ? `first ${FILES.toLocaleString()} files only · ` : ""}↑↓ move · ⏎ open · ⇥ list · ⌫ clear · ? help`
-            : `${this.treeCapped ? "first 5,000 rows only · " : ""}j k move · h l fold · ⏎ open · / filter · ⇥ viewer · ? help`)));
+            : `${this.treeCapped ? "first 5,000 rows only · " : ""}j k move · h l fold · ⏎ open · / filter${this.docked ? "" : " · ⇥ viewer"} · ? help`))));
   }
 
   helpPanel(colors) {
@@ -359,7 +412,7 @@ export default class FileBrowser extends Viewer {
       ["Viewer", [["j k  ↑ ↓", "scroll (Markdown by block, JSON and CSV by row)"], ["⌃D ⌃U  space", "a page down / up (also PgDn PgUp)"], ["g G  Home End", "top / end"],
         ["click the code", "code scrolls with its own keys: arrows, PgUp PgDn"], ["h ← ⇥", "back to the tree"], ["J K", "next / previous file"], ["[ ]", "previous / next heading"], ["s  c", "source ⇄ preview / contents"],
         ["⌫", "back after following a link"], ["⌘S", "save (in Source)"], ["o", "open in its app"]]],
-      ["Window", [["?", "this help (any key closes it)"], ["esc", "close the dialog"]]],
+      ["Window", [["?", "this help (any key closes it)"], ["esc", this.docked ? "back to the tree, clear the filter, then close the panel" : "close the dialog"]]],
     ];
     return v_flex().id("fb-help").size_full().overflow_y_scrollbar().px(20).py(14).gap(14).text_size(12.5)
       .children(groups.map(([title, rows]) => v_flex().gap(3)
@@ -369,7 +422,12 @@ export default class FileBrowser extends Viewer {
 
   render(cx) {
     const { colors, font } = appearance();
+    if (this.docked) this.follow(cx);
     const viewer = super.render(cx);
+    const view = () => div().id("fb-view").track_focus(this.viewFocus).flex_1().min_w(0).h_full().child(this.help ? this.helpPanel(colors) : viewer);
+    if (this.docked) return v_flex().id("file-browser").size_full().min_h(0).overflow_hidden().bg(colors.background)
+      .text_color(colors.foreground).font_family(font).text_size(13)
+      .child(this.showing || this.help ? view().w_full() : this.treePane(colors).flex_1().w_full());
     return h_flex().id("file-browser").size_full().min_h(0).overflow_hidden().bg(colors.background)
       .text_color(colors.foreground).font_family(font).text_size(13)
       .child(this.treePane(colors).w(320).flex_none().h_full().border_r(0.5).border_color(colors.border))

@@ -6,8 +6,9 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Popup } from "gpui-base";
 import { closeButton } from "./sidecolumn.js";
+import { HEADER_H, FOOTER_TEXT } from "./bars.js";
 
-export const HEADER_H = 40;
+export { HEADER_H };
 
 // One of the header's small buttons (22 px, as the ×): { id, label, tip, onClick, color, pulse }.
 export function headerButton(t, { id, label, tip, onClick, color, pulse }) {
@@ -42,7 +43,7 @@ export function boardHeader(t, { mod, title, titleTip, onTitle, onClose, open = 
   return h_flex().h(HEADER_H).flex_none().px(10).gap(8).items_center()
     .child(titled)
     .child(h_flex().flex_1().min_w(0).gap(8).items_center().overflow_hidden()
-      .children(facts.filter(Boolean).map((f, i) => div().id(f.id ?? `${mod}-fact-${i}`).min_w(0).truncate().text_size(11.5)
+      .children(facts.filter(Boolean).map((f, i) => div().id(f.id ?? `${mod}-fact-${i}`).min_w(0).truncate().text_size(FOOTER_TEXT)
         .text_color(f.color ?? t.dim).when(Boolean(f.tip), (el) => el.tooltip(f.tip)).child(f.text))))
     .child(h_flex().flex_none().gap(2).items_center()
       .children(buttons.filter(Boolean).map((b) => headerButton(t, b)))
