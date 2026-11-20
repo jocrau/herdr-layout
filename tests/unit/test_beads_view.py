@@ -12,6 +12,7 @@ SCRIPT = HERE.parents[2] / "mods" / "beads" / "beads-view"
 
 FAKE_BD = """#!/bin/sh
 if [ -f "$BV_FAIL" ]; then echo "database is locked" >&2; exit 1; fi
+echo "$*" >> "$BV_LOG"
 case "$*" in *--json*) echo '[{"id":"x-1","title":"One"}]';; *) echo "○ x-1 One";; esac
 """
 
@@ -26,7 +27,8 @@ class BeadsView(unittest.TestCase):
         bd.write_text(FAKE_BD)
         bd.chmod(0o755)
         cls.fail = root / "fail"
-        os.environ.update(XDG_CACHE_HOME=str(root / "cache"), XDG_STATE_HOME=str(root / "state"), BV_FAIL=str(cls.fail))
+        os.environ.update(XDG_CACHE_HOME=str(root / "cache"), XDG_STATE_HOME=str(root / "state"), BV_FAIL=str(cls.fail), BV_LOG=str(root / "bd.log"))
+        cls.log = root / "bd.log"
         cls.cwd = os.getcwd()
         os.chdir(root / "repo")  # beads-view finds the repo by its .beads folder
         loader = importlib.machinery.SourceFileLoader("beads_view", str(SCRIPT))
@@ -121,6 +123,36 @@ class BeadsView(unittest.TestCase):
             bv.cached_detail = real
         self.assertEqual(sorted(os.listdir(bv.DETAIL_DIR)), sorted(keep))
         self.assertEqual(made, [("x-1", current)] if bv.preview_width() != 40 else [])
+
+    def closes(self, key):
+        """Delete on x-1, answering `key`: the bd calls that change beads, and what was shown."""
+        bv, shown = self.bv, []
+
+        class FakeTerm:
+            def __init__(self, over_fzf): pass
+            def start(self): pass
+            def stop(self): pass
+            def size(self): return 24, 80
+            def write(self, text): shown.append(text)
+            def key(self): return key
+
+        real, bv.Term = bv.Term, FakeTerm
+        self.log.write_text("")
+        try:
+            bv.close_bead("x-1", self.state())
+        finally:
+            bv.Term = real
+        return [l for l in self.log.read_text().splitlines() if l.startswith("close")], "".join(shown)
+
+    def test_delete_closes_the_bead_on_y(self):
+        calls, shown = self.closes("y")
+        self.assertEqual(calls, ["close x-1"])
+        self.assertIn("Close x-1", shown)
+        self.assertIn("y/n", shown)
+
+    def test_delete_closes_nothing_on_any_other_key(self):
+        for key in ("n", "esc", "\x03"):
+            self.assertEqual(self.closes(key)[0], [], key)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,13 @@
     "cmd-shift-f": "layout.toggle:fleet",
     "cmd-alt-f": "mod.open:fleet-board",
     "cmd-shift-r": "layout.toggle:prs",
-    "cmd-alt-r": "mod.open:pr-board"
+    "cmd-alt-r": "mod.open:pr-board",
+    "alt-tab": "mod.open:recent-panes",
+    "cmd-.": "mod.open:zen"
+  },
+  "mod:recent-panes": {
+    "alt-tab": "recent-panes.next",
+    "alt-shift-tab": "recent-panes.prev"
   },
   "mod:fleet-board": {
     "cmd-left": "fleet-board.prev-run",

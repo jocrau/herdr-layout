@@ -156,3 +156,25 @@ test("where a moving card goes, in a few words", () => {
   assert.equal(placeText(row("SNOOZED"), "me"), "Later");
   assert.equal(placeText(row("MY_PENDING", { role: "author" }, { author: "me", requested: ["ann"] }), "me"), "Waiting on ann");
 });
+
+test("saidAlready: a reason that only restates the card's next step", async () => {
+  const { saidAlready } = await import("../../mods/pr-board/model.js");
+  assert.equal(saidAlready("approved, CI green", "merge · 1 approved · ci green"), true);
+  assert.equal(saidAlready("reviewed at current head", "Reviewed at the current head: waiting for the author · 2 medium open"), true);
+  assert.equal(saidAlready("PR is a draft", "Waiting for CI and bots to settle · PR is a draft · conflicts"), true);
+  assert.equal(saidAlready("re-review: head moved since abc1234", "Re-review what changed since abc1234"), false);
+  assert.equal(saidAlready("approved", "merge · CI green"), false);
+  assert.equal(saidAlready("", "anything"), false);
+});
+
+test("waitingOn: Later says whose PR and when it comes back; Dormant whose and how long idle", async () => {
+  const { waitingOn, backAt } = await import("../../mods/pr-board/model.js");
+  const now = Date.parse("2026-11-20T12:00:00Z");
+  const later = { key: "acme/web#67", role: "reviewer", stage: "SNOOZED", rec: { author: "alice", reasons: ["snoozed until 2026-11-30T12:00:00.000Z"] },
+    move: { group: "later", label: "later", waiting_on: null }, next_step: { text: "Later: back at 2026-11-30T12:00:00.000Z · CI failing", problem: false }, actions: [] };
+  assert.equal(backAt(later), Date.parse("2026-11-30T12:00:00Z"));
+  assert.deepEqual([waitingOn(later, "me", now).who, waitingOn(later, "me", now).since], ["alice", "in 10d"]);
+  const dormant = { key: "acme/web#9", role: "author", stage: "MY_DORMANT", rec: { author: "me", updated: "2026-08-20T12:00:00Z" },
+    move: { group: "dormant", label: "dormant", waiting_on: null }, next_step: { text: "No activity since …", problem: false }, actions: [] };
+  assert.deepEqual([waitingOn(dormant, "me", now).who, waitingOn(dormant, "me", now).since], ["you", "92d"]);
+});

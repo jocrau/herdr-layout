@@ -6,11 +6,11 @@ Shows the current repo's beads as bd's own tree (open beads by default); Enter
 selects a bead, a click on the selected one focuses it. Keys (arrows and digits
 while the filter is empty): Right focuses a bead (its subtree becomes the
 view), or on a bead without children shows its details; Left moves to the
-parent, and on a top row of a focused view goes back up (as does Backspace),
+parent, and on a top row of a focused view goes back up,
 so repeated Lefts climb the tree. Tab folds or unfolds a bead's
 children, 1-9 folds the tree to that many levels and 0 unfolds it all, Ctrl-L
-edits the bead's labels, Ctrl-A switches between open and all beads, typing
-filters, Esc quits. The view refreshes by itself when beads change.
+edits the bead's labels, Delete (or forward delete) closes the bead after a
+y/n, Ctrl-A switches between open and all beads, typing filters, Esc quits. The view refreshes by itself when beads change.
 
 f picks a label filter (Shift-F clears it): only beads with the ticked
 labels and priorities, where labels of one namespace (owner:alice, owner:bob)
@@ -37,7 +37,7 @@ Optional settings in ~/.config/beads-view/config.json (all keys optional):
 Focus, folds and the open/all choice are remembered per repo in
 ~/.local/state/beads-view/; bd's output is cached in ~/.cache/beads-view/ so
 keys respond without waiting for bd (safe to delete). Subcommands (render, header, toggle, level, focus,
-up, all, filter, unfilter, show, labels, edit, watch) are called by fzf's key bindings; run without
+up, all, filter, unfilter, show, labels, edit, close, watch) are called by fzf's key bindings; run without
 arguments to start the view; `beads-view --select ID` starts it on that bead with its details open (unfolding,
 leaving a focus or showing closed beads as needed). Needs python3, bd and fzf (0.60 or later).
 """
@@ -1486,6 +1486,41 @@ def edit(bead_id, state):
         term.stop()
 
 
+def close_bead(bead_id, state):
+    """Delete: ask on fzf's bottom row (its footer; the tree stays in view), and on
+    y close the bead with bd. bd's refusal shows there until a key is pressed."""
+    issue = show_issue(bead_id)
+    if issue is None:
+        return
+    term = Term(over_fzf=True)
+    term.start()
+    try:
+        lines, columns = term.size()
+
+        def say(text):
+            term.write(f"\x1b[?25l\x1b[{lines};1H\x1b[2K" + clip(text, columns))
+
+        if issue.get("status") == "closed":
+            say(f"{DIM}{bead_id} is already closed. Any key.")
+            term.key()
+            return
+        title = " ".join((issue.get("title") or "").split())
+        say(f"{BOLD}\x1b[33mClose {bead_id} {RESET}{title}{BOLD}\x1b[33m? y/n")
+        if term.key() not in ("y", "Y"):
+            return
+        say(f"{DIM}Closing {bead_id}…")
+        out = subprocess.run([BD, "close", bead_id], cwd=ROOT, capture_output=True, text=True, timeout=30)
+        if out.returncode != 0:
+            say(f"{BOLD}\x1b[31mbd: " + ((out.stderr or out.stdout).strip().splitlines() or ["close failed"])[-1]
+                + f"{RESET}{DIM} · any key")
+            term.key()
+            return
+        forget_detail(bead_id)
+        fetch(state, fresh=True)  # the cache now: fzf's reload reads it at once (see Editor.save)
+    finally:
+        term.stop()
+
+
 def prefetch(state, budget):
     """Cache the detail panes of the view's beads, for up to `budget` seconds;
     drop the ones that are out of date. One look at the cache folder for all
@@ -1582,6 +1617,7 @@ Navigate (the filter hidden)
   F                         clear that label filter
   ctrl-e                    edit the bead
   ctrl-l                    labels: ⏎ space tick, esc applies, ctrl-c cancels
+  ⌫ ⌦  (delete)             close the bead, after a y/n
   ctrl-a                    open beads only / all beads
   ? q esc                   this help / quit / quit
 """  # how fzf's bindings call this script (-S: skip site, faster)
@@ -1665,6 +1701,7 @@ def view(select=None):
     # Edit in the detail pane: shown first (Ctrl-E with it hidden), so fzf
     # passes its place to the editor.
     edit = f"show-preview+execute({RUN} edit {{1}})+reload({RUN} render)"
+    close = f"execute({RUN} close {{1}})+reload({RUN} render)"
     click = shlex.quote(CLICK_FILE)
     os.makedirs(CACHE_DIR, exist_ok=True)
     args = [
@@ -1678,7 +1715,7 @@ def view(select=None):
         # Starts in navigate mode (input hidden): letters are keys, as in the file and git
         # viewers; / shows the filter, esc hides it again (and quits from navigate mode).
         "--no-input",
-        "--footer=j k move · l → in · h ← out · ⏎ ⇥ details · space fold · / filter · f labels · ? help · esc quit",
+        "--footer=j k move · l → in · h ← out · ⏎ ⇥ details · space fold · ⌫ close · / filter · f labels · ? help · esc quit",
         # The cached pane when there is one (instant), else bd (and cache it).
         f"--preview=cat {shlex.quote(DETAIL_DIR)}/{{1}}@{{2}}@$FZF_PREVIEW_COLUMNS 2>/dev/null || {RUN} show {{1}} {{2}}",
         "--preview-window=right,50%,wrap-word,border-left,noinfo,hidden",
@@ -1697,7 +1734,11 @@ def view(select=None):
         f"--bind=left-click:execute-silent([ {{4}} = 0 ] || {{ printf %s $$ > {click}; {RUN} click {{1}} $$ >/dev/null 2>&1 & }})",
         f"--bind=focus:execute-silent(: > {click})",
         f"--bind=double-click:execute-silent(: > {click})+toggle-preview",  # like ⏎
-        f"--bind=backward-eof:execute-silent({RUN} up)+{reload}",
+        # Delete (⌫, the Mac's Delete key, or ⌦) closes the bead after a y/n, while the filter is
+        # hidden; with it showing, the keys edit it, and ⌫ on an empty filter goes up, as before.
+        f'--bind=bspace:transform:if [ "$FZF_INPUT_STATE" = hidden ]; then echo "{close}"; '
+        f'elif [ -z {{q}} ]; then echo "execute-silent({RUN} up)+{reload}"; else echo backward-delete-char; fi',
+        f'--bind=del:transform:[ "$FZF_INPUT_STATE" = hidden ] && echo "{close}" || echo delete-char',
         f"--bind=ctrl-a:execute-silent({RUN} all)+{reload}",
         f"--bind=ctrl-l:execute({RUN} labels {{1}})+reload({RUN} render)",
         f"--bind=ctrl-e:{edit}",
@@ -1803,9 +1844,9 @@ def main(argv):
     elif cmd == "unfilter":
         state["filter"] = []
         save(state)
-    elif cmd in ("labels", "edit"):
+    elif cmd in ("labels", "edit", "close"):
         if rest and rest[0]:  # empty while fzf's list (re)loads: nothing to edit
-            (edit_labels if cmd == "labels" else edit)(rest[0], state)
+            {"labels": edit_labels, "edit": edit, "close": close_bead}[cmd](rest[0], state)
     elif cmd == "click" and len(rest) == 2 and rest[0]:
         click(rest[0], rest[1])
     elif cmd == "watch":

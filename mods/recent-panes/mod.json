@@ -1,0 +1,1 @@
+{ "place": "none", "title": "Recent panes", "overlay": { "kind": "popup", "at": "top", "offset": 80, "width": 600, "height": 430 } }

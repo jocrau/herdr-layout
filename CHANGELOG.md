@@ -22,12 +22,40 @@ dialogs and the fleet pane.
 - `pr-board`: findings made before the last push (pr-flow 0.41's `old_findings`) show dim with the head they were
   made at ("2 findings at 2f684b0"; "Review found 1 high at 2f684b0, head moved"), instead of disappearing; a
   re-review says which still hold. A blocker finding is red and listed first, as a high one.
+- `zen` (⌘.): hides the window's chrome (the tab bar, the status bar and the sidebar) and brings it back as it was (the
+  sidebar only if it was open). The panes, dialogs and the side columns on the right (the PR and fleet boards, with
+  their own headers) stay; Herdr's toast still says when an agent needs you. Best in fullscreen: in a window, macOS's
+  buttons sit over the first pane's corner.
+- `usage-status`: the focused terminal's repository and branch, ↑ commits to push and ↓ commits behind its upstream
+  (or "not pushed", "upstream gone"), and the branch's PR when pr-flow tracks it, with its stage (a click opens the PR
+  view).
+- `usage-status`: "N need you" is a link: each click goes to the next agent that waits for you; its tooltip names them.
+- `recent-panes` (option+tab): the panes you used last, across spaces, as Firefox's ctrl+tab does it. It opens on the
+  pane before the one you're in; tab goes further back, shift+tab forward, letting go of option goes there (space and
+  tab with it), esc stays. Each row: the space's avatar, the agent's tab name (or a shell's title, else its program and
+  folder), where it is, and the agent's state. The status bar keeps the order (`lib/recent.js`). ctrl+tab stays the next tab.
+- `pr-board` from the keyboard, in the file browser's and the beads view's scheme: ⌘⇧R takes the keyboard to the first
+  PR; j k move over PRs and section headings; → goes in (opens a section, to its first PR, a PR's details, then its
+  actions, ← → between them, ⏎ runs one), ← back out the same steps. Each action has its own key on every PR, shown
+  on its button (a approve, m merge, v review, p post, y copy, b hand back, n ping, u nudge, f fix, e ready, q
+  request, z later, i ignore, X close, D discard); space is the main action; outward ones still ask first. The links
+  show their keys (d PR view, t agent tab, o GitHub, w log, c stop). The key list (?) wraps and is grouped.
+- `pr-board`: Later and Dormant rows say whose PR it is (not the section's name again), and Later when it comes back
+  ("in 10d"); in a folded section, a click on a PR's number opens the section with that PR's details.
+- `pr-board`: a card says each thing once. Its second line is its one status: an action of yours in flight
+  (Approving…, instead of a note in the footer), else its agent's running or failed job, else the next step. The
+  details keep a quiet one-line record of the last job (started 3m ago, output, stop; or last review 8m ago, log),
+  so the card keeps its height as a job starts and ends; pr-flow's reasons and GitHub's verdict show only when the
+  card doesn't say them already ("approved, CI green" once, not three times), and Re-review no longer says "again".
 - `pr-board`: section headings stand out from the cards (Samuel Skinner, PR #3): each group (Your move, Waiting on
   others, …) is in the foreground colour with a rule under it and its count in the accent colour, and Your move's
   action headings (Fix, Review, Merge, …) are a step bolder, in the board's own type sizes.
 - `pr-board`: one type scale, three sizes: a card's title 13 px; what to do next, a waiting PR's title, the action
   headings and the details 12.5 px; PR numbers, context lines, who and since, section headings and buttons 12 px
   (were 10–11.5 px). A board header's facts are 12 px, as the footers.
+- beads-view: Delete (⌫, or ⌦) closes the selected bead after a y/n asked in the footer; bd's refusal shows
+  there. With the filter showing, both keys edit it, and ⌫ on an empty filter still goes up out of a focus.
+  In navigate mode ⌫ no longer goes up; ← does.
 - `fleet-board`: the Epic card says "N wait for your triage" only for the follow-ups `fleet triage` lists (open,
   unassigned; agent-fleet 0.39's `untriaged`); the decided ones show as a quiet "M open follow-ups (decided;
   listed in the PR to main)", and an older agent-fleet gets "N open follow-ups" without a triage claim. The

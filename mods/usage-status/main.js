@@ -1,8 +1,11 @@
 // Modified by Jochen Rau, 2026-11, from Herdr's workspace-status mod: see NOTICE.md in this folder.
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, agents, theme, run, window, keys, readTextFile, home } from "herdr";
+import { spaces, agents, theme, run, readTextFile, home, focused, exec } from "herdr";
 import { footerBar } from "./lib/bars.js";
+import { noteFocus } from "./lib/recent.js";
+import { parseStatus, slugOf, repoName, syncMarks } from "./lib/gitline.js";
+import { lastQueue, prForBranch, openPrView, STAGE } from "./lib/prflow.js";
 
 // Claude subscription usage, saved by the Claude Code status line on each response
 // (this repo's extras/claude-statusline.py does it; see the README's "Status bar usage").
@@ -73,7 +76,38 @@ export default class WorkspaceStatus extends View {
   init(_props, cx) {
     this.usage = null;
     cx.timer.every(15000, (cx) => this.load(cx));
+    // The status bar is always shown: it keeps the recent panes' order for ctrl+tab (lib/recent.js, recent-panes).
+    noteFocus();
+    cx.timer.every(250, () => noteFocus());
     this.load(cx);
+    // The focused terminal's repository, branch and push state: at once when the focus moves to another folder,
+    // else every 5 s (a commit, a push, a fetch).
+    this.git = null; this.gitKey = null; this.gitAt = 0;
+    cx.timer.every(1000, (cx) => this.gitLine(cx));
+  }
+
+  gitLine(cx) {
+    const f = focused(), space = spaces().find(s => s.active);
+    const cwd = f?.cwd ?? space?.folder ?? null, on = space?.machine ?? null;
+    const key = JSON.stringify([on, cwd]);
+    if (this.gitBusy || (key === this.gitKey && Date.now() - this.gitAt < 5000)) return;
+    if (!cwd) { if (this.git) { this.git = null; cx.notify(); } this.gitKey = key; return; }
+    this.gitBusy = true;
+    cx.spawn(async (cx) => {
+      const opt = on ? { cwd, on } : { cwd };
+      let g = null;
+      try {
+        // Writes nothing under .git (no index refresh, no fsmonitor cookie).
+        const st = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v2", "--branch", "--untracked-files=no"], opt);
+        if (st.code === 0) {
+          const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], opt);
+          const url = await exec("git", ["remote", "get-url", "origin"], opt);
+          g = { ...parseStatus(st.stdout), repo: repoName(common.stdout), slug: url.code === 0 ? slugOf(url.stdout) : null };
+        }
+      } catch { g = this.git; } // couldn't ask (a machine away): keep what it showed
+      this.gitBusy = false; this.gitKey = key; this.gitAt = Date.now();
+      if (JSON.stringify(g) !== JSON.stringify(this.git)) { this.git = g; cx.notify(); }
+    });
   }
 
   load(cx) {
@@ -84,33 +118,44 @@ export default class WorkspaceStatus extends View {
     });
   }
 
-  // The palette key as actually bound, not a hardcoded one; without a
-  // binding the hint stays useful ("commands") instead of lying.
-  hint(t) {
-    const mac = window()?.platform === "macos";
-    const mod = { cmd: mac ? "⌘" : "Ctrl+", ctrl: mac ? "⌃" : "Ctrl+", shift: mac ? "⇧" : "Shift+", alt: mac ? "⌥" : "Alt+", option: mac ? "⌥" : "Alt+" };
-    const b = keys().find((k) => k.section === "global" && k.action === "app.palette");
-    const parts = b && b.keys.endsWith("--") ? [...b.keys.slice(0, -2).split("-"), "-"] : b?.keys.split("-");
-    const key = parts && parts.map((p) => mod[p.toLowerCase()] ?? p.toUpperCase()).join("");
-    return key ? `${key}  commands` : "commands";
+  // The next agent that waits for you, after the one you're in (so clicks go round them all).
+  goWaiting(waiting) {
+    if (!waiting.length) return;
+    const here = waiting.findIndex(a => a.focused);
+    run("pane.focus", { pane: waiting[(here + 1) % waiting.length].pane });
   }
 
   render() {
     const t = theme();
     const space = spaces().find(s => s.active);
     const list = agents();
-    const needs = list.filter(a => a.status === "blocked").length;
+    const waiting = list.filter(a => a.status === "blocked"), needs = waiting.length;
+    const g = this.git, pr = g ? prForBranch(lastQueue(), g.slug, g.branch) : null;
     const label = (icon, text) => h_flex().gap(6).items_center().child(svg(`mods/workspace-chrome/${icon}.svg`).size(13)).child(text);
     return footerBar(h_flex().w_full(), t).px(14).gap(16).bg(t.chrome).text_color(t.muted)
-      .child(label(space?.machine ? "server" : "monitor", space?.machine ?? "This computer"))
-      .when(Boolean(space?.branch), el => el.child(label("branch", space.branch)))
-      .child(h_flex().gap(6).items_center().child(div().size(6).rounded(3).bg(t.dim)).child(`${list.length} agents`)
-        .when(needs > 0, el => el.child(div().text_color(t.blocked).child(`· ${needs} needs you`))))
+      // Where you are: the machine when it isn't this one; the focused terminal's repository and branch, what's to
+      // push (↑) or pull (↓), and the branch's PR when pr-flow tracks it (a click: the PR view); then agents that need
+      // you (the sidebar lists them all, but it can be hidden).
+      .when(Boolean(space?.machine), el => el.child(label("server", space.machine)))
+      .when(Boolean(g?.repo), el => el.child(label("folder", g.repo)))
+      .when(Boolean(g), el => el.child(h_flex().gap(6).items_center()
+        .child(label("branch", g.branch ?? "detached"))
+        .children(syncMarks(g).map((m, i) => div().id(`git-mark-${i}`).text_color(m.tone === "push" ? t.ansi2 : m.tone === "pull" ? t.ansi3 : t.dim).tooltip(m.tip).child(m.text)))))
+      .when(Boolean(pr), el => el.child(h_flex().id("branch-pr").gap(6).px(6).py(1).rounded(5).items_center().cursor_pointer()
+        .hover(s => s.bg(t.hover).text_color(t.foreground))
+        .tooltip(`${pr.short} · ${pr.title}${pr.next_step?.text ? `\n${pr.next_step.text}` : ""}\nClick: the PR view`)
+        .on_click(() => openPrView(pr.key))
+        .child(div().text_color(t.accent).child(`#${pr.key.split("#")[1]}`))
+        .when(Boolean(STAGE[pr.stage]), x => x.child(div().text_color(STAGE[pr.stage][1] ? t.foreground : t.dim).child(STAGE[pr.stage][0])))))
+      // A link to them: each click goes to the next agent that waits for you (its space and tab with it).
+      .when(needs > 0, el => el.child(h_flex().id("needs-you").gap(6).px(6).py(1).rounded(5).items_center().text_color(t.blocked)
+        .cursor_pointer().hover(s => s.bg(t.blocked + "26")).tooltip(waiting.map(a => `${a.tab_name || a.title} · ${a.space_name}`).join("\n"))
+        .on_click(() => this.goWaiting(waiting))
+        .child(div().size(6).rounded(3).bg(t.blocked)).child(`${needs} need${needs === 1 ? "s" : ""} you`)))
       .child(div().flex_1())
       .when(Boolean(this.usage), el => {
         const u = usage(this.usage);
         return el.when(u.rows.length > 0, el => el.child(usageView(u, t)));
-      })
-      .child(div().id("palette").text_color(t.dim).on_click(() => run("app.palette")).child(this.hint(t)));
+      });
   }
 }

@@ -19,6 +19,8 @@ agent-fleet runs.
 | ⌘⇧R | **PR board** (pane on the right; ⌘⌥R opens the PR view) | Your [pr-flow](#pr-board) queue of pull requests, grouped by your next move: what each PR is, who's in it, and the next step; the PR view reviews one in the git graph with its findings. See [PR board](#pr-board). |
 | ⌘⇧F | **Fleet board** (pane on the right; ⌘⌥F as a large dialog) | An [agent-fleet](#fleet-board) run beside your agents: what needs you first, where every bead is, where its time went, and the gate's answer or resume right there. See [Fleet board](#fleet-board). |
 | ⌘B | Sidebar | Hides or shows the spaces and agents on the left. |
+| ⌥Tab | **Recent panes** (popup) | The panes you used last, across spaces, as a browser's ctrl+tab: it opens on the one before this; Tab goes further back, ⇧Tab forward, letting go of ⌥ goes there (its space and tab with it). Each row shows the space, the agent's tab name (or a shell's program and folder), where it is and the agent's state. ⌃Tab stays the next tab. |
+| ⌘. | **Zen mode** | Hides the tab bar, the status bar and the sidebar, and brings them back as they were. The panes, dialogs and the boards on the right (with their own headers) stay; Herdr's toast still says when an agent needs you. Best in fullscreen: in a window, macOS's buttons sit over the first pane's corner. |
 
 ⌘⇧ and a letter opens what you would expect for it: the file browser and beads as dialogs, the PR and fleet boards as panes beside the terminals. ⌘⌥ and the same letter opens the other form: the file browser docked in the side panel, the PR view, the fleet board as a large dialog.
 
@@ -52,9 +54,12 @@ The agents list shows each agent with its space's avatar. Right-click an agent t
 mark it unread: an idle agent marked unread waits in Done until you go back to it. The status bar can show your Claude
 subscription usage (see below).
 
-All three dialogs and the fleet pane use the same keys, for vim and arrow users alike: `j k` or
-`↑ ↓` move, `l →` go in, `h ←` come out (⏎ ⇥ toggle), `/` searches, `?` lists every key, Esc
-closes. In the fleet pane `space` runs the bead's first action and ⌘← ⌘→ switch fleet runs.
+The dialogs and both boards use the same keys, for vim and arrow users alike: `j k` or `↑ ↓` move,
+`l →` go in, `h ←` come out (⏎ ⇥ toggle), `/` searches, `?` lists every key, Esc steps back and
+finally closes. In the boards `space` runs the selected item's main action; ⌘← ⌘→ switch fleet runs.
+
+The tab bar keeps every tab's width as you switch tabs: each has its close button (dim until the
+pointer is on it), and an agent's tab keeps room for its status.
 
 ## Fleet board
 
@@ -165,11 +170,15 @@ three lines: what it is (number, title, repository), who's in it (author → rev
 sentence. A PR whose agent tab stopped to ask (a "go?", a permission) is your move too, first:
 answer its agent (space brings the tab forward). A PR whose agent you started stays in Your move,
 where it was, while the agent works. **Waiting on others** is one line per PR: on whom, since when,
-the shortest wait first. Later and dormant PRs are folded. Red means a real problem of yours: a
+the shortest wait first. Later and dormant PRs are folded, one line each when open: whose PR it is,
+and when a later one comes back ("in 10d") or how long a dormant one has been idle; a click on a
+number in a folded section opens it on that PR. Red means a real problem of yours: a
 review loop, failing CI or conflicts on your own PR (on a colleague's they're said, not red). ⏎ opens
-a PR's details and the actions possible in its state: the next step first, its alternatives (hand
-back on a colleague's PR), then the PR view, its agent tab and GitHub; an action that needs no
-follow-up closes them. The cards hold still while you work in the pane: one that's handed over says
+a PR's details and the actions possible in its state, as pr-flow lists them: the next step first,
+its alternatives (hand back on a colleague's PR), housekeeping as quiet words (later · ignore), then
+the PR view, its agent tab and GitHub; an action that needs no follow-up closes them. A card says
+each thing once: its second line is its status (an action of yours in flight, its agent's job
+running or failed, else the next step), and the details keep a one-line record of the last job. The cards hold still while you work in the pane: one that's handed over says
 where it goes ("→ Waiting on alice") and moves when the pointer leaves.
 
 **The PR view** (`d`, ⌘⌥R) is the git graph as a dialog on the PR's range in your local clone (its
@@ -202,18 +211,32 @@ denied in red, and how it ended ("done · 4m 35s · $2.15"), followed every few 
 **terminal** there shows pr-flow's own `job show` in a terminal below. Its height is remembered on
 its own.
 
+⌘⇧R puts the keyboard on the first PR. Every action has its own key, the same on every PR and
+shown on its button, so they become habit:
+
 | Key | |
 |---|---|
-| `j k` | move |
-| ⏎ `l` `h` | open or close the details |
-| `space` | the next step |
+| `j k` | move over the PRs and the sections' headings |
+| `l →` | in: open a section, go to its first PR, open its details, then step into its actions (← → between them, ⏎ runs one) |
+| `h ←` | out, the same steps back |
+| ⏎ ⇥ | a PR's details open or closed; a section folded or not |
+| `space` | the PR's main action, whichever it is (its agent tab when the agent waits for you) |
+| `a` `m` `v` | approve, merge, review (a self-check on your own PR) |
+| `p` `y` | post, copy your drafted comments |
+| `b` `n` `u` | hand back, ping, nudge |
+| `f` `e` `q` | fix, ready, request reviewers |
+| `z` `i` | later, ignore |
+| `X` `D` | close, discard the draft |
 | `d` | the PR view |
 | `t` | its agent tab |
 | `o` | the PR on GitHub |
-| `w` | its pr-flow job's log in the tail at the bottom (`-` `=` its height, esc closes it) |
+| `w` | its pr-flow job's log in the tail at the bottom (`-` `=` its height); `c` stops the job |
 | `s` | sync with GitHub now |
 | `/` | filter |
 | `?` | every key |
+
+Actions that change something on GitHub ask first (⏎ yes, Esc no); a key for an action the PR
+doesn't offer now says what it does offer.
 
 It reads pr-flow's queue (`queue --format json`) when pr-flow's state changes and every minute
 while shown, and syncs with GitHub every 10 minutes while shown. Each read saves pr-flow's last
@@ -254,7 +277,7 @@ herdr-app do layout.switch '{"name":"workbench"}'
 | ⌘⇧R PR board | The pr-flow Claude Code plugin (not public yet; see [PR board](#pr-board)), Node 20+ and `gh` |
 | `o` and `d` in the git graph | Git's editor and diff tool, set in git so Herdr finds them however it was started: `git config --global core.editor "code --wait"` and `git config --global diff.tool vscode`. Without an editor, `o` uses the system's app for the file type |
 | `claude-resume` after a reboot | Optional: [`extras/claude-resume`](extras/claude-resume) and the status line below (see [Resuming Claude sessions](#resuming-claude-sessions-after-a-reboot)) |
-| Usage in the status bar | Optional: a Claude Code status line that writes `~/.local/state/claude-usage.json`, such as [`extras/claude-statusline.py`](extras/claude-statusline.py) (see [Status bar usage](#status-bar-usage)) |
+| Usage in the status bar | Optional: a Claude Code status line that writes `~/.local/state/claude-usage.json`, such as [`extras/claude-statusline.py`](extras/claude-statusline.py) (see [Usage](#usage)) |
 
 Everything else is optional: a missing tool hides its feature.
 
@@ -264,7 +287,8 @@ Nothing here talks to a server of its own. The mods run local programs and read 
 their folders, which is how they get their data:
 
 - **Programs:** `git` (status, log, fetch, pull, push, worktree; fetch, pull and push reach
-  your remotes), `gh` (pull requests, on GitHub), `bd` and `fzf` (the beads view), `python3`
+  your remotes; the status bar runs a read-only `git status` in the focused terminal's folder every
+  few seconds), `gh` (pull requests, on GitHub), `bd` and `fzf` (the beads view), `python3`
   (beads-view, the extras), `fleet` (the fleet board), `node` with pr-flow's script (the PR board), `herdr-app` and `hc`, and your editor and
   diff tool when you ask for them.
 - **Files read:** your repositories; the layout's settings file (see [Settings](#settings)); agent-fleet's state under `~/.local/state/agent-fleet` (watched for changes);
@@ -294,7 +318,16 @@ The layout works without settings. These can be set in `~/.config/herdr-app/data
 - `pr_flow`: the `pr-flow.mjs` the PR board runs (default: the newest installed pr-flow plugin);
   `pr_flow_state`: another pr-flow state folder (the demo uses its own copy).
 
-## Status bar usage
+## Status bar
+
+The status bar shows only what the window doesn't show elsewhere: the focused terminal's
+repository and branch, `↑` commits to push and `↓` commits behind its upstream (as of the last
+fetch; or "not pushed", "upstream gone"), and the branch's pull request with its stage when pr-flow
+tracks it (a click opens the PR view); how many agents need you (a click goes to the next one);
+the machine, when the space runs on another one; and your Claude usage (below). It also keeps the
+order of the panes you used for ⌥Tab.
+
+### Usage
 
 The status bar shows your Claude subscription usage (the 5-hour and 7-day windows: share used,
 pace, projection at reset) once `~/.local/state/claude-usage.json` exists. Claude Code only
