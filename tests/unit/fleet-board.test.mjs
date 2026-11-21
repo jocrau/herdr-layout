@@ -238,3 +238,19 @@ test("tail panel: a turn up stops following the newest line, sideways in px with
   assert.equal(scrolled(v, 0, 900, 500).x, 0);
 });
 
+
+test("a parked bead whose gate you resolved waits for the next wave, not for you", () => {
+  const r = raw();
+  r.beads[1].gates = [{ id: "g1", kind: "questions", opened: T(10), resolved: T(12), how: "resumed" }];
+  r.gauges = { parked_waits: [{ bead: "acme.ep.2", since: T(10), seconds: 60 }] };
+  const s = normalize(r, "/r");
+  const b = s.beads[1];
+  assert.equal(b.state, "queued");
+  assert.equal(b.went, "resumed");
+  assert.equal(b.gate, null, "nothing offers to resume it again");
+  assert.equal(s.epic.beads.parked, 0);
+  assert.deepEqual(s.gauges.parked_waits, []);
+  const open = raw();
+  open.beads[1].gates = [{ id: "g1", kind: "questions", opened: T(10), resolved: null }];
+  assert.equal(normalize(open, "/r").beads[1].state, "parked", "an open gate still waits for you");
+});

@@ -27,7 +27,7 @@ export const ViewsMethods = {
       onWrap: b && same && !this.tail.error ? () => { this.tailWrap = !this.tailWrap; } : null,
       onTerminal: b?.history.length ? () => this.inTerminal(["fleet", "tail", b.id, "--follow"], `tail ${b.id}`) : null,
       terminalTip: b ? `fleet tail ${b.id} --follow, in a terminal below` : "",
-      onClose: () => { this.tailOn = false; }, closeTip: "Close the tail (t)",
+      onClose: () => { this.tailOn = false; }, closeTip: "Close the tail (w)",
     });
   },
 
@@ -67,13 +67,14 @@ export const ViewsMethods = {
   },
 
   // The bar that asks.
-  confirmBar(t, mono) {
+  // `under`: drawn under its bead (indented like the details), else at the top under the tabs.
+  confirmBar(t, mono, under = false) {
     const c = this.confirm;
     const btn = (id, label, primary, go) => div().id(id).px(10).h(22).rounded(5).flex().items_center().text_size(11.5)
       .when(primary, (x) => x.bg(t.accent).text_color(t.background).font_semibold())
       .when(!primary, (x) => x.border_1().border_color(t.border).text_color(t.foreground).hover((y) => y.bg(t.border)))
       .on_click((_e, cx) => { go(cx); cx.notify(); }).child(label);
-    return v_flex().px(10).py(6).gap(4).bg(t.hover).border_b_1().border_color(t.accent)
+    return v_flex().px(10).py(6).gap(4).bg(t.hover).when(under, (x) => x.pl(28).border_l_2()).when(!under, (x) => x.border_b_1()).border_color(t.accent)
       .child(div().text_size(12).font_semibold().text_color(t.foreground).child(c.title))
       .when(Boolean(c.detail), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(c.detail)))
       .when(Boolean(c.copy), (el) => el.child(div().font_family(mono).text_size(11).text_color(t.dim).child(c.copy)))
@@ -116,7 +117,9 @@ export const ViewsMethods = {
     const el = v_flex()
       .child(line.id(key).when(this.selId === b.id || this.openId === b.id, (el) => el.bg(t.hover)).hover((el) => el.bg(t.hover))
         .on_click((e, cx) => { this.selId = b.id; if (e.click_count >= 2) this.act(b, cx); else this.toggle(b.id); cx.notify(); }))
-      .when(first && this.openId === b.id, (x) => x.child(this.details(t, b, g, now)));
+      .when(first && this.openId === b.id, (x) => x.child(this.details(t, b, g, now)))
+      // The question about this bead, right under it (its details, if open): where you clicked, nothing above moves.
+      .when(first && this.confirm?.bead === b.id, (x) => { this.confirmDrawn = true; return x.child(this.confirmBar(t, this.mono, true)); });
     if (first) this.drawn.set(b.id, el);
     return el;
   },
@@ -242,9 +245,9 @@ export const ViewsMethods = {
       : h_flex().id("wave").flex_none().gap(4).items_center().px(6).h(18).rounded(9).border_1().border_color(asking ? t.accent : t.border)
         .when(asking, (x) => x.bg(t.hover))
         .hover((x) => x.bg(t.hover)).on_click((_e, cx) => { this.waveAction(); cx.notify(); })
-        .tooltip(tipText(`${wave.last_ended ? `Wave ${wave.number} ended: ${wave.last_ended.reason}, ${new Date(wave.last_ended.at).toLocaleString()}` : "No wave running"}\n${asking ? "Click again or esc: don't start it" : "Click to start the next one (asks first)"}`))
+        .tooltip(tipText(`${wave.last_ended ? `Wave ${wave.number} ended${wave.last_ended.reason ? `: ${wave.last_ended.reason}` : ""}, ${new Date(wave.last_ended.at).toLocaleString()}` : "No wave running"}\n${asking ? "Click again or esc: don't start it" : "Click to start the next one (asks first)"}`))
         .child(div().size(6).rounded(3).bg(t.dim))
-        .child(div().max_w(150).truncate().text_size(11.5).text_color(t.muted).child(wave.last_ended?.at ? `${wave.last_ended.reason} · ${dur(now - wave.last_ended.at)} ago` : "no wave"));
+        .child(div().max_w(150).truncate().text_size(11.5).text_color(t.muted).child(wave.last_ended?.at ? `${wave.last_ended.reason ?? "ended"} · ${dur(now - wave.last_ended.at)} ago` : "no wave"));
     const head = boardHeader(t, {
       mod: "fleet-board", title: e.id, open: this.picking, onTitle: (cx) => { this.togglePicker(); cx.notify(); }, onClose: (cx) => { this.closePicker(); cx.notify(); },
       menu: this.picking ? this.runPicker(t, now) : null,
@@ -300,7 +303,7 @@ export const ViewsMethods = {
         .on_click((_e, cx) => { this.view = v.id; this.reveal = true; cx.notify(); })
         .child(v.label)))
       .child(div().flex_1())
-      .when(Boolean(this.busy), (el) => el.child(div().pb(5).px(4).text_size(11).text_color(t.accent).loop("opacity", { from: 0.4, to: 1, period: 900 }).child(`${this.busy}…`)))
+      .when(Boolean(this.busy) && !this.drawn?.has(this.busy.bead), (el) => el.child(div().pb(5).px(4).text_size(11).text_color(t.accent).loop("opacity", { from: 0.4, to: 1, period: 900 }).child(`${this.busy.text}${this.busy.bead ? ` ${this.busy.bead}` : ""}…`)))
       .when(this.loading, (el) => el.child(div().pb(5).px(4).text_size(11).text_color(t.dim).loop("opacity", { from: 0.3, to: 1, period: 900 }).child("●")))
       .when(this.view === "lanes", (el) => el.child(div().id("span").pb(5).px(4).text_size(11.5).text_color(t.muted)
         .hover((x) => x.text_color(t.foreground)).tooltip("Time shown: [ ] or click")
@@ -319,6 +322,7 @@ export const ViewsMethods = {
       "waiting for CI": [b.pr ? `PR #${b.pr}` : "CI", t.ansi2],
       blocked: [`after ${b.blockers.map(short).join(", ") || "?"}`, t.dim],
       dropped: [b.parked || "taken back", t.dim],
+      queued: b.went ? [`${b.went} · next wave`, t.accent] : null,
     }[b.state] ?? null;
   },
 
@@ -427,10 +431,11 @@ export const ViewsMethods = {
           .child(div().w(44).text_size(11.5).text_color(t.foreground).child(dur((w.resolved ?? now) - w.opened)))
           .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(w.resolved ? t.dim : t.ansi1).child(w.resolved ? (w.how ?? "answered") : "waiting"))))))
       .when(acts.length > 0, (el) => el.child(h_flex().pt(2).gap(4).flex_wrap().children(acts.map((a, i) => div().id(`act-${b.id}-${i}`).px(7).h(20).rounded(5)
-        .border_1().border_color(t.border).text_size(11.5).text_color(t.foreground).flex().items_center()
+        .border_1().border_color(t.border).text_size(11.5).text_color(t.foreground).flex().items_center().gap(4)
         .when(i === 0 && b.state === "parked" && !asks(b) && a.label === "resume", (x) => x.bg(t.accent).border_color(t.accent).text_color(t.background).font_semibold())
         .hover((x) => x.bg(t.border)).tooltip(a.tip)
         .on_click((_e, cx) => { a.go(); cx.notify(); })
+        .when(Boolean(a.key), (x) => x.child(div().text_size(10.5).text_color(t.dim).child(a.key)))
         .child(a.label)))));
   },
 
@@ -530,7 +535,8 @@ export const ViewsMethods = {
       .tooltip("fleet answer: the agent reads your note when it resumes").on_click((_e, cx) => { const n = this.answerOf(b); if (n) { n.noting = true; this.focusSoon(n.area, cx); } cx.notify(); })
       .child("+ resume with a note for the agent"));
     if (!a) return box.child(div().id(`ans-${b.id}`).px(10).h(24).rounded(5).border_1().border_color(t.border).text_size(11.5).text_color(t.foreground).flex().items_center()
-      .hover((x) => x.bg(t.border)).on_click((_e, cx) => { this.focusSoon(this.answerOf(b)?.area, cx); cx.notify(); }).child("Answer here"));
+      .gap(4).hover((x) => x.bg(t.border)).on_click((_e, cx) => { this.focusSoon(this.answerOf(b)?.area, cx); cx.notify(); })
+      .child(div().text_size(10.5).text_color(t.dim).child("p")).child("Answer here"));
     return box
       .child(Textarea.new(a.area).w_full().px(6).py(4).rounded(5).border_1().border_color(this.typing ? t.accent : t.border).bg(t.background).text_size(12).text_color(t.foreground))
       .child(h_flex().gap(8).items_center()
@@ -547,7 +553,8 @@ export const ViewsMethods = {
   row(t, b, mono, g, short, now) {
     const open = this.openId === b.id, tag = this.tag(b, short, t);
     const titleColor = this.titleColor(t, b);
-    const reason = b.state === "parked" && !open ? gateText(b.gate) : ""; // open, the details say it
+    const doing = this.busyOn(b.id); // a command you ran on it: what runs, until the run is read again
+    const reason = b.state === "parked" && !open && !doing ? gateText(b.gate) : ""; // open, the details say it
     // Waiting on GitHub: what for (fleet 0.38's waiting_on: checks running, its turn, the epic branch red, ...).
     const waits = b.state === "waiting for CI" ? b.waiting_on ?? "" : "";
     // Every cell sits in a first line of ROW.h, centred, open or not. Open, the title leaves that line for one of
@@ -562,6 +569,7 @@ export const ViewsMethods = {
         .when(Boolean(tag), (el) => el.child(cell(div().max_w(150).truncate().text_size(ROW.small).text_color(tag[1]).when(Boolean(tag[2]), (x) => x.font_semibold()).child(tag[0]))))
         .child(cell(this.meta(t, b, now))))
       .when(open, (el) => el.child(div().pl(18).pb(4).text_size(ROW.text).text_color(titleColor).child(b.title)))
+      .when(Boolean(doing), (el) => el.child(div().pl(18).pb(4).text_size(ROW.small).text_color(t.accent).loop("opacity", { from: 0.4, to: 1, period: 900 }).child(`◷ ${doing}…`)))
       .when(Boolean(reason), (el) => el.child(div().pl(18).pb(4).text_size(ROW.small).text_color(t.ansi1).when(!open, (x) => x.truncate()).child(reason)))
       .when(Boolean(waits), (el) => el.child(div().pl(18).pb(4).text_size(ROW.small).text_color(t.muted).when(!open, (x) => x.truncate()).child(waits)));
     return this.item(t, b, g, now, `row-${b.id}`, line);
@@ -588,7 +596,7 @@ export const ViewsMethods = {
         .when(Boolean(sec.fold), (el) => el.hover((x) => x.bg(t.hover)).on_click((_e, cx) => { this.showDone = !this.showDone; cx.notify(); }))
         .child(div().text_size(11).font_semibold().text_color(sec.state === "parked" ? t.ansi1 : t.dim).child(sec.label.toUpperCase()))
         .child(div().text_size(11).text_color(t.dim).child(dropped ? `${list.length - dropped} · ${dropped} dropped` : String(list.length)))
-        .when(Boolean(sec.fold), (el) => el.child(div().text_size(11).text_color(t.dim).child(this.showDone ? "▾ d" : "▸ d"))));
+        .when(Boolean(sec.fold), (el) => el.child(div().text_size(11).text_color(t.dim).child(this.showDone ? "▾ 0" : "▸ 0"))));
       if (sec.fold && !this.showDone && !this.filter) continue;
       for (const b of list) out.push(this.row(t, b, mono, g, short, now));
     }
@@ -698,14 +706,18 @@ export const ViewsMethods = {
       ["⏎ ⇥", "open or close the bead's details"],
       ["l →  h ← x", "open / close the details"],
       ["space", "its first action (answer a question, resume, tail, diff); one that changes the run asks first"],
-      ["t", "its fleet tail at the bottom"],
+      ["a f i", "approve, resume (another fix round), drop: the same key on every bead, shown on its button; they ask first"],
+      ["p", "answer: the bead's answer field"],
+      ["t v", "its agent session tab, its gate (fleet gate show)"],
+      ["d o", "its diff in the git graph, its PR on GitHub"],
+      ["w", "its fleet tail at the bottom"],
       ["- =", "the tail three lines shorter / taller (or drag its top edge; double-click: back to 14)"],
       ["b", "it in the beads view"],
       ["/", "filter by id or title (backspace clears)"],
-      ["1 2", "Board, Lanes"],
+      ["1 2", "Board, Lanes (digits change what's shown)"],
       ["e", "every fleet run, in a list under the title (j k, ⏎ shows one, esc closes)"],
       ["⌘← ⌘→", "the previous / next fleet run"],
-      ["d", "show or fold Done"],
+      ["0", "show or fold Done"],
       ["[ ]", "zoom Lanes"],
       ["r", "read the run again"],
       ["?", "this list (any key closes it)"],

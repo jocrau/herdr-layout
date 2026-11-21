@@ -16,11 +16,11 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle, Popup } from "gpui-base";
 import { theme, settings, nextCommand, props, layout, notify, watchFolder, checking, closeOverlay } from "herdr";
-import { readQueue, lastQueue, queueRows, stateDir, doVerb, verbPlan, jobFor, jobText, jobLabel, detailJob, jobActive, jobDetail, findingsText, oldFindingsText, jobShow, jobStop, jobTerminal, jobLog, openPrView, talkTab, prTab, tabName, parseKey, draftReady, storedDraft, capabilities } from "./lib/prflow.js";
+import { readQueue, lastQueue, queueRows, stateDir, doVerb, verbPlan, jobFor, jobText, jobLabel, jobModel, detailJob, jobActive, jobDetail, findingsText, oldFindingsText, jobShow, jobStop, jobTerminal, jobLog, openPrView, talkTab, prTab, tabName, parseKey, draftReady, storedDraft, capabilities, prflowMachine } from "./lib/prflow.js";
 import { tabDot, alpha, numWidth } from "./lib/prrows.js";
-import { GROUPS, arrange, moveOf, nextStep, people, waitingOn, splitTitle, ago, actionsFor, agentWaits, agentAtWork, placeText, saidAlready, readableTimes } from "./model.js";
+import { GROUPS, arrange, moveOf, nextStep, people, waitingOn, splitTitle, ago, actionsFor, agentWaits, agentAtWork, planWaits, placeText, saidAlready, readableTimes } from "./model.js";
 import { tipText } from "./lib/tiptext.js";
-import { closeSide } from "./lib/sidecolumn.js";
+import { closeSide, focusFrame, toTerminal } from "./lib/sidecolumn.js";
 import { boardHeader, boardTop } from "./lib/boardheader.js";
 import { footerBar } from "./lib/bars.js";
 import { tailPanel, TailSize } from "./lib/tailpanel.js";
@@ -34,6 +34,7 @@ const TYPE = { title: 13, body: 12.5, meta: 12 };
 const textAt = (numW) => 8 + 2 + 8 + GAP + numW + GAP;
 const SYNC_EVERY = 600000; // with GitHub (only what changed), while shown
 const READ_EVERY = 60000; // pr-flow's stored queue (no GitHub), while shown
+const REMOTE_READ = 15000; // the same with pr-flow on another machine, whose state folder isn't watched
 const STUCK_AFTER = 240000; // a read still going after this is taken as lost (a sync gives up after 180 s)
 const FOLLOW_EVERY = 2000; // the open PR's running job (`job show --json`), while its details are open
 const TAIL_EVERY = 3000; // the tail panel re-reads a running job's log this often
@@ -111,7 +112,8 @@ export default class PrBoard extends View {
     cx.spawn(async (cx) => {
       for (;;) {
         const c = String(await nextCommand()).replace(/^pr-board\./, "");
-        if (c === "focus") this.h.focus();
+        if (c === "focus") { this.h.focus(); if (!this.order.includes(this.sel)) this.sel = this.order.find((x) => !isGrp(x)) ?? this.order[0] ?? null; this.reveal = true; }
+        else if (c === "leave") toTerminal();
         else if (c === "view") this.openView();
         // pr:<repo>#<n> (or owner/repo#n): that PR's view, e.g. from a key or a script.
         else if (c.startsWith("pr:")) { const want = c.slice(3); const r = queueRows(this.q).find((x) => x.key === want || x.short === want); if (r) openPrView(r.key); else notify({ title: `${want} isn't in pr-flow's queue`, level: "info", timeout: 3000 }); }
@@ -143,7 +145,15 @@ export default class PrBoard extends View {
 
   // pr-flow's state folder: a recorded step (events.jsonl) or a PR's record changing means the queue did.
   // Changes right after this pane's own read are its own (sync writes them).
+  // With pr-flow on another machine its folder can't be watched from here: the stored queue is read every
+  // REMOTE_READ while the pane is shown instead.
   async watch(cx) {
+    if (await prflowMachine()) {
+      for (;;) {
+        await cx.sleep(REMOTE_READ);
+        if (shown() && !this.loading && Date.now() - this.readAt >= REMOTE_READ) this.read(cx);
+      }
+    }
     const dir = await stateDir();
     for (;;) {
       let paths;
@@ -367,6 +377,7 @@ export default class PrBoard extends View {
     else if (is("escape") && this.tailOn) this.tailOn = false; // the tail first: the last thing opened, at the bottom
     else if (is("h", "left", "x", "escape") && this.openKey) this.openKey = null;
     else if (is("h", "left") && row && this.groupOf?.get(row.key)) { this.sel = `grp:${this.groupOf.get(row.key)}`; this.reveal = true; }
+    else if (is("space") && row && planWaits(row)) openPrView(row.key); // a fix plan waits: read it beside the code
     else if (is("space") && row && agentWaits(row)) this.talk(row, cx);
     else if (is("space") && row && actionsFor(row).main) this.runVerb(actionsFor(row).main, row, cx);
     else if (is("d") && row) openPrView(row.key);
@@ -397,6 +408,10 @@ export default class PrBoard extends View {
 
   header(t) {
     const rows = this.rows(), needs = rows.filter((r) => moveOf(r)[0] === "you" && !agentAtWork(r));
+    // While the order holds, a PR that just came to Your move still sits where it was (folded, maybe): the count
+    // says so, and a click on it lets go of the order, so they show in Your move now.
+    const drawnYou = new Set((this.drawnBlocks ?? []).filter((b) => b.group === "you").flatMap((b) => b.keys));
+    const heldAway = needs.filter((r) => !drawnYou.has(r.key)).length;
     const syncedAt = this.q?.data?.lastSync ? Date.parse(this.q.data.lastSync) : 0;
     const synced = syncedAt ? syncedAgo(Date.now() - syncedAt) : "not yet", stale = !syncedAt || Date.now() - syncedAt > 1800000;
     const warnings = this.q?.warnings ?? [];
@@ -404,7 +419,9 @@ export default class PrBoard extends View {
       boardHeader(t, {
         mod: "pr-board", title: "PRs",
         facts: [
-          { id: "pr-needs", text: needs.length ? `${needs.length} need you` : "nothing needs you", color: needs.length ? t.ansi1 : t.dim },
+          { id: "pr-needs", text: needs.length ? `${needs.length} need you` : "nothing needs you", color: needs.length ? t.ansi1 : t.dim,
+            ...(heldAway && this.snap ? { tip: tipText(`${heldAway} still where ${heldAway > 1 ? "they were" : "it was"} (marked red): the order holds while the pointer is over the pane. Click to show ${heldAway > 1 ? "them" : "it"} in Your move now`),
+              onClick: (cx) => { this.letGo = true; cx.notify(); } } : {}) },
           ...(this.newCount ? [{ id: "pr-new", text: `+${this.newCount} new`, color: t.accent, tip: "New in the queue: shown when the pointer leaves the pane (the order holds while you work in it)" }] : []),
           { id: "pr-synced", text: `${this.q?.data?.tracked ?? 0} tracked · synced ${synced}`, color: stale ? t.ansi3 : t.dim,
             tip: stale ? "pr-flow hasn't synced with GitHub for a while: s syncs now" : "When pr-flow last asked GitHub" },
@@ -456,7 +473,8 @@ export default class PrBoard extends View {
     // Each thing once. Not what the card says already (its title, detail line, next step), nor a one-word
     // reason that only names the section ("draft").
     const said = this.cardSays(r), st = this.status(t, r);
-    const reasons = (rec.reasons ?? []).filter((x) => /\s/.test(x.trim()) && !/\bjob-\d{8}-/.test(x) && !/^snoozed until/i.test(x)
+    // pr-flow 0.45.1's "fix plan waiting for your go" says what the next step already says ("Fix plan ready · …").
+    const reasons = (rec.reasons ?? []).filter((x) => /\s/.test(x.trim()) && !/\bjob-\d{8}-/.test(x) && !/^snoozed until/i.test(x) && !(planWaits(r) && /^fix plan waiting\b/i.test(x))
       && !saidAlready(x, said) && !said.includes(x.toLowerCase().replace(/^re-review: head moved since/, "re-review what changed since")));
     // The status line says the job failed: the next step it took the place of, first.
     if (st.kind === "failed" && nextStep(r).text) reasons.unshift(nextStep(r).text);
@@ -468,6 +486,8 @@ export default class PrBoard extends View {
     const tab = prTab(r.key), acts = actionsFor(r), job = this.jobOf(r);
     // A draft to read: the version a job stored, else whatever pr-flow drafted (the PR is at "post your comments").
     const draft = draftReady(this.q, r) ?? (r.stage === "NEEDS_YOU" ? { v: null } : null);
+    // The fix round's plan waiting for your go (pr-flow 0.45.0): read and changed in the PR view, beside the code.
+    const plan = r.rec?.fixPlan?.state === "waiting" ? r.rec.fixPlan : null;
     const tip = (v) => {
       const p = verbPlan(r, v, verbs);
       const where = p.kind === "agent" ? `\nIn ${tabName(r.key)}'s agent tab` : p.kind === "job" ? `\nIn the background when pr-flow can run it as a job, else in ${tabName(r.key)}'s agent tab` : "";
@@ -478,6 +498,7 @@ export default class PrBoard extends View {
     // → on the open PR steps into these, in the order drawn (key()): the actions, then the links.
     const items = [...runnable.filter((v) => acts.keep.length <= 3 || !acts.keep.includes(v)).map((v) => ({ id: `pr-${r.key}-${v}`, run: (cx) => this.runVerb(v, r, cx) })),
       ...(draft ? [{ id: `pr-${r.key}-draft`, run: () => openPrView(r.key) }] : []),
+      ...(plan ? [{ id: `pr-${r.key}-plan`, run: () => openPrView(r.key) }] : []),
       { id: `pr-${r.key}-view`, run: () => openPrView(r.key) }, { id: `pr-${r.key}-tab`, run: (cx) => this.talk(r, cx) },
       { id: `pr-${r.key}-gh`, run: (cx) => this.runVerb("open", r, cx) }];
     this.actItems = { key: r.key, items };
@@ -512,7 +533,8 @@ export default class PrBoard extends View {
       .child(h_flex().flex_1().min_w(0).gap(4).flex_wrap().items_center()
         .when(Boolean(acts.main), (e) => e.child(verbPill(acts.main, true)))
         .children(acts.also.filter((v) => !verbPlan(r, v, verbs).disabled).map((v) => verbPill(v, false)))
-        .when(Boolean(draft), (e) => e.child(pill(`pr-${r.key}-draft`, draft.v ? `draft v${draft.v} ↗` : "draft ↗", "The draft in the PR view: its summary, each comment on its line; post, copy, shorter, softer, more there (d)", false, () => openPrView(r.key), "d"))))
+        .when(Boolean(draft), (e) => e.child(pill(`pr-${r.key}-draft`, draft.v ? `draft v${draft.v} ↗` : "draft ↗", "The draft in the PR view: its summary, each comment on its line; post, copy, shorter, softer, more there (d)", false, () => openPrView(r.key), "d")))
+        .when(Boolean(plan), (e) => e.child(pill(`pr-${r.key}-plan`, "fix plan ↗", "The fix round's plan in the PR view, each item on its line: change an item there, or go (d)", false, () => openPrView(r.key), "d"))))
       .child(h_flex().flex_none().pt(1).items_center().children(more));
     const where = h_flex().gap(2).flex_wrap().items_center()
       .child(link(`pr-${r.key}-view`, "PR view ↗", "The PR view: its files and diff, each finding on its line, in the git graph (d)", () => openPrView(r.key), false, "d"))
@@ -531,7 +553,8 @@ export default class PrBoard extends View {
   // The PR's last pr-flow job, as a quiet record under the actions' reasons (capability `jobs`): the status line
   // says what a running job does and why one failed, the context line what a review found, so this only says when
   // ("Self-check started 2m ago", "Last review 8m ago") and where to look (log ↗, output ↗ and stop while it runs);
-  // its phase, runtime, model, cost and id in the tooltip. One meta line in every state, so the card keeps its height.
+  // the model and effort it ran with after that; its phase, runtime, cost and id in the tooltip. One meta line in
+  // every state, so the card keeps its height.
   jobLine(t, r, j, link) {
     const verb = jobLabel(j, r), label = `${verb[0]?.toUpperCase() ?? ""}${verb.slice(1)}`; // "Self-check" on your own PR
     const d = jobDetail(j, Date.now(), label), active = jobActive(j), now = Date.now();
@@ -540,10 +563,12 @@ export default class PrBoard extends View {
       : j.state === "failed" ? `Last ${verb} failed ${since(j.ended_at)}`
       : j.state === "cancelled" ? `Last ${verb} stopped ${since(j.ended_at)}`
       : `Last ${verb} ${since(j.ended_at)}`;
+    // What it ran with, said here once (not in the tooltip): pr-flow picks it from its agents settings and the PR's size.
+    const model = jobModel(j);
     const cost = typeof j.cost === "number" ? `$${j.cost.toFixed(2)}` : null;
     return h_flex().gap(2).items_center()
       .child(div().id(`pr-${r.key}-job`).flex_1().min_w(0).truncate().py(2).text_size(TYPE.meta).text_color(t.dim)
-        .tooltip(tipText([d.state, d.error, d.meta, cost].filter(Boolean).join("\n"))).child(text.trim()))
+        .tooltip(tipText([d.state, d.error, d.meta, cost].filter(Boolean).join("\n"))).child(model ? `${text.trim()} · ${model}` : text.trim()))
       .child(link(`pr-${r.key}-job-out`, active ? "output ↗" : "log ↗",
         active ? "What the agent is doing, followed in the tail at the bottom (w): its words, commands and errors" : "What the agent did, in the tail at the bottom (w): its words, commands, errors and result",
         (_e, cx) => { this.sel = r.key; this.toggleTail(cx); cx.notify(); }, this.tailOn && this.tail.id === j.id, "w"))
@@ -580,7 +605,7 @@ export default class PrBoard extends View {
         ["esc", "back one step (actions, tail, details, filter); then closes the column"], ["/", "filter (esc clears)"],
       ]],
       ["ACT (the same key on every PR; shown on its button)", [
-        ["space", "the PR's main action, whichever it is; its agent tab when the agent waits for you"],
+        ["space", "the PR's main action, whichever it is; its agent tab when the agent waits for you; a fix plan in the PR view"],
         ["a  m", "approve, merge"], ["v", "review (self-check on yours)"], ["p  y", "post, copy your comments"],
         ["b  n  u", "hand back, ping, nudge"], ["f  e  q", "fix, ready, request reviewers"],
         ["z  i", "later, ignore"], ["X  D", "close, discard the draft"], ["", "outward ones ask first: ⏎ yes, esc no"],
@@ -693,6 +718,12 @@ export default class PrBoard extends View {
       .on_click((_e, cx) => { this.touched(); this.sel = r.key; this.h.focus(); this.openKey = this.openKey === r.key || r.gone ? null : r.key; this.moreOpen = false; cx.notify(); });
   }
 
+  // The PRs that moved since the held order: in their new place, lit for a moment.
+  flashMoved(live, now) {
+    const was = new Map(this.snap.flatMap((b) => b.keys.map((k) => [k, `${b.group}|${b.label}`])));
+    for (const b of live) for (const r of b.rows) if (was.has(r.key) && was.get(r.key) !== `${b.group}|${b.label}`) this.flash.set(r.key, now + MOVED_FLASH);
+  }
+
   body(t, mono) {
     const q = this.q, out = [], now = Date.now();
     this.order = []; this.drawn = new Map(); this.newCount = 0; this.groupOf = new Map(); this.openGroups = new Set();
@@ -706,6 +737,7 @@ export default class PrBoard extends View {
     }
     const shape = (bs) => bs.map((b) => ({ group: b.group, label: b.label, keys: b.rows.map((r) => r.key) }));
     let blocks;
+    if (this.letGo) { this.letGo = false; this.inputAt = Date.now(); if (this.snap) this.flashMoved(live, now); this.snap = shape(live); }
     if (this.holding()) {
       // The order as drawn when you started working in the pane; each PR as it is now, a gone one as last seen.
       // New PRs wait (the header counts them).
@@ -716,11 +748,7 @@ export default class PrBoard extends View {
         rows: b.keys.map((k) => byKey.get(k) ?? (this.seen.has(k) ? { ...this.seen.get(k), gone: true } : null)).filter(Boolean) }));
     } else {
       // Let go: the PRs that moved show in their new place for a moment.
-      if (this.snap) {
-        const was = new Map(this.snap.flatMap((b) => b.keys.map((k) => [k, `${b.group}|${b.label}`])));
-        for (const b of live) for (const r of b.rows) if (was.has(r.key) && was.get(r.key) !== `${b.group}|${b.label}`) this.flash.set(r.key, now + MOVED_FLASH);
-        this.snap = null;
-      }
+      if (this.snap) { this.flashMoved(live, now); this.snap = null; }
       blocks = live;
     }
     this.drawnBlocks = shape(blocks);
@@ -752,8 +780,10 @@ export default class PrBoard extends View {
       // Folded: the PRs' numbers; a click on one opens the section, that PR selected and its details open.
       if (!open) {
         out.push(h_flex().pl(8 + 2 + 8 + GAP - 4).pr(10).pb(2).flex_wrap().font_family(mono).text_size(TYPE.meta).text_color(t.dim)
-          .children(rows.map((r) => div().id(`pr-fold-${r.key}`).px(4).rounded(4).cursor_pointer().hover((e) => e.bg(t.hover).text_color(t.foreground))
-            .tooltip(tipText(`${r.short} · ${r.title}`))
+          .children(rows.map((r) => ({ r, to: leaving(r, mine.find((b) => b.rows.includes(r))) })).map(({ r, to }) => div().id(`pr-fold-${r.key}`).px(4).rounded(4).cursor_pointer().hover((e) => e.bg(t.hover).text_color(t.foreground))
+            // One that's leaving for Your move (the order holds it here): red, as the header's count.
+            .when(Boolean(to) && moveOf(r)[0] === "you", (e) => e.text_color(t.ansi1))
+            .tooltip(tipText(`${r.short} · ${r.title}${to ? `\n→ ${to}` : ""}`))
             .on_click((_e, cx) => { this.touched(); this.fold.set(g, true); this.sel = r.key; this.openKey = r.key; this.moreOpen = false; this.reveal = true; this.h.focus(); cx.notify(); })
             .child(`#${r.key.split("#")[1]}`))));
         continue;
@@ -800,6 +830,7 @@ export default class PrBoard extends View {
       })
       .on_mouse_down("left", () => this.touched())
       .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx))
+      .when(true, (e) => focusFrame(e, t, this.h.is_focused() || this.filtering))
       .child(this.header(t))
       .when(Boolean(this.confirm) && !this.confirmDrawn, (e) => e.child(this.confirmBar(t)))
       .when(this.filtering || Boolean(this.filter), (e) => e.child(h_flex().px(10).py(4).gap(6).items_center().border_b_1().border_color(t.border)

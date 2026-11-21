@@ -4,9 +4,23 @@
 
 First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (⌘G), `beads` (⌘B),
 `fleet-board` (⌘⇧F), `new-space` (⌘N), `worktree-support`/`worktree-actions`, `space-agents`,
-`tabs-graph`, `usage-status`, `preview-plus` and `sidebar-footer`, and one keymap across the
+`tabs-graph`, `usage-status` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- The fix round's plan in the PR view (pr-flow 0.45.0, its ENGINE.md "Fix plans"): when a fix session on your own PR shows
+  its plan, the notes show it too (FIX PLAN: each item's severity, verdict, place, point, reply or proof; the go
+  line) and the items with a code place sit on their lines in the diff, on the reading path (`n N`). ⏎ on an item
+  opens its verdicts (`f w a u s`), a text box takes anything else, and ⌘⏎ asks, then types `go`: all typed into
+  the PR's session as you'd type them there, the changed plan replacing the one shown. The PR board's card says
+  "Fix plan ready" as your move (not "agents at work"), with `fix plan ↗` (d); space opens it.
+- `preview-plus` is gone: the file browser, which replaced it in the side panel, is the one viewer, so a fix lands
+  once. Its Mermaid bundle is the newer build with the elkjs and entities licence notices kept in it.
+- Keys mean the same across the boards: on the fleet board each bead action has a fixed letter, shown on its
+  button and the PR board's where they match: `a` approve, `f` resume (another fix round), `i` drop, `p` answer,
+  `t` its session tab, `v` its gate, `d` its diff, `o` its PR, `b` the beads view. The tail moves from `t` to `w` (as
+  on the PR board) and folding Done from `d` to `0`. In the beads view space shows or hides the details, as ⏎ and ⇥
+  (folding stays on `l` `h` and the digits). Digits change what is shown, never act on an item: levels in the beads
+  view, Board/Lanes and Done on the fleet board.
 - Header and footer rows line up across the window: every header is 42 px (the brand row, the tab bar, the side
   panel's and every board's header) and every footer 28 px with 12 px text (Settings, the status bar, the fleet
   board's, the PR board's and the file browser's footer), from one place (`lib/bars.js`).
@@ -56,6 +70,8 @@ dialogs and the fleet pane.
 - beads-view: Delete (⌫, or ⌦) closes the selected bead after a y/n asked in the footer; bd's refusal shows
   there. With the filter showing, both keys edit it, and ⌫ on an empty filter still goes up out of a focus.
   In navigate mode ⌫ no longer goes up; ← does.
+- beads-view: s syncs the beads with their Dolt remote (`bd sync`: pull, conflict check, push), saying so in the
+  footer, then reloads the tree; a conflict or a push race shows there until a key is pressed.
 - `fleet-board`: the Epic card says "N wait for your triage" only for the follow-ups `fleet triage` lists (open,
   unassigned; agent-fleet 0.39's `untriaged`); the decided ones show as a quiet "M open follow-ups (decided;
   listed in the PR to main)", and an older agent-fleet gets "N open follow-ups" without a triage claim. The

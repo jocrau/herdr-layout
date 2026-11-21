@@ -6,7 +6,7 @@ import { register } from "node:module";
 import { arrange, nextStep, moveOf, actionsFor, actionOf, waitingOn, readableTimes, withProblem, viewOf } from "../../mods/pr-board/model.js";
 
 register("./stub-hooks.mjs", import.meta.url);
-const { verbPlan, jobFor, jobText, detailJob, jobActive, jobDetail, transcriptLines, toolLine, runTime, jobShowArgs, shq } = await import("../../lib/prflow.js");
+const { verbPlan, jobFor, jobText, detailJob, jobActive, jobDetail, jobModel, transcriptLines, toolLine, runTime, jobShowArgs, shq } = await import("../../lib/prflow.js");
 
 const act = (verb, kind, role, extra = {}) => ({ verb, label: verb[0].toUpperCase() + verb.slice(1), kind, role, outward: false, confirm: null, disabled_reason: null, ...extra });
 const merge = {
@@ -119,13 +119,14 @@ test("a PR's job in its details: the row's, else its latest ended one; what it's
   assert.equal(detailJob(q, { key: "acme/none#1" }, now), null);
   assert.equal(detailJob(null, { key: "x" }, now), null);
   assert.ok(jobActive(q.jobs[0]) && jobActive({ state: "queued" }) && !jobActive(q.jobs[1]) && !jobActive(null));
-  assert.deepEqual(jobDetail(q.jobs[0], now), { state: "review running · 40% · reading the diff · 3m", meta: "claude · opus · high · j2", error: null });
+  assert.deepEqual(jobDetail(q.jobs[0], now), { state: "review running · 40% · reading the diff · 3m", meta: "claude · j2", error: null });
   assert.deepEqual(jobDetail(q.jobs[1], now), { state: "review done after 12m · $0.42", meta: "j1", error: null });
   assert.equal(jobDetail(q.jobs[2], now).state, "check stopped · after <1m");
   assert.deepEqual(jobDetail(q.jobs[3], now), { state: "review failed after 30m", meta: "j4", error: "the answer does not match the schema" });
   assert.equal(jobDetail({ id: "j6", verb: "review", state: "failed" }, now).error, "pr-flow gave no reason");
   assert.equal(jobDetail({ id: "j7", verb: "review", state: "queued" }, now).state, "review queued");
   assert.equal(jobDetail(null), null);
+  assert.equal(jobModel(q.jobs[0]), "opus high"); assert.equal(jobModel({ model: "sonnet" }), "sonnet"); assert.equal(jobModel({ runtime: "command", model: null, effort: null }), ""); assert.equal(jobModel(null), "");
   assert.equal(jobDetail(q.jobs[1], now, "self-check").state, "self-check done after 12m · $0.42");
 });
 
@@ -247,4 +248,15 @@ test("Waiting on others: the shortest wait first, an unknown one last; ties by r
   const w = (n, since) => ({ key: `o/r#${n}`, stage: "WAITING", role: "reviewer", move: { group: "waiting", label: "author", order: null, waiting_on: { kind: "author", who: ["vic"], since } }, next_step: { text: "", problem: false }, actions: [] });
   const rows = [w(1, "2026-11-01T00:00:00Z"), w(2, null), w(3, "2026-11-18T00:00:00Z"), w(4, "2026-11-10T00:00:00Z"), w(5, "2026-11-18T00:00:00Z")];
   assert.deepEqual(arrange(rows)[0].rows.map((r) => r.key), ["o/r#3", "o/r#5", "o/r#4", "o/r#1", "o/r#2"]);
+});
+
+test("a fix plan waiting for your go is your move (Fix plan), not an agent at work, though its session holds the PR", async () => {
+  const { moveOf, agentAtWork, planWaits } = await import("../../lib/prmodel.js");
+  const row = { key: "o/r#1", role: "author", stage: "MY_BUSY", tab: "idle", rec: { fixPlan: { state: "waiting", items: 3, fix: 1 } },
+    move: { group: "you", label: "Fix plan", order: 1, waiting_on: null }, next_step: { text: "Fix plan ready · 3 items (1 fix)", problem: false }, actions: [] };
+  assert.equal(planWaits(row), true); assert.equal(agentAtWork(row), false);
+  assert.deepEqual(moveOf(row), ["you", "Fix plan", null, 1]);
+  // Once go is given, the session is at work again.
+  const going = { ...row, rec: { fixPlan: { state: "going", items: 3, fix: 1 } }, move: { group: "waiting", label: "an agent working", order: null, waiting_on: { kind: "agent", who: ["session-ab"], since: null } }, tab: "working" };
+  assert.equal(planWaits(going), false); assert.equal(agentAtWork(going), true);
 });

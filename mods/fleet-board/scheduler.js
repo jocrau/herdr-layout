@@ -1,9 +1,9 @@
 // Fleet board: the background work: one worker loop (Herdr wakes one sleeping task a mod reliably), the reads,
 // the strip's scan, the tail, the hidden look, the folder watch. Mixed into FleetBoard.
-import { props, panes, spaces, run, exec, watchFolder } from "herdr";
-import { readSnapshot, fleetBin, readRuns } from "./fleet.js";
+import { props, panes, spaces, run, watchFolder } from "herdr";
+import { readSnapshot, fleetExec, fleetMachine, readRuns } from "./fleet.js";
 import { stateRoot, relevant, summarize, changedRepos, runKey } from "./snapshot.js";
-import { IDLE_POLL, SCAN_EVERY, DIRTY_EVERY, HIDDEN_CHECK, MIN_GAP, TAIL_EVERY } from "./model.js";
+import { IDLE_POLL, REMOTE_POLL, SCAN_EVERY, DIRTY_EVERY, HIDDEN_CHECK, MIN_GAP, TAIL_EVERY } from "./model.js";
 import { shown, load, save, focusedFolder, targetOf, splitTarget } from "./env.js";
 
 export const SchedulerMethods = {
@@ -15,7 +15,7 @@ export const SchedulerMethods = {
     if (props()?.repo) return props().repo; // a layout block pinned to one repository
     if (this.pin) return this.pin.target;
     if (this.target) return this.target;
-    const first = load() ?? focusedFolder();
+    const first = load() ?? focusedFolder(this.machine ?? null);
     if (!first) return null;
     const at = this.tried.get(first);
     return at && Date.now() - at < 60000 ? null : first;
@@ -36,7 +36,8 @@ export const SchedulerMethods = {
       if (cached) this.show(cx, cached, want, true);
       this.refresh(cx, true);
     }
-    else if (Date.now() - this.last > IDLE_POLL) this.refresh(cx);
+    // With the fleet on another machine nothing is watched (its files are there): read it more often instead.
+    else if (Date.now() - this.last > (this.machine ? REMOTE_POLL : IDLE_POLL)) this.refresh(cx);
     // Elapsed times move, but they show whole minutes: redraw for the clock every 10 s, not on every tick
     // (a change in the run redraws at once by itself).
     else if (Date.now() - (this.clockAt ?? 0) >= 10000) { this.clockAt = Date.now(); cx.notify(); }
@@ -106,6 +107,7 @@ export const SchedulerMethods = {
     this.loading = true;
     cx.notify();
     try {
+      this.machine = await fleetMachine();
       const r = await this.timed(cx, cwd);
       if (gen !== this.gen) return true; // a newer worker took over meanwhile
       // You moved on while it read (a chip, ⌘← ⌘→, another folder): drop it, don't flip back to that run.
@@ -131,6 +133,8 @@ export const SchedulerMethods = {
     } catch (e) {
       this.problem = { kind: "error", message: String(e?.message ?? e), cwd };
     }
+    // A command's row said what ran until this read showed where the bead went: keep it on screen there.
+    if (this.busy?.until === "read") { if (this.selId === this.busy.bead) this.reveal = true; this.busy = null; }
     this.loading = false;
     cx.notify();
     return true;
@@ -140,8 +144,11 @@ export const SchedulerMethods = {
     const seen = new Set([skip]), list = [];
     const add = (f) => { if (f && !seen.has(f) && !this.tried.has(f)) { seen.add(f); list.push(f); } };
     add(load());
-    for (const sp of spaces()) add(sp.folder);
-    for (const p of panes()) add(p.cwd);
+    // Only folders on the fleet's machine: fleet reads its runs there.
+    const here = (sp) => (sp?.machine ?? null) === (this.machine ?? null);
+    for (const sp of spaces()) if (here(sp)) add(sp.folder);
+    const tabSpace = new Map(spaces().flatMap((sp) => (sp.tabs ?? []).map((t) => [t.id, sp])));
+    for (const p of panes()) if (here(tabSpace.get(p.tab))) add(p.cwd);
     // All at once, four at a time: one after another took seconds before a fresh pane showed a run.
     // The first in the list's order wins, one with a wave running first, as before.
     const found = new Array(Math.min(list.length, 10)).fill(null);
@@ -200,7 +207,7 @@ export const SchedulerMethods = {
     const cwd = this.cwd;
     try {
       // Whole lines (`--full`): without it, fleet's tail cuts each line at a fixed width.
-      const r = await exec(await fleetBin(), ["tail", b.id, "--repo", cwd, "--full"], { cwd, timeout: 15000 });
+      const r = await fleetExec("fleet", ["tail", b.id, "--repo", cwd, "--full"], { cwd, timeout: 15000 });
       // eslint-disable-next-line no-control-regex
       const lines = (r.stdout || "").replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").split("\n").filter((l) => l.trim());
       this.tail = { id: b.id, lines: lines.slice(-200), at: Date.now(), error: r.code === 0 ? null : (r.stderr || "").trim().replace(/^fleet: /, "") || `fleet tail exited with ${r.code}` };
@@ -258,6 +265,7 @@ export const SchedulerMethods = {
 
   // One watch on the state root (~/.local/state/agent-fleet): which repositories' runs change.
   watchRoot(cx) {
+    if (this.machine) return; // the state is on another machine: the strip is read every SCAN_EVERY instead
     const root = this.s?.runDir ? stateRoot(this.s.runDir).replace(/\/[^/]+$/, "") : null;
     if (!root || this.watchingRoot === root) return;
     this.watchingRoot = root;
@@ -322,6 +330,7 @@ export const SchedulerMethods = {
   // One watch at a time: switching runs cancels the last one (a pending watch counts against Herdr's limit),
   // and each loop has its own token, so going back to a run never revives an old loop beside the new one.
   watch(cx, root) {
+    if (this.machine) { this.watchHandle?.cancel(); this.watching = null; return; } // there: read every REMOTE_POLL
     if (!root || this.watching === root) return;
     this.watchHandle?.cancel();
     this.watching = root;

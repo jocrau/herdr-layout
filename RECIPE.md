@@ -41,7 +41,7 @@ Left to right:
 2. **Work column**: the **tab bar** (`tabs-graph`, 42 px: the tabs with + right after them, then icon links that
    open the file browser, git graph and beads and show or hide the PR and fleet columns); the terminal area; on the right a
    hidden **side panel** (368 px, 280–900; ⌘⌥O or the `tabs-graph.files` / `.changes` commands; a `side-header`
-   header with Preview · Changes tabs and a ×) stacking `preview-plus` (linziyanleo, MIT) and Herdr's `changes`; the
+   header with Preview · Changes tabs and a ×) stacking `file-browser` and Herdr's `changes`; the
    **status bar** (`usage-status`, 28 px) with Claude usage on the right when available.
 Side columns (the side panel, the PR column, the fleet column) are open one at a time: opening one closes the
 other. They close the same three ways: the × at the right of
@@ -219,7 +219,7 @@ Layout (`layouts/workbench.json`, from Herdr's `main` 0.1.13):
 ```
 root row
   sidebar column: brand(workspace-chrome) / sidebar-lists(spaces: worktree-support, agents: space-agents) / sidebar-footer(sidebar-footer)
-  work column: tabs(tabs-graph) / work-body row(main, panel column [hidden] → panel-body stack(files: preview-plus, changes: changes)) / status(usage-status)
+  work column: tabs(tabs-graph) / work-body row(main, panel column [hidden] → panel-body stack(files: file-browser, changes: changes)) / status(usage-status)
   fleet [hidden, 400 px]: fleet-board
 ```
 
@@ -229,12 +229,12 @@ with that name for the space and its tab and `claude --remote-control <name>`), 
 `tabs-graph.files`, `tabs-graph.changes`; its links as icons: the dialogs, then the side columns;
 one side column at a time; the wheel switches tabs one per notch, a sideways swipe scrolls them),
 `side-header` (the side panel's header: its views as tabs and a ×), `usage-status` (Herdr's `workspace-status`),
-`file-browser` (its own `main.js` subclassing preview-plus's viewer as `viewer.js`),
+`file-browser` (its own `main.js` subclassing the viewer from linziyanleo's preview-plus (MIT), copied in as `viewer.js` and its renderers),
 `git-graph` (rabeeh-ta, MIT; `mod.json` overlay dialog; `graph.js` holds the Graph's lifecycle, its methods are
 mixed in from `table.js`, `review.js`, `pickers.js` and `manygit.js`, with `reads.js`, `tools.js` and
 `common.js` beside them; the git plumbing is `git.js`, `execute.js`, `repos.js`, `lanes.js`), `beads` (a launcher popup that starts
 `mods/beads/beads-view` with `hc run --bg` in the nearest folder with `.beads`, closes itself and
-opens a dialog on the terminal once `terminals()` lists it). `preview-plus` (linziyanleo, MIT; Escape goes back), `sidebar-footer` (the footer of Herdr's
+opens a dialog on the terminal once `terminals()` lists it). `sidebar-footer` (the footer of Herdr's
 `workspace-chrome`, Settings only), `fleet-board` (original: `snapshot.js` normalizes `fleet status --json` schema 1 and `fleet runs --json`,
 `fleet.js` runs them, `model.js` computes what the views show; `main.js` is the class, its methods mixed in
 from `scheduler.js`, `alerts.js`, `actions.js` and `views.js`). Herdr's `workspace-chrome`,

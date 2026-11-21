@@ -13,7 +13,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, Scrollbar, VirtualListScrollHandle, v_virtual_list } from "gpui-base";
 import { focused, panes, spaces, exec, home, props, closeOverlay, setShared } from "herdr";
 import { footerBar } from "./lib/bars.js";
-import { closeSide } from "./lib/sidecolumn.js";
+import { closeSide, focusFrame } from "./lib/sidecolumn.js";
 import Viewer from "./viewer.js";
 import { Tree } from "./tree.js";
 import { join, normalize, kind, richText, basename, dirname } from "./paths.js";
@@ -26,7 +26,7 @@ const ROW = 26, MATCHES = 300, FILES = 20000, PREVIEW_DELAY = 120;
 // folder another mod opened it on (the git graph's `v`: props { folder, path, rev }).
 function start() {
   const p = props() ?? {};
-  if (typeof p.folder === "string" && p.folder) return { cwd: p.folder, on: null, spaceId: spaces().find((s) => s.active)?.id ?? null, path: p.path, rev: p.rev, line: p.line };
+  if (typeof p.folder === "string" && p.folder) return { cwd: p.folder, on: typeof p.on === "string" && p.on ? p.on : null, spaceId: spaces().find((s) => s.active)?.id ?? null, path: p.path, rev: p.rev, line: p.line };
   const f = focused();
   const pane = f?.pane ? panes().find((p) => p.pane === f.pane) : null;
   const space = spaces().find((s) => s.id === f?.space) || spaces().find((s) => s.active);
@@ -425,7 +425,8 @@ export default class FileBrowser extends Viewer {
     if (this.docked) this.follow(cx);
     const viewer = super.render(cx);
     const view = () => div().id("fb-view").track_focus(this.viewFocus).flex_1().min_w(0).h_full().child(this.help ? this.helpPanel(colors) : viewer);
-    if (this.docked) return v_flex().id("file-browser").size_full().min_h(0).overflow_hidden().bg(colors.background)
+    if (this.docked) return focusFrame(v_flex().id("file-browser").size_full().min_h(0).overflow_hidden().bg(colors.background), colors,
+      this.treeFocus.is_focused() || this.viewFocus.is_focused() || this.filtering)
       .text_color(colors.foreground).font_family(font).text_size(13)
       .child(this.showing || this.help ? view().w_full() : this.treePane(colors).flex_1().w_full());
     return h_flex().id("file-browser").size_full().min_h(0).overflow_hidden().bg(colors.background)

@@ -14,8 +14,9 @@ export function newer(a, b) {
 // The overview watches this many repositories at most (Herdr allows 64 pending watches a mod).
 export const REPO_WATCHES = 48;
 
-export function location(folder) {
-  if (folder) return { cwd: folder, on: null };
+// `folderOn`: the machine `folder` is on (a PR's clone on pr-flow's machine), null for this one.
+export function location(folder, folderOn = null) {
+  if (folder) return { cwd: folder, on: folderOn ?? null };
   const space = spaces().find((s) => s.active), f = focused();
   const pane = f?.pane ? panes().find((p) => p.pane === f.pane) : null;
   const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;

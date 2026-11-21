@@ -139,7 +139,9 @@ export default class Tabs extends View {
         })
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: c.id, space: space.id } } }); })
         .when(Boolean(program?.icon), el => el.child(program.tint ? svg(program.icon).size(14).text_color(t.muted) : image(program.icon).size(14)))
-        .child(div().max_w(170).truncate().child(c.zoomed ? `${name} Z` : name))
+        // A title cut off at 170px shows in full on hover. Text can't be measured from a script, so it goes by length:
+        // ~22 characters fit at this size, and a tooltip on a name that just fits does no harm.
+        .child(div().max_w(170).truncate().when(name.length > 20, el => el.tooltip(name)).child(c.zoomed ? `${name} Z` : name))
         // Local change: a tab keeps its width as you flip through tabs and its agent works. An agent's tab always has
         // room for its status (spinner, dot, or nothing while idle), and every tab has its close button, dim until
         // the pointer is on it (Herdr's showed it on the active tab only, so the tabs shifted at each switch).

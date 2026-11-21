@@ -24,7 +24,7 @@ export function headerButton(t, { id, label, tip, onClick, color, pulse }) {
 // The row. title: text; onTitle: makes the title open something (a down chevron after it, highlighted while `open`);
 // menu: what opens, drawn as a dropdown under the title, over the board (the board keeps it open: `open`, esc);
 // onClose: a press outside the dropdown (also on the title: the board ignores the click that follows);
-// titleTip; facts: [{ id?, text, color?, tip? }] after the title, cut first when room is short;
+// titleTip; facts: [{ id?, text, color?, tip?, onClick? }] after the title, cut first when room is short;
 // buttons: headerButton specs; mod: the board's mod (for the ×).
 export function boardHeader(t, { mod, title, titleTip, onTitle, onClose, open = false, menu = null, facts = [], buttons = [] }) {
   const titleEl = h_flex().id(`${mod}-title`).flex_none().max_w(260).h(26).px(onTitle ? 6 : 0).gap(5).items_center().rounded(6)
@@ -44,7 +44,10 @@ export function boardHeader(t, { mod, title, titleTip, onTitle, onClose, open = 
     .child(titled)
     .child(h_flex().flex_1().min_w(0).gap(8).items_center().overflow_hidden()
       .children(facts.filter(Boolean).map((f, i) => div().id(f.id ?? `${mod}-fact-${i}`).min_w(0).truncate().text_size(FOOTER_TEXT)
-        .text_color(f.color ?? t.dim).when(Boolean(f.tip), (el) => el.tooltip(f.tip)).child(f.text))))
+        .text_color(f.color ?? t.dim).when(Boolean(f.tip), (el) => el.tooltip(f.tip))
+        .when(Boolean(f.onClick), (el) => el.cursor_pointer().rounded(4).hover((x) => x.bg(t.hover))
+          .on_click((_e, cx) => { cx.stop_propagation(); f.onClick(cx); }))
+        .child(f.text))))
     .child(h_flex().flex_none().gap(2).items_center()
       .children(buttons.filter(Boolean).map((b) => headerButton(t, b)))
       .child(closeButton(t, mod)));

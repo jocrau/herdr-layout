@@ -28,11 +28,13 @@ export function splitTarget(target) {
   return { cwd: cwd || null, epic: epic || null };
 }
 
-// The focused terminal's folder; else its pane's, else its space's (as the file browser finds it).
-export function focusedFolder() {
+// The focused terminal's folder; else its pane's, else its space's (as the file browser finds it). Only on the
+// machine the fleet lives on (`on`, null for this computer): a folder elsewhere isn't one fleet can read.
+export function focusedFolder(on = null) {
   const f = focused();
   if (!f) return null;
   const pane = f.pane ? panes().find((p) => p.pane === f.pane) : null;
   const space = spaces().find((s) => s.id === f.space);
+  if ((space?.machine ?? null) !== (on ?? null)) return null;
   return f.cwd || pane?.cwd || space?.folder || null;
 }

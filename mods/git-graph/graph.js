@@ -15,7 +15,7 @@ import { platform } from "./tools.js";
 
 export class Graph {
   init(cx) {
-    this.folder = props()?.folder ?? null;
+    this.folder = props()?.folder ?? null; this.folderOn = props()?.on ?? null;
     // A scrollbar finds its list by name: each copy (panel, pane) needs its own.
     this.listId = `graph-rows-${Math.random().toString(36).slice(2)}`;
     this.diffId = `${this.listId}-diff`;
@@ -91,7 +91,7 @@ export class Graph {
     cx.timer.every(15000, (cx) => { if (!this.watching || this.state === "workspace") this.refresh(cx, true, true); this.warm(cx); });
   }
 
-  key() { return JSON.stringify(location(this.folder)); }
+  key() { return JSON.stringify(location(this.folder, this.folderOn)); }
 
   reset() {
     Object.assign(this, folderState());
@@ -126,7 +126,7 @@ export class Graph {
   // more: the next page, which reads the log alone (see loadMore).
   refresh(cx, full = true, timer = false, more = false) {
     if (this.prWaiting()) return; // the PR view: its repository isn't known yet
-    const { cwd, on } = location(this.folder), context = this.key();
+    const { cwd, on } = location(this.folder, this.folderOn), context = this.key();
     if (context !== this.context) { this.enter(context); full = true; }
     if (!cwd) { this.state = "nofolder"; return; }
     // A repository opened from the Manygit list loads in place of the folder.

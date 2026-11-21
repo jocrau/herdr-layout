@@ -7,16 +7,17 @@
 // a block's props can pin it instead: { "repo": "/path/to/repo", "view": "lanes" }.
 // It re-reads when the run's state directory changes (watchFolder), and every minute anyway.
 // Keys (when focused), as in the git graph and the beads view: j k / ↑ ↓ move · ⏎ ⇥ l → details in, h ← x out ·
-// space act · t tail · b in the beads view · / filter · ? keys · 1 2 views · d done · [ ] zoom lanes · r refresh;
+// space act · a f i approve, resume, drop · p answer · t session · v gate · d diff · o PR · w tail · b in the beads
+// view · / filter · ? keys · 1 2 views · 0 done · [ ] zoom lanes · r refresh (pr-board's letters where they match);
 // ⌘← ⌘→ (keys.json, mod:fleet-board) the previous / next run.
 // A bead that starts waiting for you posts a notification; while the docked pane is hidden it still looks every
 // 2 minutes (`fleet runs --json` when agent-fleet has it, else one `fleet status --json` of the last run shown).
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle } from "gpui-base";
-import { theme, settings, nextCommand, props, focused, run, shared, setShared } from "herdr";
+import { theme, settings, nextCommand, props, focused, run, shared, setShared, layout } from "herdr";
 import { VIEWS, SPANS, HIDDEN_CHECK, dur, shortener, graph, tipText } from "./model.js";
-import { closeSide } from "./lib/sidecolumn.js";
+import { closeSide, focusFrame, toTerminal } from "./lib/sidecolumn.js";
 import { splitTarget } from "./env.js";
 import { boardHeader, boardTop } from "./lib/boardheader.js";
 import { footerBar } from "./lib/bars.js";
@@ -48,7 +49,7 @@ export default class FleetBoard extends View {
     this.showDone = true; // open, so j k reach the done beads too (d folds it)
     this.help = false; // ? shows the keys
     this.confirm = null; // { title, detail, label, run, copy? }: a command that changes the run, asked about first
-    this.busy = null; // the command running now (its label)
+    this.busy = null; // the command running now: { text, bead, at, until? } (actions.js runFleet)
     // Lanes' zoom, remembered: the last hour unless set; [ ] zoom (out to 7 days, in to "fit": the whole run).
     this.span = SPANS.includes(shared("fleet-board.span")) ? shared("fleet-board.span") : 3600000;
     this.h = cx.focus_handle();
@@ -67,6 +68,7 @@ export default class FleetBoard extends View {
       for (;;) {
         const c = String(await nextCommand()).replace(/^fleet-board\./, "");
         if (c === "focus") this.h.focus();
+        else if (c === "leave") toTerminal();
         else if (VIEWS.some((v) => v.id === c)) this.view = c;
         else if (c === "refresh") this.refresh(cx, true);
         else if (c === "next-run" || c === "prev-run") this.stepRun(cx, c === "next-run" ? 1 : -1);
@@ -86,6 +88,9 @@ export default class FleetBoard extends View {
     // One worker does every background job in turn (reads, the strip's scan, the tail, the hidden look):
     // Herdr wakes only one of a mod's sleeping tasks reliably, so tasks sleeping side by side starve.
     cx.spawn((cx) => this.worker(cx, this.gen));
+    // Shown (⌘⇧F): the keyboard comes here. Not when the layout loads with it shown already.
+    this.wasShown = shownHere();
+    cx.timer.every(200, (cx) => { const now = shownHere(); if (now && !this.wasShown) { this.h.focus(); cx.notify(); } this.wasShown = now; });
     // As a dialog (⌘⌥F), like the git graph and the file browser: the keyboard is on it at once.
     if (props()?.overlay) { this.h.focus(); cx.timer.after(300, () => this.h.focus()); }
   }
@@ -146,10 +151,12 @@ export default class FleetBoard extends View {
     else if (is("l", "right") && b) { if (this.openId !== b.id) this.openOnly(b); }
     else if (is("h", "left", "x") && this.openId) this.openId = null;
     else if (is("space") && b) this.act(b, cx);
+    // An action's own key, the same on every bead (ACTION_KEYS; p the answer field); b the beads view.
+    else if (is("a", "f", "i", "t", "v", "o", "d", "p") && b) this.keyAction(b, k, cx);
     else if (is("/")) { this.showFilter = true; this.focusSoon(this.filterState, cx); }
     else if (is("backspace") && this.filter) { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; }
     else if (is("?", "shift-/")) this.help = !this.help;
-    else if (is("t")) this.tailOn = !this.tailOn;
+    else if (is("w")) this.tailOn = !this.tailOn;
     else if (is("-") && this.tailOn) this.tailSize.step(-1, this.height, cx);
     else if (is("=") && this.tailOn) this.tailSize.step(1, this.height, cx);
     else if (is("b") && b) this.inBeads(b);
@@ -157,7 +164,7 @@ export default class FleetBoard extends View {
     else if (is("escape") && this.openId) this.openId = null;
     // Esc undoes one thing at a time (the filter, then the open bead); with nothing left, it closes the column.
     else if (is("escape")) closeSide("fleet-board");
-    else if (is("d")) this.showDone = !this.showDone;
+    else if (is("0")) this.showDone = !this.showDone; // digits change what's shown
     else if (is("[")) this.zoom(SPANS[Math.max(0, SPANS.indexOf(this.span) - 1)]);
     else if (is("]")) this.zoom(SPANS[Math.min(SPANS.length - 1, SPANS.indexOf(this.span) + 1)]);
     else if (is("r")) this.refresh(cx, true);
@@ -180,7 +187,7 @@ export default class FleetBoard extends View {
 
   render(_cx) {
     const t = theme(), mono = settings().font_family ?? "JetBrains Mono", now = Date.now();
-    const root = v_flex().id("fleet-board").size_full().bg(t.background).text_color(t.foreground)
+    const root = focusFrame(v_flex().id("fleet-board").size_full().bg(t.background).text_color(t.foreground)
       .on_size_change((size, cx) => {
         if (Math.abs((this.width ?? 0) - size.width) > 1 || Math.abs((this.height ?? 0) - size.height) > 1) { this.width = size.width; this.height = size.height; cx.notify(); }
       })
@@ -188,7 +195,7 @@ export default class FleetBoard extends View {
       .on_mouse_move((e, cx) => this.tailSize.move(e, cx))
       .on_mouse_up("left", (_e, cx) => this.tailSize.end(this.height, cx))
       .on_hover((hovered, cx) => { if (!hovered) this.tailSize.end(this.height, cx); })
-      .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx));
+      .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx)), t, this.h.is_focused() || this.filtering);
     // No run shown yet: the same header (the run list behind its title), then what's missing.
     if (!this.s) {
       const head = boardHeader(t, { mod: "fleet-board", title: "Fleet", open: this.picking, onTitle: (cx) => { this.togglePicker(); cx.notify(); }, onClose: (cx) => { this.closePicker(); cx.notify(); },
@@ -199,6 +206,7 @@ export default class FleetBoard extends View {
     if (this.graphOf !== this.s) { this.graphOf = this.s; this.graphMemo = graph(this.s.beads); }
     const g = this.graphMemo, short = shortener(this.s.epic.id);
     this.order = []; this.ordered = new Set(); this.drawn = new Map(); this.pinned = null;
+    this.confirmDrawn = false; this.mono = mono; // item() draws a bead's question under it (confirmBar needs the font)
     // The id column fits the longest short id (monospace, ~7.5 px a character at this size), up to 11 characters:
     // a longer id is cut with "…" (the open row's details show it whole), so the title keeps its room.
     this.idW = Math.round(Math.min(6 + 7.5 * 11, Math.max(40, 6 + 7.5 * Math.max(0, ...this.s.beads.map((b) => short(b.id).length)))));
@@ -215,7 +223,7 @@ export default class FleetBoard extends View {
     return root
       .child(this.header(t, mono, now))
       .child(this.tabs(t))
-      .when(Boolean(this.confirm), (el) => el.child(this.confirmBar(t, mono)))
+      .when(Boolean(this.confirm) && !this.confirmDrawn, (el) => el.child(this.confirmBar(t, mono))) // about no bead drawn (the wave): at the top
       .when(this.showFilter || Boolean(this.filter), (el) => el.child(h_flex().px(10).py(4).gap(6).items_center().border_b_1().border_color(t.border)
         .child(div().text_size(12).text_color(this.filtering ? t.accent : t.dim).child("/"))
         .child(Input.new(this.filterState).flex_1().text_size(12))
@@ -234,6 +242,19 @@ export default class FleetBoard extends View {
 
 // The class's methods live in these modules by topic; `this` is the FleetBoard in all of them.
 import { SchedulerMethods } from "./scheduler.js";
+
+// Whether the pane can be seen: a dialog, or a block with nothing above it hidden.
+function shownHere() {
+  if (props()?.overlay) return true;
+  const walk = (n, hidden) => {
+    if (!n || typeof n !== "object") return null;
+    const h = hidden || Boolean(n.hidden);
+    if (n.content?.mod === "fleet-board") return !h;
+    for (const c of n.children ?? []) { const r = walk(c, h); if (r !== null) return r; }
+    return null;
+  };
+  return walk(layout(), false) ?? true;
+}
 import { AlertsMethods } from "./alerts.js";
 import { ActionsMethods } from "./actions.js";
 import { ViewsMethods } from "./views.js";

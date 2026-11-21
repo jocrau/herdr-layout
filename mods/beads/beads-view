@@ -7,10 +7,12 @@ selects a bead, a click on the selected one focuses it. Keys (arrows and digits
 while the filter is empty): Right focuses a bead (its subtree becomes the
 view), or on a bead without children shows its details; Left moves to the
 parent, and on a top row of a focused view goes back up,
-so repeated Lefts climb the tree. Tab folds or unfolds a bead's
-children, 1-9 folds the tree to that many levels and 0 unfolds it all, Ctrl-L
+so repeated Lefts climb the tree. Space, as Enter and Tab, shows or hides the details (the boards'
+space runs an item's main action; a bead's is to show it); l and h unfold and fold. Digits change
+what is shown, never act on a bead: 1-9 folds the tree to that many levels and 0 unfolds it all. Ctrl-L
 edits the bead's labels, Delete (or forward delete) closes the bead after a
-y/n, Ctrl-A switches between open and all beads, typing filters, Esc quits. The view refreshes by itself when beads change.
+y/n, Ctrl-A switches between open and all beads, s syncs the beads with their Dolt remote (`bd sync`:
+pull, conflict check, push), typing filters, Esc quits. The view refreshes by itself when beads change.
 
 f picks a label filter (Shift-F clears it): only beads with the ticked
 labels and priorities, where labels of one namespace (owner:alice, owner:bob)
@@ -37,7 +39,7 @@ Optional settings in ~/.config/beads-view/config.json (all keys optional):
 Focus, folds and the open/all choice are remembered per repo in
 ~/.local/state/beads-view/; bd's output is cached in ~/.cache/beads-view/ so
 keys respond without waiting for bd (safe to delete). Subcommands (render, header, toggle, level, focus,
-up, all, filter, unfilter, show, labels, edit, close, watch) are called by fzf's key bindings; run without
+up, all, filter, unfilter, show, labels, edit, close, sync, watch) are called by fzf's key bindings; run without
 arguments to start the view; `beads-view --select ID` starts it on that bead with its details open (unfolding,
 leaving a focus or showing closed beads as needed). Needs python3, bd and fzf (0.60 or later).
 """
@@ -1521,6 +1523,44 @@ def close_bead(bead_id, state):
         term.stop()
 
 
+# bd sync's exit codes (see `bd sync --help`), said on the bottom row.
+SYNC_EXIT = {
+    2: "merge conflict: nothing pushed, resolve it by hand",
+    3: "busy (push race or another writer): nothing pushed, try again",
+    4: "pending edits are stuck: nothing pushed, see bd sync --help",
+}
+
+
+def sync_beads(state):
+    """s: one `bd sync` (pull, conflict check, push), its progress and outcome on fzf's
+    bottom row, as close_bead asks there. A failure stays until a key is pressed."""
+    term = Term(over_fzf=True)
+    term.start()
+    try:
+        lines, columns = term.size()
+
+        def say(text):
+            term.write(f"\x1b[?25l\x1b[{lines};1H\x1b[2K" + clip(text, columns))
+
+        say(f"{DIM}Syncing beads with the remote…")
+        try:
+            out = subprocess.run([BD, "sync"], cwd=ROOT, capture_output=True, text=True, timeout=180)
+        except subprocess.TimeoutExpired:
+            say(f"{BOLD}\x1b[31mbd sync: no answer after 3 minutes{RESET}{DIM} · any key")
+            term.key()
+            return
+        if out.returncode != 0:
+            last = ((out.stderr or out.stdout).strip().splitlines() or ["sync failed"])[-1]
+            say(f"{BOLD}\x1b[31mbd sync: " + SYNC_EXIT.get(out.returncode, last) + f"{RESET}{DIM} · any key")
+            term.key()
+            return
+        fetch(state, fresh=True)  # pulled beads in the cache now: fzf's reload reads it at once
+        say(f"{DIM}Synced with the remote.")
+        time.sleep(0.8)
+    finally:
+        term.stop()
+
+
 def prefetch(state, budget):
     """Cache the detail panes of the view's beads, for up to `budget` seconds;
     drop the ones that are out of date. One look at the cache folder for all
@@ -1607,10 +1647,9 @@ Navigate (the filter hidden)
   g G  home end             first / last
   l →                       unfold a folded bead, else into a bead with children, or its details (in details: edit)
   h ←                       fold an open bead, else to the parent row, or up out of the focus
-  ⏎  ⇥                      details pane on / off
+  ⏎  ⇥  space               details pane on / off
   J K                       move and show details
-  space                     fold / unfold
-  1-9  0                    show that many levels / unfold all
+  1-9  0                    show that many levels / unfold all (digits change what's shown)
   /                         filter: every word must appear (!word excludes, 'word is fuzzy; esc clears and hides it)
   f                         only beads with these labels and priorities (one namespace or P0-P4: any of them):
                               ⏎ space tick, esc applies, ctrl-c cancels
@@ -1619,6 +1658,7 @@ Navigate (the filter hidden)
   ctrl-l                    labels: ⏎ space tick, esc applies, ctrl-c cancels
   ⌫ ⌦  (delete)             close the bead, after a y/n
   ctrl-a                    open beads only / all beads
+  s                         sync with the Dolt remote (bd sync: pull, conflict check, push)
   ? q esc                   this help / quit / quit
 """  # how fzf's bindings call this script (-S: skip site, faster)
 
@@ -1715,7 +1755,7 @@ def view(select=None):
         # Starts in navigate mode (input hidden): letters are keys, as in the file and git
         # viewers; / shows the filter, esc hides it again (and quits from navigate mode).
         "--no-input",
-        "--footer=j k move · l → in · h ← out · ⏎ ⇥ details · space fold · ⌫ close · / filter · f labels · ? help · esc quit",
+        "--footer=j k move · l → in · h ← out · ⏎ ⇥ space details · ⌫ close · / filter · f labels · s sync · ? help · esc quit",
         # The cached pane when there is one (instant), else bd (and cache it).
         f"--preview=cat {shlex.quote(DETAIL_DIR)}/{{1}}@{{2}}@$FZF_PREVIEW_COLUMNS 2>/dev/null || {RUN} show {{1}} {{2}}",
         "--preview-window=right,50%,wrap-word,border-left,noinfo,hidden",
@@ -1749,12 +1789,12 @@ def view(select=None):
     def nav(key, action):
         typed = "put( )" if key == "space" else f"put({key})"
         args.append(f'--bind={key}:transform:[ "$FZF_INPUT_STATE" = hidden ] && echo "{action}" || echo "{typed}"')
-    fold = f"execute-silent({RUN} toggle {{1}})+reload({RUN} render)"
     for key, action in (("j", "down"), ("k", "up"), ("g", "first"), ("G", "last"),
                         ("J", "down+show-preview"), ("K", "up+show-preview"),
-                        ("space", fold), ("/", "show-input"), ("q", "abort"),
+                        ("space", "toggle-preview"), ("/", "show-input"), ("q", "abort"),
                         ("f", f"execute({RUN} filter)+{reload}"),
                         ("F", f"execute-silent({RUN} unfilter)+{reload}"),
+                        ("s", f"execute({RUN} sync)+{reload}"),
                         ("?", f"execute({RUN} help | less -R)")):
         nav(key, action)
     # While the filter is empty, arrows walk the tree: Right edits the bead while
@@ -1847,6 +1887,8 @@ def main(argv):
     elif cmd in ("labels", "edit", "close"):
         if rest and rest[0]:  # empty while fzf's list (re)loads: nothing to edit
             {"labels": edit_labels, "edit": edit, "close": close_bead}[cmd](rest[0], state)
+    elif cmd == "sync":
+        sync_beads(state)
     elif cmd == "click" and len(rest) == 2 and rest[0]:
         click(rest[0], rest[1])
     elif cmd == "watch":

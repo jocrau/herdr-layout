@@ -4,6 +4,7 @@ import { v_flex, h_flex, Editor, EditorState, Input, InputState, VirtualListScro
 import { props, shared, spaces, panes, focused, run, readTextFile, writeTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
 import { target, dirname, basename, extension, kind, richText, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
+import { toTerminal } from "./lib/sidecolumn.js";
 import { loadMedia, openFile } from "./media.js";
 import { stageMarkdown } from "./markdown.js";
 import { markdownView } from "./markdown-view.js";
@@ -84,8 +85,9 @@ export default class Viewer extends View {
     this.sync(cx);
     cx.spawn(async cx => {
       for (;;) {
-        const command = await nextCommand();
-        if (command === "back") this.back(cx);
+        const command = String(await nextCommand()).replace(/^file-browser\./, "");
+        if (command === "leave") toTerminal();
+        else if (command === "back") this.back(cx);
         else if (command === "source") this.setSource(true, cx);
         else if (command === "preview") this.setSource(false, cx);
         else if (command === "save") this.save(cx);

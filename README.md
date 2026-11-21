@@ -16,8 +16,8 @@ agent-fleet runs.
 | ⌘⇧B | **Beads** (dialog) | The [beads](https://github.com/steveyegge/beads) issues of the focused repository as a foldable tree, with details, editing and labels. |
 | ⌘N | **New space** (dialog) | Asks for a name and a folder: type to filter the git repositories under your code folder (`~/Code`, or `code_dir` in the [settings](#settings)), with the one you're in first, then recent ones; or Home, or Browse… for any folder. Opens a space there with that name, its first tab named the same, and Claude Code running there as the Remote Control session of that name (`claude --remote-control <name>`). All from the keyboard: Enter right after the name opens it in the repository you're in; Tab moves to the folder, ↑↓ pick, Enter opens. The + in the spaces list and a worktree's "Open as space" ask the same way. |
 | ⌘⌥O | Side panel | The file browser in one column (the tree, or the file you open: ⏎ or a click opens it, Escape goes back), following the focused terminal's repository, and Herdr's Changes panel. |
-| ⌘⇧R | **PR board** (pane on the right; ⌘⌥R opens the PR view) | Your [pr-flow](#pr-board) queue of pull requests, grouped by your next move: what each PR is, who's in it, and the next step; the PR view reviews one in the git graph with its findings. See [PR board](#pr-board). |
-| ⌘⇧F | **Fleet board** (pane on the right; ⌘⌥F as a large dialog) | An [agent-fleet](#fleet-board) run beside your agents: what needs you first, where every bead is, where its time went, and the gate's answer or resume right there. See [Fleet board](#fleet-board). |
+| ⌘⇧R | **PR board** (pane on the right; pressed again: the keyboard into it; pressed in it: hidden; ⌘⌥R opens the PR view) | Your [pr-flow](#pr-board) queue of pull requests, grouped by your next move: what each PR is, who's in it, and the next step; the PR view reviews one in the git graph with its findings. See [PR board](#pr-board). |
+| ⌘⇧F | **Fleet board** (pane on the right; pressed again: the keyboard into it; pressed in it: hidden; ⌘⌥F as a large dialog) | An [agent-fleet](#fleet-board) run beside your agents: what needs you first, where every bead is, where its time went, and the gate's answer or resume right there. See [Fleet board](#fleet-board). |
 | ⌘B | Sidebar | Hides or shows the spaces and agents on the left. |
 | ⌥Tab | **Recent panes** (popup) | The panes you used last, across spaces, as a browser's ctrl+tab: it opens on the one before this; Tab goes further back, ⇧Tab forward, letting go of ⌥ goes there (its space and tab with it). Each row shows the space, the agent's tab name (or a shell's program and folder), where it is and the agent's state. ⌃Tab stays the next tab. |
 | ⌘. | **Zen mode** | Hides the tab bar, the status bar and the sidebar, and brings them back as they were. The panes, dialogs and the boards on the right (with their own headers) stay; Herdr's toast still says when an agent needs you. Best in fullscreen: in a window, macOS's buttons sit over the first pane's corner. |
@@ -57,6 +57,8 @@ subscription usage (see below).
 The dialogs and both boards use the same keys, for vim and arrow users alike: `j k` or `↑ ↓` move,
 `l →` go in, `h ←` come out (⏎ ⇥ toggle), `/` searches, `?` lists every key, Esc steps back and
 finally closes. In the boards `space` runs the selected item's main action; ⌘← ⌘→ switch fleet runs.
+⌘⌥← in a side column (the boards, the side panel's files) hands the keyboard back to the terminal beside it;
+a board that has the keyboard shows the same blue line as a focused pane.
 
 The tab bar keeps every tab's width as you switch tabs: each has its close button (dim until the
 pointer is on it), and an agent's tab keeps room for its status.
@@ -143,8 +145,11 @@ pane is hidden (it then looks every 2 minutes); clicking it shows the pane.
 | `j k` `↑ ↓` `⌃N ⌃P` | move; `⌃D ⌃U` page, `g G` ends |
 | `⏎ ⇥` | open or close the bead's details; `l →` open, `h ← x` close |
 | `space` | the bead's first action (answer, resume, tail) |
+| `a` `f` `i` | approve, resume (another fix round), drop: the same key on every bead, shown on its button, as on the PR board; they ask first |
+| `p` | answer: the bead's answer field |
+| `t` `v` `d` `o` | its agent session tab, its gate, its diff in the git graph, its PR on GitHub |
 | `/` | filter by id or title; `⌫` clears |
-| `t` `b` `d` | tail, beads view, fold the done beads |
+| `w` `b` `0` | tail, beads view, fold the done beads (digits change what's shown) |
 | `-` `=` | the tail three lines shorter or taller |
 | `[ ]` | zoom the lanes |
 | `r` | read again |
@@ -211,7 +216,7 @@ denied in red, and how it ended ("done · 4m 35s · $2.15"), followed every few 
 **terminal** there shows pr-flow's own `job show` in a terminal below. Its height is remembered on
 its own.
 
-⌘⇧R puts the keyboard on the first PR. Every action has its own key, the same on every PR and
+⌘⇧R shows the pane with the keyboard on the first PR; with the pane shown and the keyboard elsewhere, it brings the keyboard back; pressed in the pane, it hides it. Every action has its own key, the same on every PR and
 shown on its button, so they become habit:
 
 | Key | |
@@ -317,6 +322,30 @@ The layout works without settings. These can be set in `~/.config/herdr-app/data
   space, the one shown).
 - `pr_flow`: the `pr-flow.mjs` the PR board runs (default: the newest installed pr-flow plugin);
   `pr_flow_state`: another pr-flow state folder (the demo uses its own copy).
+
+### The fleet and pr-flow on another machine
+
+The fleet and pr-flow can run on another machine that Herdr reaches (`hc machine add`), such as an
+always-on box, with this window as the place you watch and answer them. Name it, as `hc machine ls`
+does:
+
+```json
+{ "fleet_machine": "agentbox", "pr_flow_machine": "agentbox" }
+```
+
+- `fleet_machine`: the fleet board runs `fleet` there (from that machine's login PATH; `fleet` above
+  is this computer's), shows the runs there, and opens its terminals and session tabs there. It reads
+  the run on screen every 15 seconds instead of watching its files. Its beads and diff open on that
+  machine too.
+- `pr_flow_machine`: the PR board runs pr-flow there and reads its state and job logs there; PR tabs
+  open in the PR space on that machine (made when missing); the PR view reads the clone there. It
+  reads the queue every 15 seconds while shown. `pr_flow` and `pr_flow_state` are then paths on that
+  machine (`~` its home).
+- `pr_flow_code_dir`: where the PRs' clones are on that machine (default `~/Code` there).
+
+There, the tools have to be on the login shell's PATH: `fleet` (`fleet install-cli`), `node`,
+`gh` (logged in), `git`, `claude`, and for the beads view `bd`, `fzf` and `python3`. The beads view
+needs no setting: in a space on another machine it shows that machine's beads.
 
 ## Status bar
 

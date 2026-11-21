@@ -101,12 +101,13 @@ test("with facts and --no-save, the board reads the queue quietly and takes each
     headRef: "login-form", baseRef: "main", headSha: "abc123", ci: "FAILURE", decision: "CHANGES_REQUESTED", draft: false, conflicts: true,
     threads: { unresolved: 2, awaitingReviewer: 1, awaitingAuthor: 1 }, reviewedSha: "def456", open: { high: 1, low: 2 }, old: {}, findingsSha: null, reasons: ["new commits"],
     author: "vic", requested: ["ann", "qa"], reviewers: [{ who: "bob", state: "APPROVED" }], lastPush: "2026-11-16T09:00:00Z",
-    updated: "2026-11-16T10:00:00Z", rounds: 2, about: "Adds a login form.", files: 7,
+    updated: "2026-11-16T10:00:00Z", rounds: 2, about: "Adds a login form.", files: 7, fixPlan: null,
   });
   assert.deepEqual(recordOf({ draft: null, threads: null }), {
     headRef: null, baseRef: null, headSha: null, ci: null, decision: null, draft: false, conflicts: false, threads: null, reviewedSha: null,
-    open: {}, old: {}, findingsSha: null, reasons: [], author: null, requested: [], reviewers: [], lastPush: null, updated: null, rounds: 0, about: null, files: null,
+    open: {}, old: {}, findingsSha: null, reasons: [], author: null, requested: [], reviewers: [], lastPush: null, updated: null, rounds: 0, about: null, files: null, fixPlan: null,
   }, "nulls where pr-flow doesn't know");
+  assert.deepEqual(recordOf({ fix_plan: { state: "waiting", items: 5, fix: 2 } }).fixPlan, { state: "waiting", items: 5, fix: 2 }, "the plan's counts (pr-flow 0.45.0)");
   assert.deepEqual(fromListing({ sections: [] }), { records: {}, me: null, warnings: [] }, "an empty queue needs no records either");
 });
 
@@ -135,6 +136,16 @@ test("a new PR tab starts from pr-flow's prompt when there is one, else from the
     { name: "api#7", space: "s1", folder: "/c/api", argv: ["claude", prompt], focus: true });
   assert.deepEqual(newTab("acme/api#7", { space: null, folder: null, text: "/pr-flow:inbox fix api#7", start: null }),
     { name: "api#7", argv: ["claude"], task: "/pr-flow:inbox fix api#7", focus: true });
+});
+
+test("a PR tab opens in the PR space; with pr-flow on another machine and no PR space there, in a new one there", async () => {
+  const { tabCommand } = await import("../../lib/prflow.js");
+  const tab = { name: "api#7", folder: "/c/api", argv: ["claude"] };
+  assert.deepEqual(tabCommand(tab, { space: "s1" }), ["tab.new", { space: "s1", focus: true, ...tab }]);
+  assert.deepEqual(tabCommand(tab, {}), ["tab.new", { focus: true, ...tab }], "this computer, no PR space: the space shown");
+  assert.deepEqual(tabCommand(tab, { space: "box/s2", on: "box" }), ["tab.new", { space: "box/s2", focus: true, ...tab }]);
+  assert.deepEqual(tabCommand(tab, { on: "box", spaceName: "Reviews" }),
+    ["space.new", { name: "Reviews", machine: "box", tab: "api#7", focus: true, folder: "/c/api", argv: ["claude"] }]);
 });
 
 test("a tab to talk about a PR starts from its context and takes no action", async () => {

@@ -36,6 +36,16 @@ export function gatesOf(b) {
   }).filter(Boolean);
 }
 
+// A parked bead whose gate you already resolved (fleet resume / answer / approve write the gate's resolved file;
+// the bead stays gated until the next wave picks it up): it waits for the fleet now, not for you. Queued, with
+// `went` saying how its wait ended ("resumed", "answered", "approved"); no gate, so nothing offers to resume it again.
+export function goneOn(b) {
+  if (b.state !== "parked" || !b.gate?.id) return b;
+  const g = b.gates.find((x) => x.id === b.gate.id);
+  if (!g || g.resolved === null) return b;
+  return { ...b, state: "queued", gate: null, went: g.how ?? "resumed" };
+}
+
 // Epoch milliseconds for every time; a few derived fields the views share.
 export function normalize(raw, cwd) {
   const e = raw.epic;
@@ -46,7 +56,9 @@ export function normalize(raw, cwd) {
     history: steps(b.history ?? []),
     blockers: b.blockers ?? [],
     gates: gatesOf(b),
-  }));
+  })).map(goneOn);
+  // A bead you resumed, answered or approved isn't waiting for you any more: the counts say so too.
+  const settled = beads.filter((b) => b.went).length;
   return {
     cwd,
     generated: ms(raw.generated),
@@ -55,7 +67,7 @@ export function normalize(raw, cwd) {
       ...e,
       // Defaults for what a partial snapshot leaves out, so the views never read through undefined.
       workers: { used: 0, max: null, ...(e.workers ?? {}) },
-      beads: { total: 0, done: 0, dropped: 0, parked: 0, running: 0, ...(e.beads ?? {}) },
+      beads: (({ parked, ...rest }) => ({ ...rest, parked: Math.max(0, parked - settled) }))({ total: 0, done: 0, dropped: 0, parked: 0, running: 0, ...(e.beads ?? {}) }),
       wave: { running: false, ...e.wave, started: ms(e.wave?.started), last_ended: e.wave?.last_ended ? { ...e.wave.last_ended, at: ms(e.wave.last_ended.at) } : null },
       usage: e.usage ? { ...e.usage, reset_5h: ms(e.usage.reset_5h), reset_7d: ms(e.usage.reset_7d) } : null,
       // The epic's status now, read from the tracker on every call (fleet 0.39); null before, or when it can't say.
@@ -65,7 +77,7 @@ export function normalize(raw, cwd) {
     gauges: {
       ...raw.gauges,
       merged_per_hour: (raw.gauges?.merged_per_hour ?? []).map((m) => ({ from: ms(m.from), merged: m.merged })),
-      parked_waits: (raw.gauges?.parked_waits ?? []).map((p) => ({ ...p, since: ms(p.since) })),
+      parked_waits: (raw.gauges?.parked_waits ?? []).filter((p) => !beads.some((b) => b.went && b.id === p.bead)).map((p) => ({ ...p, since: ms(p.since) })),
       person_waits: raw.gauges?.person_waits ?? null,
     },
   };

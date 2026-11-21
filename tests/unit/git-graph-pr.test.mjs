@@ -21,7 +21,7 @@ test("text wraps between words at the width; a longer word gets a line of its ow
 test("look-ats are read as places whether pr-flow gave objects or 'path:line — why' text; one without a place is left out", async () => {
   const { PrMethods } = await import("../../mods/git-graph/pr.js");
   const look_at = [{ path: "a.js", line: 3, end_line: null, why: "w" }, "c.js:1 — y", "src/d.ts:10-14 – range", { why: "no path" }, "not a reference"];
-  assert.deepEqual(PrMethods.prLooks.call({ pr: { record: { explainer: { look_at } } } }), [
+  assert.deepEqual(PrMethods.prLooks.call({ pr: { notes: { explainer: { look_at } } } }), [
     { path: "a.js", line: 3, end_line: null, why: "w" },
     { path: "c.js", line: 1, end_line: null, why: "y" },
     { path: "src/d.ts", line: 10, end_line: 14, why: "range" },
@@ -243,4 +243,60 @@ test("opening a PR with pr-flow's view: branches and head from its facts, your l
   const old = openFromView(null, record);
   assert.deepEqual(old.rec, { headRef: "x", baseRef: "y", headSha: "z" }); assert.equal(old.reviewed, "old");
   assert.deepEqual(openFromView(null, null), { rec: null, reviewed: null, findings: [] });
+});
+
+// A newer pr-flow's view: the explainer, and each finding's fix and end line, so no show beside it.
+const FULL_VIEW = { ...PR_VIEW, reasons: ["self-checked at 1a2b3c4"],
+  explainer: { sha: "1a2b3c47c56b", at: "2026-03-01T10:20:10.017Z", text: "Adds a login form.", points: [], look_at: [{ path: "a.py", line: 3, end_line: null, why: "the check" }] },
+  findings: PR_VIEW.findings.map((f, i) => ({ ...f, end_line: null, fix: `fix ${i}`, evidence: null })) };
+
+test("a view with the explainer and each finding's fix and end line needs no show; an older one does", async () => {
+  const { viewIsFull } = await import("../../lib/prflow.js");
+  assert.equal(viewIsFull(FULL_VIEW), true);
+  assert.equal(viewIsFull({ ...FULL_VIEW, explainer: null, findings: [] }), true, "no explainer stored and no findings is still a full view");
+  assert.equal(viewIsFull(PR_VIEW), false, "no explainer field, findings without fix");
+  assert.equal(viewIsFull({ ...PR_VIEW, explainer: null }), false, "findings without fix and end line");
+  assert.equal(viewIsFull(null), false);
+});
+
+test("the PR view's notes (reasons, explainer, threads) come from a full view, else from show's record", async () => {
+  const { notesOf, openFromView } = await import("../../lib/prflow.js");
+  assert.deepEqual(notesOf(FULL_VIEW, null), { reasons: ["self-checked at 1a2b3c4"], explainer: FULL_VIEW.explainer,
+    threads: { unresolved: 1, awaitingReviewer: 0, awaitingAuthor: 1 } });
+  const record = { reasons: ["waiting on the author"], explainer: { text: "old" }, snapshot: { threads: { unresolved: 2, awaitingReviewer: 1, awaitingAuthor: 0, open: [] } } };
+  assert.deepEqual(notesOf(PR_VIEW, record), { reasons: ["waiting on the author"], explainer: { text: "old" }, threads: { unresolved: 2, awaitingReviewer: 1, awaitingAuthor: 0 } });
+  assert.deepEqual(notesOf(null, null), { reasons: [], explainer: null, threads: null });
+  // Opening from a full view alone: its findings carry their fixes.
+  assert.deepEqual(openFromView(FULL_VIEW, null).findings.map((f) => [f.id, f.fix]), [["F2", "fix 1"], ["F10", "fix 0"]]);
+});
+
+// The fix round's plan (pr-flow 0.45.0, its ENGINE.md "Fix plans").
+const PLAN = { version: 2, at: "2026-11-21T10:00:00Z", sha: "1a2b3c47c56b", session: "session-ab12cd", state: "waiting", state_at: null,
+  size: { added: 412, deleted: 37, files: 9 }, handback: ["erin"], go: "go = fix T1, commit, push, post these replies, resolve T1 T2, hand back to erin",
+  items: [
+    { id: "T1", kind: "thread", severity: "high", verdict: "fix", path: "b.py", line: 12, end_line: null, who: "copilot", text: "stale dial", reply: "Fixed in <sha>", proof: "a test", resolve: true },
+    { id: "T3", kind: "conversation", severity: "low", verdict: "answer", path: null, line: null, who: "bob", text: "why a function?", reply: "@bob — it takes arguments", resolve: false },
+    { id: "F2", kind: "finding", severity: "low", verdict: "skip", path: "a.py", line: 3, text: "nit", reply: null },
+  ] };
+
+test("the fix plan is read from view's fix_plan field, never from 0.44.0's earlier `plan`", async () => {
+  const { fixPlanOf, planOpen } = await import("../../lib/prflow.js");
+  assert.equal(fixPlanOf({ ...PR_VIEW, fix_plan: PLAN }), PLAN);
+  assert.equal(fixPlanOf({ ...PR_VIEW, plan: PLAN }), null, "0.44.0's view.plan is another design");
+  assert.equal(fixPlanOf({ ...PR_VIEW, fix_plan: null }), null);
+  assert.equal(fixPlanOf({ ...PR_VIEW, fix_plan: { state: "waiting" } }), null, "a plan without items isn't one");
+  assert.equal(fixPlanOf(null), null);
+  assert.equal(planOpen(PLAN), true); assert.equal(planOpen({ ...PLAN, state: "going" }), false); assert.equal(planOpen(null), false);
+});
+
+test("the words typed into the session are the chat's own: `<id> <verdict>`, `skip <id>`", async () => {
+  const { planWords, PLAN_VERDICTS } = await import("../../lib/prflow.js");
+  assert.equal(planWords("T2", "won't-fix"), "T2 won't-fix"); assert.equal(planWords("T1", "follow-up"), "T1 follow-up"); assert.equal(planWords("T3", "skip"), "skip T3");
+  assert.deepEqual(PLAN_VERDICTS.map(([k]) => k), ["f", "w", "a", "u", "s"], "none of them needs a modifier; they mean verdicts only in an item's row");
+});
+
+test("plan items with a code place are stops on the reading path, after findings on the same line; one without a place isn't", async () => {
+  const { readingPath } = await import("../../mods/git-graph/pr.js");
+  const stops = readingPath([{ path: "b.py", line: 12 }], [], ["a.py", "b.py"], [], [], PLAN.items);
+  assert.deepEqual(stops.map((s) => `${s.kind}${s.i}`), ["p2", "f0", "p0"]);
 });

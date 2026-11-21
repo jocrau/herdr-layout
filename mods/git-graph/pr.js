@@ -7,10 +7,11 @@
 // view (esc steps back out); reviewing such a branch's head since base shows the PR's notes there too (a "lite" PR:
 // this.pr with lite set, without the PR view's bar, scope and frame).
 import { div } from "gpui-kit";
-import { v_flex, h_flex, Popup, Scrollbar, v_virtual_list, VirtualListScrollHandle } from "gpui-base";
+import { v_flex, h_flex, Popup, Scrollbar, v_virtual_list, VirtualListScrollHandle, Input, InputState } from "gpui-base";
 import { exec, notify, props, shared, setShared, openOverlay } from "herdr";
 import { OPEN_PR, VIEW_OPEN, lastQueue, readQueue, queueRows, showPr, findingsOf, prRange, doVerb, verbPlan, jobFor, jobText, showPrTab, prTab, tabName, openPrView, parseKey, act,
-  draftView, draftOf, draftVersions, versionLabel, draftText, draftNotes, draftCommand, rewordDraft, jobShow, capabilities, prView, viewRow, openFromView, detailJob } from "./lib/prflow.js";
+  draftView, draftOf, draftVersions, versionLabel, draftText, draftNotes, draftCommand, rewordDraft, jobShow, capabilities, prView, viewRow, openFromView, viewIsFull, notesOf, detailJob,
+  fixPlanOf, PLAN_VERDICTS, planWords, planOpen, typeIntoTab } from "./lib/prflow.js";
 import { prRow, sevColor, SEVERITIES, findingsBadge, ciGlyph, alpha, numWidth, repoWidth, tabDot } from "./lib/prrows.js";
 import { READ } from "./git.js";
 import { actionsFor, agentWaits, arrange, moveOf, nextStep, GROUPS } from "./lib/prmodel.js";
@@ -26,6 +27,8 @@ const DRAFT_TEXTS = "git-graph.draft-texts", DRAFT_KEEP = 40;
 const TONES = [["shorter", "Shorter"], ["softer", "Softer, kinder"], ["more", "More detail"]];
 // A draft comment's colour: not a finding's severity, not a place's accent, not a thread's.
 const draftColor = (t) => t.ansi6 ?? t.ansi4 ?? t.accent;
+const planColor = (t) => t.ansi3 ?? t.accent; // the fix round's plan (yellow: it waits for your go)
+const PLAN_QUIET = 120000; // a change typed into the session with no new version after this long: said so
 const VIEWED = "git-graph.viewed", VIEWED_KEEP = 80; // { [pr]: { at, files: { path: blob } } }, the last PRs
 const CODE_AROUND = 3, CODE_MAX = 14; // a note's code: lines on each side, and the most of its own shown
 
@@ -47,14 +50,16 @@ export function shapeFiles(files, hot, fold = true) {
   return { files: [...first, ...rest, row], noise };
 }
 
-// The reading path: findings ({ kind: "f", i }), the draft's comments ({ kind: "d", i }), places ({ kind: "l", i })
-// and open threads ({ kind: "t", i }) in the order of the file list (`paths`; files not in it last, by name), then
-// by line; on one line findings, then draft comments, places, threads.
-const KIND_ORDER = { f: 0, d: 1, l: 2, t: 3 };
-export function readingPath(findings, looks, paths, threads = [], drafts = []) {
+// The reading path: findings ({ kind: "f", i }), the fix plan's items ({ kind: "p", i }), the draft's comments
+// ({ kind: "d", i }), places ({ kind: "l", i }) and open threads ({ kind: "t", i }) in the order of the file list
+// (`paths`; files not in it last, by name), then by line; on one line in that order. Plan items without a code
+// place aren't stops (they're in the notes).
+const KIND_ORDER = { f: 0, p: 1, d: 2, l: 3, t: 4 };
+export function readingPath(findings, looks, paths, threads = [], drafts = [], plan = []) {
   const order = new Map(paths.map((p, i) => [p, i])), at = (p) => order.get(p) ?? paths.length;
   return [...findings.map((f, i) => ({ kind: "f", i, path: f.path ?? "", line: f.line ?? 0 })), ...looks.map((l, i) => ({ kind: "l", i, path: l.path, line: l.line ?? 0 })),
-    ...threads.map((x, i) => ({ kind: "t", i, path: x.path, line: x.line ?? 0 })), ...drafts.map((x, i) => ({ kind: "d", i, path: x.path, line: x.line ?? 0 }))]
+    ...threads.map((x, i) => ({ kind: "t", i, path: x.path, line: x.line ?? 0 })), ...drafts.map((x, i) => ({ kind: "d", i, path: x.path, line: x.line ?? 0 })),
+    ...plan.map((x, i) => ({ kind: "p", i, path: x.path, line: x.line ?? 0 })).filter((x) => x.path)]
     .sort((a, b) => at(a.path) - at(b.path) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) || a.line - b.line || KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.i - b.i);
 }
 
@@ -123,6 +128,15 @@ export const PrMethods = {
     this.prViewId = Math.random().toString(36).slice(2);
     cx.timer.every(10000, () => this.prBeat());
     cx.timer.every(2000, (cx) => this.prDraftTick(cx)); // a reword job followed; the draft read again now and then
+    // The fix plan's text box: what you'd type in the session's chat, typed into it on ⏎ (prPlanSend).
+    this.planInput = InputState.new({ placeholder: "Tell the session… (⏎ types it there)" });
+    this.planInput.on("focus", (_e, cx) => { this.planTyping = true; cx.notify(); });
+    this.planInput.on("blur", (_e, cx) => { this.planTyping = false; cx.notify(); });
+    this.planInput.on("submit", (_e, cx) => {
+      const text = this.planInput.value().trim();
+      if (text && this.pr) { this.prPlanSend(text, cx); this.planInput.set_value(""); }
+      this.handle.focus(); cx.notify();
+    });
     const key = props()?.pr;
     if (key) this.prEnter(key, cx);
   },
@@ -149,7 +163,7 @@ export const PrMethods = {
   // Opens a PR: its record (branches, head), its range in your checkout (fetched when needed) and its
   // findings; then the graph moves to that repository and opens the review on the range.
   loadPr(key, cx) {
-    const pr = this.pr = { key, status: "loading", findings: [], fAt: -1, lAt: -1, tAt: -1, dAt: -1 };
+    const pr = this.pr = { key, status: "loading", findings: [], fAt: -1, lAt: -1, tAt: -1, dAt: -1, pAt: -1 };
     this.selected = null; this.details = null; this.diff = null; this.zone = "graph";
     // Another PR's history starts at its top: the list scrolled down in the last one may be past this one's end.
     this.cursor = null; this.moreAsked = null; this.scrollHandle.scroll_to_item(0);
@@ -158,15 +172,17 @@ export const PrMethods = {
       if (this.pr !== pr) return;
       let record, rec, range, findings, view, reviewed;
       if (caps.has("view")) {
-        // pr-flow 0.32 (`view`): the PR's stage, next step, actions, facts, draft and jobs in one read; show beside
-        // it only for what view leaves out (the explainer's look-heres and changes, each finding's fix and end line).
+        // pr-flow's `view`: the PR's stage, next step, actions, facts, draft, jobs, explainer and findings in one
+        // read. show beside it only with an older pr-flow, whose view leaves out the explainer and the findings'
+        // fixes and end lines (viewIsFull).
         pr.viewCap = true; pr.draftCap = caps.has("draft");
-        [view, record] = await Promise.all([prView(key), showPr(key)]);
+        view = await prView(key);
         if (this.pr !== pr) return;
+        if (!viewIsFull(view)) { record = await showPr(key); if (this.pr !== pr) return; }
         const got = openFromView(view, record);
         rec = got.rec ?? lastQueue()?.records?.[key] ?? null; findings = got.findings; reviewed = got.reviewed;
         this.prTakeView(pr, view);
-        pr.record = record; pr.headRef = rec?.headRef; pr.baseRef = rec?.baseRef;
+        pr.notes = notesOf(view, record); pr.headRef = rec?.headRef; pr.baseRef = rec?.baseRef;
         range = await prRange(key, rec);
         if (this.pr !== pr) return;
         this.prSetDraft(pr, pr.draftCap ? view : null);
@@ -175,15 +191,15 @@ export const PrMethods = {
         if (this.pr !== pr) return;
         const s = record?.snapshot;
         rec = s ? { headRef: s.headRef, baseRef: s.baseRef, headSha: s.headSha } : lastQueue()?.records?.[key] ?? null;
-        pr.record = record; pr.headRef = rec?.headRef; pr.baseRef = rec?.baseRef;
+        pr.notes = notesOf(null, record); pr.headRef = rec?.headRef; pr.baseRef = rec?.baseRef;
         [range, findings, view] = await Promise.all([prRange(key, rec), findingsOf(key), draftView(key)]);
         if (this.pr !== pr) return;
         reviewed = record?.role === "author" ? record?.last_checked_sha : record?.last_reviewed_sha;
         this.prSetDraft(pr, view); // the stored comment draft, if any (pr-flow's `draft` capability)
       }
       if (range.error) { pr.status = "error"; pr.error = range.error; this.state = "prerror"; cx.notify(); return; }
-      pr.status = "ready"; pr.root = range.root; pr.head = range.head; pr.base = range.base; pr.baseName = range.baseName;
-      const git = (args) => exec("git", [...READ, ...args], { cwd: range.root }).catch(() => ({ code: -1, stdout: "" }));
+      pr.status = "ready"; pr.root = range.root; pr.on = range.on ?? null; pr.head = range.head; pr.base = range.base; pr.baseName = range.baseName;
+      const git = (args) => exec("git", [...READ, ...args], { cwd: range.root, on: range.on ?? null }).catch(() => ({ code: -1, stdout: "" }));
       // The header's ahead/behind: the PR's head against its base.
       if (range.base) {
         const lr = await git(["rev-list", "--left-right", "--count", `${range.base}...${range.head}`]);
@@ -200,7 +216,7 @@ export const PrMethods = {
       }
       if (this.pr !== pr) return;
       pr.findings = findings.filter((f) => !f.status || f.status === "open" || f.status === "partial").sort(bySeverity);
-      this.folder = range.root;
+      this.folder = range.root; this.folderOn = range.on ?? null;
       // Only the PR's head and its base in the graph ("This PR"): the head is near the top however busy the repo.
       pr.revs = [range.head, ...(range.base ? [range.base] : [])];
       this.prRevs = pr.revs; this.limit = PAGE;
@@ -259,12 +275,15 @@ export const PrMethods = {
   // ---------- why it's here, what it changes, where to look (pr-flow's review notes)
 
   prNotes(t, mono) {
-    const rec = this.pr.record ?? {}, th = rec.snapshot?.threads, e = rec.explainer;
+    const notes = this.pr.notes ?? {}, th = notes.threads, e = notes.explainer;
     const head = (text) => div().pt(8).pb(1).text_size(10.5).font_semibold().text_color(t.muted).child(text);
     const facts = [
       // As on pr-board's card: not a one-word reason that only names the stage ("draft", shown in the bar), nor
       // pr-flow's "job-… working since" line (the bar's job chip says it).
-      ...(rec.reasons ?? []).filter((x) => /\s/.test(String(x).trim()) && !/\bjob-\d{8}-/.test(x)),
+      // While a fix plan waits for your go: its session's "An agent (session-…) working since" (before pr-flow
+      // 0.45.1) isn't so, and "fix plan waiting for your go" (0.45.1) is the plan block's own header: both left out.
+      ...(notes.reasons ?? []).filter((x) => /\s/.test(String(x).trim()) && !/\bjob-\d{8}-/.test(x)
+        && !(planOpen(this.pr.plan) && (/\bsession-[0-9a-z]+\b.*\bworking\b/i.test(x) || /^fix plan waiting\b/i.test(x)))),
       th?.unresolved ? `${th.unresolved} open thread${th.unresolved === 1 ? "" : "s"}${th.awaitingReviewer ? `, ${th.awaitingReviewer} waiting on you` : th.awaitingAuthor ? `, ${th.awaitingAuthor} on the author` : ""}` : null,
     ].filter(Boolean);
     const stale = e?.sha && e.sha !== this.pr.head ? ` (at ${e.sha.slice(0, 8)})` : "";
@@ -273,6 +292,7 @@ export const PrMethods = {
       // Its height as laid out (the panel's width fixes it), for notesHeight; drawn again when it changed.
       .on_size_change((size, cx) => { const h = size.height / this.unit(); if (Math.abs(h - (this.notesContent ?? 0)) > 1) { this.notesContent = h; cx.notify(); } })
       .when(facts.length > 0, (el) => el.child(div().w_full().text_size(11.5).text_color(t.foreground).child(facts.join(" · "))))
+      .when(Boolean(this.pr.plan), (el) => el.child(this.prPlanPanel(t, mono)))
       .when(Boolean(this.pr.draft), (el) => el.child(this.prDraftPanel(t, mono)))
       .child(this.prFindingsList(t, mono))
       .when(Boolean(this.pr.threads?.length), (el) => el.child(this.prThreadsList(t, mono)))
@@ -309,7 +329,7 @@ export const PrMethods = {
     if (at < 0) {
       this.viewing = `${Date.now()}`; // the file list takes the keyboard back when the viewer closes (returnFromViewer)
       openOverlay({ mod: "file-browser", kind: "dialog", width: 0.92, height: 0.9,
-        props: { folder: this.pr.root, path, rev: /^[0-9a-f]{40}$/.test(this.pr.head) ? this.pr.head : undefined, line, closedKey: VIEWER_CLOSED, closedToken: this.viewing } });
+        props: { folder: this.pr.root, on: this.pr.on ?? null, path, rev: /^[0-9a-f]{40}$/.test(this.pr.head) ? this.pr.head : undefined, line, closedKey: VIEWER_CLOSED, closedToken: this.viewing } });
       return;
     }
     this.zone = "files"; this.fileAt = at; this.fileScroll.scroll_to_item(at);
@@ -354,12 +374,14 @@ export const PrMethods = {
     const r = commit && !commit.uncommitted ? this.prsAt(commit)[0] : null;
     if (!r) { if (this.pr?.lite) { this.pr = null; this.details = this.details?.orig ?? this.details; } return; }
     if (this.pr?.key === r.key && this.pr.head === commit.hash) return;
-    const pr = this.pr = { key: r.key, lite: true, status: "loading", findings: [], fAt: -1, lAt: -1, tAt: -1, dAt: -1,
+    const pr = this.pr = { key: r.key, lite: true, status: "loading", findings: [], fAt: -1, lAt: -1, tAt: -1, dAt: -1, pAt: -1,
       root: this.root, head: commit.hash, base: this.details.since.from, headRef: r.rec?.headRef, baseRef: r.rec?.baseRef };
     cx.spawn(async (cx) => {
-      const [record, findings] = await Promise.all([showPr(r.key), findingsOf(r.key)]);
+      // One view when pr-flow's carries everything (viewIsFull); else show and findings, as before.
+      const view = await prView(r.key);
+      const [record, findings] = viewIsFull(view) ? [null, view.findings] : await Promise.all([showPr(r.key), findingsOf(r.key)]);
       if (this.pr !== pr) return;
-      pr.record = record;
+      pr.notes = notesOf(view, record);
       pr.findings = findings.filter((f) => !f.status || f.status === "open" || f.status === "partial").sort(bySeverity);
       pr.status = "ready";
       this.prRenote(); cx.notify();
@@ -541,7 +563,7 @@ export const PrMethods = {
 
   // Keeps a view read (the bar's row is built from it); one that failed keeps the last, and waits for the next beat.
   prTakeView(pr, view) {
-    if (view) pr.view = view;
+    if (view) { pr.view = view; this.prSetPlan(pr, view); }
     pr.viewAt = Date.now();
   },
 
@@ -688,7 +710,7 @@ export const PrMethods = {
   gotoDraft(i, cx) {
     const c = this.prDraftComments()[i];
     if (!c) return;
-    this.pr.dAt = i; this.pr.fAt = -1; this.pr.lAt = -1; this.pr.tAt = -1;
+    this.pr.dAt = i; this.pr.fAt = -1; this.pr.lAt = -1; this.pr.tAt = -1; this.pr.pAt = -1;
     this.pr.range = c.side === "LEFT" ? null : { path: c.path, from: c.line, to: c.end ?? c.line, draft: true };
     this.prRenote();
     this.gotoLine(c.path, c.line, cx);
@@ -787,7 +809,9 @@ export const PrMethods = {
     const pr = this.pr;
     if (!this.prMode() || pr.status !== "ready" || pr.dTicking) return;
     const rw = pr.rewording, queueNewer = pr.viewCap && (lastQueue()?.at ?? 0) > (pr.viewAt ?? 0);
-    if (!rw && !queueNewer && Date.now() - (pr.dReadAt ?? 0) < 20000) return;
+    // A fix plan in play (waiting, going, pushed): read every 4 s, so a change typed into the session shows soon.
+    const planLive = pr.plan && ["waiting", "going", "pushed"].includes(pr.plan.state);
+    if (!rw && !queueNewer && Date.now() - (pr.dReadAt ?? 0) < (planLive ? 4000 : 20000)) return;
     pr.dTicking = true;
     cx.spawn(async (cx) => {
       try {
@@ -852,6 +876,142 @@ export const PrMethods = {
         .when(x.side === "LEFT", (e) => e.child(div().flex_none().text_size(10.5).text_color(t.dim).child("old side")))
         .child(div().flex_1()))
       .child(div().w_full().text_size(12).text_color(t.foreground).when(!whole, (e) => e.max_h(36).overflow_hidden()).child(x.body));
+  },
+
+  // ---------- the fix round's plan (pr-flow 0.45.0, its ENGINE.md "Fix plans"): in the notes and on its items' lines. Your
+  // go and changes are typed into the PR's session as you'd type them there; the session records the changed plan
+  // as a new version, which replaces the one shown.
+
+  // Takes `view --json`'s fix_plan. The item reached stays reached by its id; a change typed into the session is
+  // answered by a new version (or the plan leaving `waiting`).
+  prSetPlan(pr, view) {
+    const p = fixPlanOf(view), was = pr.plan;
+    if (p?.version === was?.version && p?.state === was?.state) return;
+    const at = was && pr.pAt >= 0 ? was.items[pr.pAt]?.id : null;
+    pr.plan = p;
+    if (pr.planSent && (!p || p.version > pr.planSent.version || !planOpen(p))) pr.planSent = null;
+    pr.pAt = at && p ? p.items.findIndex((x) => x.id === at) : -1;
+    if (!planOpen(p) || !p.items.some((x) => x.id === pr.planRow)) pr.planRow = null;
+    if (pr.status === "ready") { this.prShape(); this.prRenote(); }
+  },
+
+  // A plan item, as a finding: reached (its card marked), its line in the middle of the diff when it has one.
+  gotoPlan(i, cx) {
+    const x = this.pr.plan?.items?.[i];
+    if (!x) return;
+    this.pr.pAt = i; this.pr.fAt = -1; this.pr.lAt = -1; this.pr.tAt = -1; this.pr.dAt = -1;
+    if (this.pr.planRow !== x.id) this.pr.planRow = null;
+    if (!x.path) { this.prRenote(); cx.notify(); return; }
+    this.pr.range = { path: x.path, from: x.line, to: x.end_line ?? x.line };
+    this.prRenote();
+    this.gotoLine(x.path, x.line, cx);
+  },
+
+  // ⏎ on an item (or a click on its verdict): its verdict row, open or closed.
+  prPlanRow(id, cx) {
+    const pr = this.pr;
+    if (!id || !planOpen(pr.plan)) return;
+    pr.planRow = pr.planRow === id ? null : id;
+    const i = pr.plan.items.findIndex((x) => x.id === id);
+    if (i >= 0 && pr.pAt !== i) { pr.pAt = i; pr.fAt = -1; pr.lAt = -1; pr.tAt = -1; pr.dAt = -1; this.prRenote(); }
+    cx.notify();
+  },
+
+  // Is the session that made the plan here to type into (the PR's agent tab, with its terminal)?
+  prPlanSession() { return Boolean(prTab(this.pr?.key)?.terminal); },
+
+  // Types `words` into the PR's session (a verdict, go, or your own words). Shown on its item, or under the go line,
+  // until the session records the next version.
+  prPlanSend(words, cx, id = null) {
+    const pr = this.pr, p = pr?.plan;
+    if (!planOpen(p) || !words.trim()) return;
+    if (!this.prPlanSession()) {
+      notify({ title: `${tabName(pr.key)}: no session to type into`, body: "The session that made this plan isn't open here. t opens the PR's agent tab; a new fix round starts there.", level: "info", timeout: 6000 });
+      return;
+    }
+    pr.planSent = { id, words, at: Date.now(), version: p.version };
+    pr.planRow = null;
+    cx.spawn(async (cx) => {
+      const res = await typeIntoTab(pr.key, words);
+      if (res !== "sent") {
+        if (pr.planSent?.words === words) pr.planSent = null;
+        notify({ title: `${tabName(pr.key)}: couldn't type “${words}”`, body: res ?? "The PR's agent tab is gone.", level: "error", timeout: 10000 });
+      }
+      pr.dReadAt = 0; // the plan read again at the next beat
+      cx.notify();
+    });
+    cx.notify();
+  },
+
+  // ⌘⏎ or Go: asks with the plan's go line, then types go. A plan from an older head asks once more first.
+  prPlanGo(cx) {
+    const pr = this.pr, p = pr?.plan;
+    if (!planOpen(p)) return;
+    if (pr.planSent) { notify({ title: "Waiting for the session", body: `“${pr.planSent.words}” isn't in the plan shown yet: go once its new version is here.`, level: "info", timeout: 5000 }); return; }
+    if (!this.prPlanSession()) { this.prPlanSend("go", cx); return; } // says why it can't
+    const ask = (cx, text, label, go) => { pr.confirm = { verb: "go", label, text, go }; cx.notify(); };
+    const final = (cx) => ask(cx, `Type go into ${tabName(pr.key)}'s session? ${p.go}`, "go", (cx) => this.prPlanSend("go", cx));
+    if (this.prPlanMoved()) ask(cx, `Planned at ${String(p.sha).slice(0, 8)}, and the PR's head has moved since. Go anyway?`, "go anyway", (cx) => final(cx));
+    else final(cx);
+  },
+
+  // Has the PR's head moved since the plan was made?
+  prPlanMoved() {
+    const sha = String(this.pr?.plan?.sha ?? ""), head = String(this.pr?.head ?? "");
+    return Boolean(sha && /^[0-9a-f]{7,}$/.test(head) && !head.startsWith(sha) && !sha.startsWith(head));
+  },
+
+  // The plan in the notes: where it stands, its items (each goes to its line; ⏎ or a click on its verdict opens
+  // the verdict row), the go line, and the text box. Read-only once it's no longer waiting for your go.
+  prPlanPanel(t, mono) {
+    const pr = this.pr, p = pr.plan, c = planColor(t), open = planOpen(p), session = this.prPlanSession(), moved = this.prPlanMoved();
+    const sz = p.size ?? {}, size = sz.added != null ? `+${sz.added} −${sz.deleted ?? 0} in ${sz.files ?? "?"} files${sz.after ? ` → +${sz.after.added} −${sz.after.deleted ?? 0}` : ""}` : "";
+    const state = { waiting: session ? "waiting for your go" : "waiting, but its session isn't open here", going: "go given: fixing", pushed: "pushed: replies next", done: "done", dropped: "dropped: its session let go of the PR" }[p.state] ?? p.state;
+    const sent = pr.planSent, late = sent && Date.now() - sent.at > PLAN_QUIET;
+    return v_flex().id("pr-plan").mt(6).px(8).py(6).gap(5).rounded(6).border_l(2).border_color(c).bg(alpha(c, "0c"))
+      .child(h_flex().gap(6).items_center().flex_wrap()
+        .child(div().flex_none().text_size(10.5).font_semibold().text_color(c).child("FIX PLAN"))
+        .child(div().flex_none().text_size(10.5).text_color(moved ? t.ansi1 : t.dim).child(`planned at ${String(p.sha ?? "?").slice(0, 8)}${moved ? ", head moved" : ""}`))
+        .when(Boolean(size), (e) => e.child(div().flex_none().text_size(10.5).text_color(t.dim).child(size)))
+        .child(div().flex_1())
+        .child(div().flex_none().text_size(10.5).text_color(open ? c : t.muted).child(state)))
+      .children(p.items.map((x, i) => this.prPlanItem(t, mono, x, i, open)))
+      .when(Boolean(p.go), (e) => e.child(div().w_full().pt(2).font_family(mono).text_size(11).text_color(open ? t.foreground : t.muted).child(p.go)))
+      // One slot under the go line, the same height in every state: what was typed, else the keys.
+      .when(open, (e) => e.child(div().w_full().h(16).text_size(10.5).truncate().text_color(late ? t.ansi3 ?? t.muted : t.dim)
+        .child(sent ? (late ? `no answer from the session yet to “${sent.words}” · t its tab` : `sent: ${sent.words} · waiting for the session's new version`)
+          : session ? "n N its items · ⏎ an item's verdicts (f w a u s) · ⌘⏎ go (asks first)" : "No session to type into: t opens the PR's agent tab")))
+      .when(open, (e) => e.child(h_flex().gap(6).items_center()
+        .child(Input.new(this.planInput).flex_1().h(26).px(8).rounded(6).border_1().border_color(this.planTyping ? c : t.border).bg(t.background).text_size(12).text_color(t.foreground)
+          .when(!session, (x) => x.opacity(0.5)))
+        .child(this.prCardButton(t, "pr-plan-go", "Go… ⌘⏎", `Type go into the session (asks first): ${p.go ?? ""}`, (cx) => this.prPlanGo(cx)).when(!session || Boolean(sent), (x) => x.opacity(0.5)))));
+  },
+
+  // A plan item: severity, id, verdict (a click: its verdict row), place (goes there), who; its point; the reply
+  // it gets (or a fix's proof); while waiting for the session, what was typed for it.
+  prPlanItem(t, mono, x, i, open) {
+    const pr = this.pr, here = i === pr.pAt, row = open && pr.planRow === x.id, c = planColor(t);
+    const vc = x.verdict === "fix" ? t.ansi2 : x.verdict === "skip" ? t.dim : x.verdict === "won't-fix" ? t.ansi1 : t.accent;
+    const sent = pr.planSent?.id === x.id ? pr.planSent : null;
+    return v_flex().id(`pr-plan-${x.id}`).px(8).py(5).gap(3).rounded(6).cursor_pointer().bg(here ? t.hover : alpha(t.foreground, "08")).hover((e) => e.bg(t.hover))
+      .on_click((_e, cx) => this.gotoPlan(i, cx))
+      .child(h_flex().gap(6).items_center()
+        .when(Boolean(x.severity), (e) => e.child(div().flex_none().px(5).rounded(4).bg(alpha(sevColor(t, x.severity), "22")).text_size(10.5).font_semibold().text_color(sevColor(t, x.severity)).child(x.severity)))
+        .child(div().flex_none().font_family(mono).text_size(11).text_color(t.muted).child(x.id))
+        .child(div().id(`pr-plan-v-${x.id}`).flex_none().px(5).rounded(4).text_size(10.5).font_semibold().text_color(vc).bg(alpha(vc, row ? "33" : "18"))
+          .when(open, (e) => e.cursor_pointer().tooltip(tipText("Change its verdict (⏎ on the item)")).on_click((_e, cx) => { cx.stop_propagation(); this.prPlanRow(x.id, cx); }))
+          .child(`${x.verdict}${x.duplicate_of ? ` of ${x.duplicate_of}` : ""}`))
+        .when(Boolean(x.path), (e) => e.child(this.prPlace(t, mono, x.path, x.line, x.end_line, (cx) => this.gotoPlan(i, cx))))
+        .when(Boolean(x.who), (e) => e.child(div().flex_none().max_w(140).truncate().text_size(11).text_color(t.dim).child(x.who)))
+        .child(div().flex_1()))
+      .child(div().w_full().text_size(12).text_color(x.verdict === "skip" ? t.muted : t.foreground).child(x.text ?? ""))
+      .when(x.verdict === "fix" && Boolean(x.proof), (e) => e.child(div().w_full().text_size(11).text_color(t.muted).child(`proof: ${x.proof}`)))
+      .when(Boolean(x.reply), (e) => e.child(div().w_full().text_size(11).text_color(t.muted).child(`reply: ${x.reply}`)))
+      .when(Boolean(sent), (e) => e.child(div().w_full().text_size(10.5).text_color(c).child(`sent: ${sent.words}`)))
+      .when(row, (e) => e.child(h_flex().gap(4).flex_wrap().pt(2)
+        .children(PLAN_VERDICTS.map(([key, v]) => this.prCardButton(t, `pr-plan-${x.id}-${key}`, `${key} ${v}`, `Type “${planWords(x.id, v)}” into the session`, (cx) => this.prPlanSend(planWords(x.id, v), cx, x.id))
+          .when(v === x.verdict, (b) => b.border_color(vc).text_color(vc))))
+        .child(div().flex_none().text_size(10.5).text_color(t.dim).child("esc closes"))));
   },
 
   // ---------- findings in the review
@@ -966,7 +1126,7 @@ export const PrMethods = {
   // pr-flow's look-ats as { path, line, end_line, why }: an entry it couldn't read as one ("a.js:3 — why")
   // read here, one without a place left out.
   prLooks() {
-    const raw = this.pr.record?.explainer?.look_at ?? [];
+    const raw = this.pr.notes?.explainer?.look_at ?? [];
     return raw.map((l) => {
       if (l && typeof l === "object") return l.path ? { path: l.path, line: Number(l.line) || null, end_line: Number(l.end_line) || null, why: l.why ?? "" } : null;
       const m = /^\s*([^\s:]+):(\d+)(?:-(\d+))?\s*(?:[—–-]\s*)?(.*)$/.exec(String(l ?? ""));
@@ -1001,11 +1161,11 @@ export const PrMethods = {
     if (pr?.status !== "ready") return;
     pr.code ??= new Map(); pr.codeAsked ??= new Set();
     // Each file once: those of the findings and places, then of the threads once they're read.
-    const paths = [...new Set([...pr.findings.filter((f) => f.path && f.line).map((f) => f.path), ...this.prLooks().map((l) => l.path), ...(pr.threads ?? []).map((x) => x.path), ...this.prDraftComments().map((x) => x.path)])]
+    const paths = [...new Set([...pr.findings.filter((f) => f.path && f.line).map((f) => f.path), ...this.prLooks().map((l) => l.path), ...(pr.threads ?? []).map((x) => x.path), ...this.prDraftComments().map((x) => x.path), ...(pr.plan?.items ?? []).filter((x) => x.path).map((x) => x.path)])]
       .filter((p) => !pr.codeAsked.has(p));
     if (!paths.length) return;
     for (const p of paths) pr.codeAsked.add(p);
-    const git = (args) => exec("git", [...READ, ...args], { cwd: pr.root }).catch(() => ({ code: -1, stdout: "", stderr: "" }));
+    const git = (args) => exec("git", [...READ, ...args], { cwd: pr.root, on: pr.on ?? null }).catch(() => ({ code: -1, stdout: "", stderr: "" }));
     cx.spawn(async (cx) => {
       await Promise.all(paths.map(async (path) => {
         const [show, diff] = await Promise.all([git(["show", `${pr.head}:${path}`]), pr.base ? git(["diff", "--no-ext-diff", "-U0", `${pr.base}...${pr.head}`, "--", path]) : null]);
@@ -1023,14 +1183,15 @@ export const PrMethods = {
     const f = this.pr.findings.filter((x) => x.path === path).sort(bySeverity)[0];
     if (f) return div().size(6).flex_none().rounded(3).bg(sevColor(t, f.severity));
     // No finding there, but a draft comment: its colour.
-    return this.prDraftComments().some((x) => x.path === path) ? div().size(6).flex_none().rounded(3).bg(draftColor(t)) : null;
+    if (this.prDraftComments().some((x) => x.path === path)) return div().size(6).flex_none().rounded(3).bg(draftColor(t));
+    return this.pr.plan?.items?.some((x) => x.path === path) ? div().size(6).flex_none().rounded(3).bg(planColor(t)) : null;
   },
 
   // A finding: its file selected, its line in the middle of the diff.
   gotoFinding(i, cx) {
     const f = this.pr?.findings?.[i];
     if (!f) return;
-    this.pr.fAt = i; this.pr.lAt = -1; this.pr.tAt = -1; this.pr.dAt = -1;
+    this.pr.fAt = i; this.pr.lAt = -1; this.pr.tAt = -1; this.pr.dAt = -1; this.pr.pAt = -1;
     this.pr.range = { path: f.path, from: f.line, to: f.end_line ?? f.line };
     this.prRenote(); // the one reached unfolds
     this.gotoLine(f.path, f.line, cx);
@@ -1040,7 +1201,7 @@ export const PrMethods = {
   gotoLook(i, cx) {
     const l = this.prLooks()[i];
     if (!l) return;
-    this.pr.lAt = i; this.pr.fAt = -1; this.pr.tAt = -1; this.pr.dAt = -1;
+    this.pr.lAt = i; this.pr.fAt = -1; this.pr.tAt = -1; this.pr.dAt = -1; this.pr.pAt = -1;
     this.pr.range = { path: l.path, from: l.line, to: l.end_line ?? l.line };
     this.prRenote();
     this.gotoLine(l.path, l.line, cx);
@@ -1050,7 +1211,7 @@ export const PrMethods = {
   gotoThread(i, cx) {
     const x = this.pr.threads?.[i];
     if (!x) return;
-    this.pr.tAt = i; this.pr.fAt = -1; this.pr.lAt = -1; this.pr.dAt = -1;
+    this.pr.tAt = i; this.pr.fAt = -1; this.pr.lAt = -1; this.pr.dAt = -1; this.pr.pAt = -1;
     this.pr.range = { path: x.path, from: x.line, to: x.line };
     this.prRenote();
     this.gotoLine(x.path, x.line, cx);
@@ -1063,7 +1224,7 @@ export const PrMethods = {
     if (pr?.status !== "ready" || pr.threadsAsked || !k) return;
     pr.threadsAsked = true;
     cx.spawn(async (cx) => {
-      const r = await exec("gh", ["api", "graphql", "-F", `owner=${k.owner}`, "-F", `name=${k.repo}`, "-F", `n=${k.n}`, "-f", `query=${THREADS_QUERY}`], { cwd: pr.root, timeout: 20000 }).catch(() => null);
+      const r = await exec("gh", ["api", "graphql", "-F", `owner=${k.owner}`, "-F", `name=${k.repo}`, "-F", `n=${k.n}`, "-f", `query=${THREADS_QUERY}`], { cwd: pr.root, on: pr.on ?? null, timeout: 20000 }).catch(() => null);
       let data = null;
       try { data = r?.code === 0 ? JSON.parse(r.stdout) : null; } catch { data = null; }
       if (this.pr !== pr) return;
@@ -1137,7 +1298,7 @@ export const PrMethods = {
     if (!x?.id || x.busy) return;
     x.busy = true; cx.notify();
     cx.spawn(async (cx) => {
-      const r = await exec("gh", ["api", "graphql", "-f", `query=${resolveQuery(resolve)}`, "-f", `id=${x.id}`], { cwd: pr.root, timeout: 20000 }).catch((e) => ({ code: -1, stderr: String(e) }));
+      const r = await exec("gh", ["api", "graphql", "-f", `query=${resolveQuery(resolve)}`, "-f", `id=${x.id}`], { cwd: pr.root, on: pr.on ?? null, timeout: 20000 }).catch((e) => ({ code: -1, stderr: String(e) }));
       x.busy = false;
       if (this.pr !== pr) return;
       if (r.code !== 0) {
@@ -1167,19 +1328,20 @@ export const PrMethods = {
   // (a finding before a place on the same line); n N go through them
 
   prStops() {
-    return readingPath(this.pr.findings, this.prLooks(), (this.details?.files ?? []).map((f) => f.path), this.pr.threads ?? [], this.prDraftComments());
+    return readingPath(this.pr.findings, this.prLooks(), (this.details?.files ?? []).map((f) => f.path), this.pr.threads ?? [], this.prDraftComments(), this.pr.plan?.items ?? []);
   },
 
   // The stop reached: its index in prStops(), or -1.
   prStopAt(stops = this.prStops()) {
-    return stops.findIndex((x) => x.i === (x.kind === "f" ? this.pr.fAt : x.kind === "l" ? this.pr.lAt : x.kind === "d" ? this.pr.dAt : this.pr.tAt));
+    return stops.findIndex((x) => x.i === (x.kind === "f" ? this.pr.fAt : x.kind === "l" ? this.pr.lAt : x.kind === "d" ? this.pr.dAt : x.kind === "p" ? this.pr.pAt : this.pr.tAt));
   },
 
   prStepStop(d, cx) {
     const stops = this.prStops(), n = stops.length;
     if (!n) return;
     const at = this.prStopAt(stops), next = stops[at < 0 ? (d > 0 ? 0 : n - 1) : (at + d + n) % n];
-    if (next.kind === "f") this.gotoFinding(next.i, cx); else if (next.kind === "l") this.gotoLook(next.i, cx); else if (next.kind === "d") this.gotoDraft(next.i, cx); else this.gotoThread(next.i, cx);
+    if (next.kind === "f") this.gotoFinding(next.i, cx); else if (next.kind === "l") this.gotoLook(next.i, cx); else if (next.kind === "d") this.gotoDraft(next.i, cx);
+    else if (next.kind === "p") this.gotoPlan(next.i, cx); else this.gotoThread(next.i, cx);
   },
 
   // After a diff is drawn: the finding asked for, in the middle of the view.
@@ -1214,6 +1376,11 @@ export const PrMethods = {
       // The draft's comments, as GitHub will show them: on the new side's line, or a removed line's (LEFT).
       ...this.prDraftComments().map((x, i) => ({ x, i })).filter(({ x }) => x.path === path)
         .map(({ x, i }) => ({ line: x.line, end: x.end, side: x.side, head: `Draft${x.finding ? ` ${x.finding}` : ""}${x.end ? ` (lines ${x.line}–${x.end})` : ""}${x.side === "LEFT" ? " (old side)" : ""}: ${x.body}`, severity: "draft", cur: i === this.pr.dAt })),
+      // The fix plan's items: id, verdict and point; reached, the reply it gets (or how a fix is proven).
+      ...(this.pr.plan?.items ?? []).map((x, i) => ({ x, i })).filter(({ x }) => x.path === path)
+        .map(({ x, i }) => ({ line: x.line, end: x.end_line, head: `Plan ${x.id} ${x.verdict}: ${x.text}`,
+          replies: [x.verdict === "fix" && x.proof ? `proof: ${x.proof}` : null, x.reply ? `reply: ${x.reply}` : null].filter(Boolean),
+          severity: "plan", cur: i === this.pr.pAt })),
     ];
     if (!notes.length) return rows;
     const out = [...rows], loose = [];
@@ -1235,7 +1402,7 @@ export const PrMethods = {
   },
 
   prDiffNote(r, t) {
-    const c = r.severity === "look" ? t.accent : r.severity === "thread" ? t.ansi5 ?? t.accent : r.severity === "draft" ? draftColor(t) : sevColor(t, r.severity);
+    const c = r.severity === "look" ? t.accent : r.severity === "thread" ? t.ansi5 ?? t.accent : r.severity === "draft" ? draftColor(t) : r.severity === "plan" ? planColor(t) : sevColor(t, r.severity);
     return h_flex().w_full().h(20).flex_none().gap(8).bg(alpha(c, r.cur ? "30" : "1c")).border_l(2).border_color(c)
       .child(div().w(40).flex_none().text_right().pr(6).text_color(c).child(r.more ? "" : "◀"))
       .child(div().flex_1().min_w(0).truncate().text_color(r.fix ? t.muted : t.foreground).child(r.text));
@@ -1246,7 +1413,7 @@ export const PrMethods = {
     if (!this.prReviewing()) return null;
     const stops = this.prStops(), at = this.prStopAt(stops);
     if (!stops.length) return null;
-    return div().flex_none().text_size(11).text_color(at >= 0 ? t.accent : t.dim).tooltip(tipText("The findings, the draft's comments, the places to look at and the open threads, in the files' order (n N)"))
+    return div().flex_none().text_size(11).text_color(at >= 0 ? t.accent : t.dim).tooltip(tipText("The findings, the fix plan's items, the draft's comments, the places to look at and the open threads, in the files' order (n N)"))
       .child(at >= 0 ? `stop ${at + 1} of ${stops.length} · n N` : `${stops.length} stops · n`);
   },
 
@@ -1281,7 +1448,8 @@ export const PrMethods = {
   prShape() {
     const d = this.details;
     if (!d?.files?.length || !this.prReviewing()) return;
-    const pr = this.pr, hot = new Set([...pr.findings.map((f) => f.path), ...this.prLooks().map((l) => l.path), ...(pr.threads ?? []).map((x) => x.path), ...this.prDraftComments().map((x) => x.path)]);
+    const pr = this.pr, hot = new Set([...pr.findings.map((f) => f.path), ...this.prLooks().map((l) => l.path), ...(pr.threads ?? []).map((x) => x.path), ...this.prDraftComments().map((x) => x.path),
+      ...(pr.plan?.items ?? []).filter((x) => x.path).map((x) => x.path)]);
     const key = `${[...hot].join("\0")}\0${Boolean(pr.unfolded)}`, orig = d.orig ?? d;
     if (d.shapedKey === key) return;
     const { files, noise } = shapeFiles(orig.files, hot, !pr.unfolded);
@@ -1315,7 +1483,7 @@ export const PrMethods = {
     pr.blobsFor = files;
     const paths = files.map((f) => f.path);
     cx.spawn(async (cx) => {
-      const r = await exec("git", [...READ, "ls-tree", "-r", "-z", pr.head, "--", ...paths], { cwd: pr.root }).catch(() => null);
+      const r = await exec("git", [...READ, "ls-tree", "-r", "-z", pr.head, "--", ...paths], { cwd: pr.root, on: pr.on ?? null }).catch(() => null);
       if (this.pr !== pr || r?.code !== 0) return;
       pr.blobs = blobsOf(r.stdout, paths);
       cx.notify();
@@ -1377,10 +1545,21 @@ export const PrMethods = {
       return false;
     }
     if (this.prPick) { this.prPickKey(e, cx); return true; } // the picker has the keyboard while it's open
+    // The fix plan's text box has the keyboard while it's focused: esc gives it back.
+    if (this.planTyping) { if (k === "escape") this.handle.focus(); return true; }
+    // An item's verdict row (⏎ on a plan item): f w a u s type that verdict into the session; esc closes it.
+    if (this.pr.planRow && !this.pr.confirm) {
+      const v = PLAN_VERDICTS.find(([key]) => key === k);
+      if (v) { this.prPlanSend(planWords(this.pr.planRow, v[1]), cx, this.pr.planRow); return true; }
+      if (k === "escape") { this.pr.planRow = null; return true; }
+    }
     if (this.pr.confirm && (k === "enter" || k === "escape")) {
       if (k === "enter") this.prConfirmed(cx); else { this.pr.confirm = null; cx.notify(); }
       return true;
     }
+    // The fix plan: ⏎ on an item opens its verdict row; ⌘⏎ go (asks first).
+    if (planOpen(this.pr.plan) && k === "enter" && this.pr.pAt >= 0 && !this.pr.confirm) { this.prPlanRow(this.pr.plan.items[this.pr.pAt]?.id, cx); return true; }
+    if (planOpen(this.pr.plan) && k === "cmd-enter") { this.prPlanGo(cx); return true; }
     // The draft: ⌘⏎ post it (asks first), y copy it, ⇧V the next version.
     if (this.pr.draft && k === "cmd-enter") { this.prDraftAsk("post", cx); return true; }
     if (this.pr.draft && k === "y" && !this.search.typing) { this.prDraftCopy(cx); return true; }
