@@ -6,7 +6,7 @@ import { join, normalize } from "./paths.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
 
-async function directory(path, on) {
+export async function directory(path, on) {
   if (!on && window()?.platform === "windows") {
     const command = "& { param($p) @(Get-ChildItem -LiteralPath $p -Force -ErrorAction Stop | Where-Object Name -ne '.git' | Select-Object -First 501 | ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress } '" + path.replaceAll("'", "''") + "'";
     const result = await exec("powershell", ["-NoProfile", "-Command", command]);

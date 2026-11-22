@@ -15,14 +15,15 @@ import { focused, panes, spaces, exec, home, props, closeOverlay, setShared, set
 import { footerBar } from "./lib/bars.js";
 import { closeSide, focusFrame } from "./lib/sidecolumn.js";
 import Viewer from "./viewer.js";
-import { Tree } from "./tree.js";
-import { join, normalize, kind, richText, basename, dirname } from "./paths.js";
+import { Tree, directory } from "./tree.js";
+import { join, normalize, kind, richText, basename, dirname, typedPath, pathMatches, completion } from "./paths.js";
 import { appearance } from "./appearance.js";
 
-const ROW = 26, MATCHES = 300, FILES = 20000, PREVIEW_DELAY = 120, TREE_W = 320;
+const NO_FILES = [];
+const ROW = 26, MATCHES = 300, FILES = 20000, PREVIEW_DELAY = 120, TREE_W = 320, LIVE = 3000;
 // Vim's normal mode on code: these keys are bound (context FbNormal, the editor's frame) to actions of the browser,
 // so the read-only editor keeps the keyboard (its cursor and selection show) and never sees them as typing.
-const NORMAL_KEYS = ["j", "k", "h", "l", "g", "shift-g", "y", "shift-y", "shift-v", "i", "/", "n", "shift-n", "o", "shift-j", "shift-k",
+const NORMAL_KEYS = ["j", "k", "h", "l", "g", "shift-g", "y", "shift-y", "shift-v", "i", "/", "n", "shift-n", "o", "s", "shift-j", "shift-k",
   "?", "shift-/", "[", "]", "escape", "tab", "shift-tab", "backspace", "enter", "space", "ctrl-d", "ctrl-u", "ctrl-f", "ctrl-b", "ctrl-w",
   "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
 const normalAction = (k) => "file_browser_normal_" + k.replace(/[^a-z0-9]/g, (c) => "_" + c.charCodeAt(0));
@@ -94,15 +95,14 @@ export function matchTree(ranked, filter) {
 // A term matches as typed (any case) inside one file or folder name, as ripgrep and fd match names, never letters
 // spread over the path; a term with a / in it may span folders. Higher: in the file's (or folder's) own name, at the
 // start of the name, at the start of a word (after - _ . or a space). null: not there.
+// Two lookups at most per path: a letter typed over 40,000 paths must stay well inside the script's time limit.
 function nameScore(t, p) {
   const end = p.endsWith("/") ? p.length - 1 : p.length, name = p.lastIndexOf("/", end - 1) + 1;
-  let best = null;
-  for (let at = p.indexOf(t); at >= 0; at = p.indexOf(t, at + 1)) {
-    const inName = at >= name, word = at === 0 || "/_-. ".includes(p[at - 1]);
-    const s = 1 + (inName ? 8 : 0) + (word ? 4 : 0) + (inName && at === name ? 4 : 0);
-    if (best === null || s > best) best = s;
-  }
-  return best === null ? null : best - p.length * 0.01;
+  const own = p.indexOf(t, name);
+  if (own >= 0) return 9 + (own === name ? 8 : "_-. ".includes(p[own - 1]) ? 4 : 0) - p.length * 0.01;
+  const at = p.indexOf(t);
+  if (at < 0) return null;
+  return 1 + (at === 0 || "/_-. ".includes(p[at - 1]) ? 4 : 0) - p.length * 0.01;
 }
 
 export function matchFiles(files, filter, last = null) {
@@ -159,6 +159,7 @@ export default class FileBrowser extends Viewer {
     this.input.on("focus", (_e, cx) => { this.filtering = true; this.ensureFiles(cx); cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.filtering = false; cx.notify(); });
     this.input.on("change", (_e, cx) => { this.filter = this.input.value(); this.at = 0; this.atPath = null; this.toBest = true; this.ensureFiles(cx); cx.notify(); });
+    this.homes = {}; // a remote machine's home, for ~ in a typed path
     this.input.on("submit", (_e, cx) => this.enter(cx));
     if (!normalBound) { normalBound = true; cx.bind_keys(NORMAL_KEYS.map((k) => ({ keystroke: k, action: normalAction(k), context: "FbNormal" }))); }
     // Vim: / finds in the file (incremental, from where it started), ⏎ keeps the match, esc goes back.
@@ -178,6 +179,11 @@ export default class FileBrowser extends Viewer {
   // Only the latest load lands: a docked browser that moves on while git answers keeps the newer repository.
   openAt(s, cx) {
     const load = this.openLoad = {};
+    this.homes ??= {};
+    if (s.on && this.homes[s.on] === undefined) {
+      this.homes[s.on] = null;
+      exec("sh", ["-c", 'printf %s "$HOME"'], { on: s.on }).then((r) => { if (r.code === 0 && r.stdout.startsWith("/")) this.homes[s.on] = r.stdout; }).catch(() => {});
+    }
     cx.spawn(async (cx) => {
       // The top folder and where the terminal is inside it, as git sees them (symlinks resolved: a terminal in
       // /tmp/x is in /private/tmp/x, so comparing path strings would miss it).
@@ -258,8 +264,10 @@ export default class FileBrowser extends Viewer {
     }
   }
 
-  // The whole repo's file names, for the filter: git's list, else find.
+  // The whole repo's file names, for the filter: git's list, else find. A typed path lists its folder instead.
   ensureFiles(cx) {
+    if (this.typed()) return this.loadTyped(cx);
+    if (this.git === false) return this.liveSearch(cx);
     if (this.files || this.loadingFiles || !this.root) return;
     this.loadingFiles = true;
     const load = this.filesLoad = {};
@@ -283,7 +291,7 @@ export default class FileBrowser extends Viewer {
 
   rows() {
     if (!this.nav) return [];
-    if (this.filter.trim()) return this.matches();
+    if (this.filter.trim()) return this.typed() ? this.typedRows() : this.matches();
     const out = [];
     this.treeCapped = false;
     const walk = (prefix, depth) => {
@@ -301,11 +309,139 @@ export default class FileBrowser extends Viewer {
 
   // The filter's matches as a tree (matchTree); the cursor starts on the best match.
   matches() {
-    const key = this.filter, last = this.matchCache;
-    if (last?.key === key && last.files === this.files) return last.tree.rows;
-    const { rows, pool } = matchFiles(this.files ?? [], key, last?.files === this.files ? last : null);
-    this.matchCache = { key, files: this.files, rows, pool, tree: matchTree(rows, key) };
+    const key = this.filter, last = this.matchCache, list = this.searchList();
+    if (last?.key === key && last.files === list) return last.tree.rows;
+    const { rows, pool } = matchFiles(list, key, last?.files === list ? last : null);
+    this.matchCache = { key, files: list, rows, pool, tree: matchTree(rows, key) };
     return this.matchCache.tree.rows;
+  }
+
+  // Outside a repository (above one with u, ~/Code): no list of every file up front, which would stop after the first
+  // FILES and miss the rest. As fd and ripgrep do, the file system is asked for names holding what was typed (the
+  // longest term; a term with / against the whole path), each time the filter changes: fd (skips what .gitignore
+  // ignores, as node_modules), else find. The answer is ranked with all the terms, as git's list is.
+  liveSearch(cx) {
+    const filter = this.filter.trim(), root = this.root, on = this.place.on;
+    const token = this.liveToken = {};
+    if (!filter || !root) { this.liveList = null; this.liveBusy = false; return cx.notify(); }
+    cx.timer.after(120, (cx) => {
+      if (this.liveToken !== token || this.closed) return;
+      const terms = filter.toLowerCase().split(/\s+/);
+      const span = terms.find((t) => t.includes("/")), term = span ?? terms.reduce((a, b) => (b.length > a.length ? b : a));
+      const script = `if command -v fd >/dev/null 2>&1; then fd -H -i -F --exclude .git --max-results ${LIVE} ${span ? "--full-path " : ""}-- "$1";`
+        + ` else find . \\( -name node_modules -o -name .git \\) -prune -o \\( -type d -iname "*$1*" -exec printf '%s/\\n' {} + \\)`
+        + ` -o \\( -iname "*$1*" -print \\) 2>/dev/null | head -n ${LIVE}; fi`;
+      this.liveBusy = true; cx.notify();
+      exec(on ? "sh" : "/bin/zsh", ["-lc", script, "fb", term], { cwd: root, on, timeout: 20000 })
+        .catch((error) => ({ code: 1, stdout: "", stderr: String(error.message || error) }))
+        .then((r) => {
+          if (this.liveToken !== token || this.closed || this.root !== root) return;
+          this.liveBusy = false;
+          this.liveList = r.stdout.split("\n").filter(Boolean).map((p) => p.replace(/^\.\//, ""));
+          this.liveCapped = this.liveList.length >= LIVE;
+          this.matchCache = null; this.toBest = true;
+          cx.notify();
+        });
+    });
+  }
+
+  // What / searches: git's file list (or find's) with its folders, and everything the tree has listed so far, which
+  // git's list leaves out: the top level always, folders git ignores (.worktrees), empty ones, and what's past the
+  // first FILES files above a repository. Made again when either changes.
+  searchList() {
+    if (this.git === false) return this.liveList ?? NO_FILES;
+    const nav = this.nav;
+    let size = 0;
+    for (const entries of nav?.entries.values() ?? []) size += entries.length;
+    const sig = `${size}|${nav?.entries.size ?? 0}`;
+    if (this.searchCache?.files === this.files && this.searchCache.nav === nav && this.searchCache.sig === sig) return this.searchCache.list;
+    const listed = [];
+    for (const [prefix, entries] of nav?.entries ?? []) for (const e of entries) {
+      const path = prefix ? `${prefix}/${e.name}` : e.name;
+      listed.push(e.dir ? path + "/" : path);
+    }
+    const files = this.files ?? [], have = new Set(files);
+    const list = [...files, ...listed.filter((p) => !have.has(p))];
+    this.searchCache = { files: this.files, nav, sig, list };
+    return list;
+  }
+
+  // ---------- a path typed into the filter (~/Code/x/, /tmp/y, ../z): its folder's entries that begin with the name
+  // typed, ⇥ completes as a shell does, ⏎ opens a folder as the tree or a file in it.
+
+  homeDir() { return this.place.on ? this.homes[this.place.on] : home(); }
+  typed() { return this.root && this.filter ? typedPath(this.filter, this.homeDir(), this.root) : null; }
+
+  // Lists the typed path's folder (once per folder; the latest folder typed wins).
+  loadTyped(cx) {
+    const p = this.typed();
+    if (!p || this.typedList?.dir === p.dir) return;
+    const list = this.typedList = { dir: p.dir, entries: null, error: null };
+    directory(p.dir, this.place.on)
+      .then((entries) => { if (this.typedList !== list) return; list.entries = entries; this.toBest = true; cx.notify(); })
+      .catch(() => { if (this.typedList !== list) return; list.error = "No such folder"; cx.notify(); });
+  }
+
+  // The rows: absolute paths (`abs`); with nothing begun after the last /, the folder itself first, as ".".
+  typedRows() {
+    const p = this.typed(), list = this.typedList;
+    if (!p || list?.dir !== p.dir || !list.entries) return [];
+    const row = (abs, name, dir, hl = []) => ({ path: abs, abs, name, dir, depth: 0, open: false, match: true, hit: true, hl });
+    const hl = [...Array(p.partial.length).keys()];
+    return [...(p.partial ? [] : [row(p.dir, ".", true)]),
+      ...pathMatches(list.entries, p.partial).map((e) => row(join(p.dir, e.name), e.dir ? e.name + "/" : e.name, e.dir, hl))];
+  }
+
+  // The text in the filter, the cursor after it.
+  setTyped(text, cx) {
+    this.input.set_value(text); this.input.set_selected_range({ start: text.length, end: text.length });
+    this.filter = text; this.at = 0; this.atPath = null; this.toBest = true;
+    this.loadTyped(cx); cx.notify();
+  }
+
+  // ⇥: the name completed (a folder's / added, so the next ⇥ goes on in it); with nothing to add, the row under the
+  // cursor (moved there with ↑↓) is taken.
+  completeTyped(cx) {
+    const t = this.filter.trim(), p = this.typed();
+    if (t === "~" || /(^|\/)\.\.?$/.test(t)) return this.setTyped(t + "/", cx);
+    const list = this.typedList;
+    if (list?.dir !== p.dir || !list.entries) return this.say(list?.error ?? "Listing the folder…", cx);
+    const ms = pathMatches(list.entries, p.partial), head = t.slice(0, t.length - p.partial.length);
+    const add = completion(ms, p.partial);
+    if (add != null) return this.setTyped(head + add, cx);
+    const row = this.typedRows()[this.at];
+    if (row && row.name !== "." && this.at > 0) return this.setTyped(head + row.name, cx);
+    return this.say(ms.length ? `${ms.length} names begin so: type on, or ↑↓ then ⇥` : "No match", cx);
+  }
+
+  // ⏎ on a typed path: a folder becomes the tree; a file opens, in the tree it's in (its repository, else its
+  // folder; the tree shown when the file is inside it). Typed whole with nothing listed: asked whether it's there.
+  openTyped(row, cx) {
+    const on = this.place.on;
+    const go = (abs, dir) => {
+      this.clearFilter(cx);
+      if (dir) return this.setRoot(normalize(abs), null, cx);
+      const rel = this.relative(abs);
+      if (rel) { this.reveal(rel, cx, true); this.atPath = rel; this.revealScroll = rel; this.openFile(rel, cx); this.focusView(); this.showFile(true, cx); return; }
+      cx.spawn(async (cx) => {
+        const at = await exec("git", ["rev-parse", "--show-toplevel", "--show-prefix"], { cwd: dirname(abs), on }).catch(() => null);
+        if (this.closed) return;
+        const [top, prefix = ""] = at?.code === 0 ? at.stdout.split("\n") : [];
+        const root = at?.code === 0 ? top.trim() : dirname(abs), folder = at?.code === 0 ? prefix.trim().replace(/\/$/, "") : "";
+        const rel = folder ? `${folder}/${basename(abs)}` : basename(abs);
+        this.setRoot(root, folder || null, cx);
+        this.atPath = rel; this.revealScroll = rel;
+        this.show({ file: join(root, rel), root, on }, cx);
+        this.focusView(); this.showFile(true, cx);
+      });
+    };
+    if (row?.abs) return go(row.abs, row.dir);
+    const p = this.typed();
+    if (!p) return;
+    const abs = normalize(join(p.dir, p.partial));
+    exec("sh", ["-c", 'if [ -d "$1" ]; then echo d; elif [ -e "$1" ]; then echo f; fi', "fb", abs], { on })
+      .then((r) => { const what = r.stdout.trim(); if (what) go(abs, what === "d"); else this.say(`Not there: ${this.filter.trim()}`, cx); })
+      .catch(() => this.say(`Not there: ${this.filter.trim()}`, cx));
   }
 
   select(i, rows, cx, preview = true) {
@@ -335,6 +471,7 @@ export default class FileBrowser extends Viewer {
   // the file is also shown in the tree and the filter cleared.
   enter(cx) {
     const rows = this.rows(), row = rows[this.at];
+    if (this.typed()) return this.openTyped(row, cx);
     if (!row) return;
     // A folder found with /: the tree opened down to it and the cursor on it (the keyboard stays in the tree).
     if (row.dir && row.match) {
@@ -351,7 +488,7 @@ export default class FileBrowser extends Viewer {
   }
 
   clearFilter(cx) {
-    this.filter = ""; this.input.set_value(""); this.matchCache = null;
+    this.filter = ""; this.input.set_value(""); this.matchCache = null; this.typedList = null;
     this.treeFocus.focus();
     cx.notify();
   }
@@ -394,6 +531,7 @@ export default class FileBrowser extends Viewer {
       return this.closeBrowser();
     }
     if (k === "q" && !typing) { done(); return this.closeBrowser(); }
+    if (k === "tab" && typing && this.typed()) { done(); return this.completeTyped(cx); }
     if (k === "tab" && typing) { done(); this.treeFocus.focus(); return cx.notify(); }
     if (k === "tab") { done(); if (this.selected) { this.focusView(); this.showFile(true, cx); } return cx.notify(); }
     if (typing) return;
@@ -466,17 +604,17 @@ export default class FileBrowser extends Viewer {
   // The status bar across the window (vim's status line): the mode and a half-typed command or what just happened,
   // the keys that matter where the keyboard is, and where you are.
   statusBar(colors) {
-    const file = this.selected?.file, type = file ? kind(file) : null, code = type === "text" && Boolean(this.code);
+    const file = this.selected?.file, type = file ? kind(file) : null, code = Boolean(type) && this.isCode(type) && Boolean(this.code);
     const inView = this.inView(), tree = !inView && !this.finding;
     const mode = this.finding ? "FIND" : this.filtering || (tree && this.filter) ? "FILTER" : tree ? "TREE"
       : this.editing ? "INSERT" : this.visual != null ? "VISUAL" : code ? "NORMAL" : "VIEW";
     const pending = `${this.count || ""}${this.pendingKey === "ctrl-w" ? "⌃W" : this.pendingKey || ""}`;
     const keys = this.finding ? "⏎ keep · esc back · then n N"
-      : this.filtering ? "type a name · ↑↓ ⌃N ⌃P move · ⏎ open · ⇥ to the list · esc clear"
+      : this.filtering ? (this.typed() ? "a path · ⇥ complete · ↑↓ move · ⏎ open · esc clear" : "type a name, or a path (~/ /) · ↑↓ ⌃N ⌃P move · ⏎ open · ⇥ to the list · esc clear")
       : tree ? "j k move · l open · / filter · u up · yy path · ⇥ file · q close · ? help"
       : this.editing ? "esc normal mode · ⌘S save"
       : this.visual != null ? `${Math.abs(this.dataAt - this.visual) + 1} lines · j k extend · y copy · esc cancel`
-      : code ? "i insert · / find · V lines · yy copy · gg G · ⇥ tree · ? help"
+      : code ? `i insert · / find · V lines · yy copy · gg G${type === "json" || type === "yaml" ? " · s tree view" : ""} · ⇥ tree · ? help`
       : "j k scroll · [ ] headings · s source · c contents · h tree · ? help";
     const facts = [];
     if (tree || !file) {
@@ -579,7 +717,7 @@ export default class FileBrowser extends Viewer {
 
   // The keyboard to the file: its editor for code (normal mode), else the view.
   focusView() {
-    const code = kind(this.selected?.file ?? "") === "text";
+    const code = this.isCode();
     if (code && this.code) this.code.focus();
     else this.viewFocus.focus();
     if (code) this.refocus = true; // a file still loading: its editor takes it once there
@@ -598,7 +736,7 @@ export default class FileBrowser extends Viewer {
   keyDown(e, cx) {
     if (this.helpKey(e, cx)) return;
     const k = e.keystroke, file = this.selected?.file, type = file ? kind(file) : null;
-    if (type === "text" && this.code && !this.finding) {
+    if (this.isCode(type) && this.code && !this.finding) {
       if (this.twice(k)) return cx.stop_propagation();
       if (!this.editing) this.syncCursor();
     }
@@ -617,7 +755,7 @@ export default class FileBrowser extends Viewer {
     if (k === "tab" || k === "shift-tab") return toTree();
     if (k === "cmd-s" || k === "ctrl-s") return super.keyDown(e, cx);
     // Code: normal mode's keys here; in insert mode (i) the editor has them, esc comes back.
-    const code = type === "text" && Boolean(this.code);
+    const code = this.isCode(type) && Boolean(this.code);
     if (code && !this.editing && k === "i") { cx.stop_propagation(); return this.setEditing(true, cx); }
     const editor = Boolean(this.code) && (this.source || !richText(type)) && type !== "image" && type !== "pdf" && !(code && !this.editing);
     if (editor || !file) return;
@@ -686,7 +824,7 @@ export default class FileBrowser extends Viewer {
   treePane(colors) {
     const rows = this.rows();
     // Each letter typed into the filter puts the cursor on the best match again.
-    const best = this.filter.trim() ? this.matchCache?.tree?.best : null;
+    const best = !this.filter.trim() ? null : this.typed() ? rows[0]?.path : this.matchCache?.tree?.best;
     if (this.toBest && best != null) { this.toBest = false; this.atPath = best; this.revealScroll = best; }
     const found = rows.findIndex((r) => r.path === this.atPath);
     if (found >= 0) this.at = found;
@@ -706,7 +844,13 @@ export default class FileBrowser extends Viewer {
           .text_color(mark === "A" ? colors.ansi2 : mark === "D" || mark === "U" ? colors.ansi1 : colors.ansi3).child(mark)));
     };
     const hits = this.matchCache?.tree?.hits ?? 0;
-    const status = !this.nav ? "Loading…" : this.filter.trim() ? (this.files ? `${hits}${hits === MATCHES ? "+" : ""} matches` : "Listing files…")
+    const tp = this.filter.trim() ? this.typed() : null, tl = tp && this.typedList?.dir === tp.dir ? this.typedList : null;
+    const tilde = (d) => (d.startsWith(home() + "/") && !this.place.on ? "~" + d.slice(home().length) : d);
+    const status = !this.nav ? "Loading…" : tp ? (tl?.error ? `${tl.error}: ${tilde(tp.dir)}` : !tl?.entries ? `Listing ${tilde(tp.dir)}…`
+        : `${rows.length - (tp.partial ? 0 : 1)} in ${tilde(tp.dir)} · ⇥ completes · ⏎ opens`)
+      : this.filter.trim()
+      ? (this.git === false ? (this.liveBusy ? "Searching…" : `${hits}${hits === MATCHES || this.liveCapped ? "+" : ""} matches`)
+        : this.files ? `${hits}${hits === MATCHES ? "+" : ""} matches` : "Listing files…")
       : this.nav.error || (this.nav.loading && !rows.length ? "Loading…" : !rows.length ? "No files" : null);
     return v_flex().id("fb-tree-pane").track_focus(this.treeFocus).min_h(0)
       .on_key_down((e, cx) => this.treeKey(e, cx))
@@ -716,6 +860,9 @@ export default class FileBrowser extends Viewer {
         .child(div().flex_1().min_w(0).truncate().font_semibold().child(this.root ? basename(this.root) : "Files")))
       .child(h_flex().h(32).flex_none().mx(8).my(6).px(8).gap(6).items_center().rounded(7).border_1()
         .border_color(this.filtering ? colors.accent ?? colors.border : colors.border)
+        // A press anywhere in the box (the input, its padding, the /) types into it: the pane's own press below would
+        // put the keyboard back on the tree. The input's own press (the cursor's place) comes first.
+        .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); if (!this.filtering) this.input.focus(); cx.notify(); })
         .child(div().text_size(12).text_color(colors.dim).child("/"))
         .child(Input.new(this.input).flex_1().h_full().text_size(12.5).text_color(colors.foreground)))
       .when(Boolean(status), (el) => el.child(div().px(14).py(4).text_size(11.5).text_color(colors.dim).child(status)))
@@ -725,6 +872,7 @@ export default class FileBrowser extends Viewer {
           .on_item_click((path, cx) => {
             const i = rows.findIndex((r) => r.path === path), r = rows[i];
             if (!r) return;
+            if (r.abs) { this.select(i, rows, cx, false); return this.openTyped(r, cx); }
             this.treeFocus.focus();
             if (r.dir) { this.select(i, rows, cx, false); this.nav.toggle(r.path, cx); }
             else if (this.docked) { this.select(i, rows, cx, false); this.openFile(r.path, cx); this.showFile(true, cx); }
@@ -736,7 +884,7 @@ export default class FileBrowser extends Viewer {
         : this.visual != null ? `-- VISUAL LINE -- ${Math.abs(this.dataAt - this.visual) + 1} lines · y copy · esc`
         : this.editing ? "-- INSERT -- · esc normal mode"
         : this.inView()
-          ? (kind(this.selected?.file ?? "") === "text" ? "i insert · / find · V lines · yy copy · ⌃W h tree · ? help" : "h ← ⇥ tree · J K files · [ ] headings · s source · ? help")
+          ? (this.isCode() ? "i insert · / find · V lines · yy copy · ⌃W h tree · ? help" : "h ← ⇥ tree · J K files · [ ] headings · s source · ? help")
           : (this.filter ? `${this.filesCapped ? `first ${FILES.toLocaleString()} files only · ` : ""}↑↓ move · ⏎ open · ⇥ list · ⌫ clear · ? help`
             : `${this.treeCapped ? "first 5,000 rows only · " : ""}j k move · h l fold · ⏎ open · / filter · u up${this.docked ? "" : " · ⇥ viewer"} · ? help`)))));
   }
@@ -754,12 +902,12 @@ export default class FileBrowser extends Viewer {
       ["Tree", [["j k  ↑ ↓  ⌃N ⌃P", "move (the file under the cursor previews)"], ["⌃D ⌃U  PgDn PgUp", "half / whole page"], ["gg G  Home End", "first / last"],
         ["l →  ⏎", "open a folder, or go into the file"], ["h ←", "close the folder, or go to its parent"], ["J K", "next / previous file"],
         ["u", "the folder above as the tree (even above the repository)"], ["C", "this folder as the tree"], ["P", "back to the repository"],
-        ["/  ⌫", "filter the whole tree (names containing what you type), clear it"], ["yy  Y", "copy the path (in the tree / full)"], ["I", "show / hide hidden files"],
+        ["/  ⌫", "filter the whole tree (names containing what you type), clear it"], ["/~/…  //…", "a path (~ is home): ⇥ completes, ⏎ opens a folder as the tree or a file"], ["yy  Y", "copy the path (in the tree / full)"], ["I", "show / hide hidden files"],
         ["R  o", "reload / open in its app"], ["⇥  ⌃W l", "to the file"]]],
       ["File (normal mode)", [["j k  ↑ ↓", "a line (code), else scroll"], ["⌃D ⌃U  ⌃F ⌃B", "half / whole page"], ["gg G  42G", "top / end / line 42 (5j: five lines)"],
         ["i", "insert mode: edit in place (esc: back to normal mode)"], ["V  then y", "select lines, copy them"], ["yy  3yy  Y", "copy the line / three lines / the whole file"],
         ["/  n N", "find in the file, next / previous"], ["h ←  ⇥  ⌃W h", "back to the tree"], ["J K", "next / previous file"],
-        ["[ ]  s  c", "Markdown: headings, source, contents"], ["⌫", "back after following a link"], ["⌘S", "save"], ["o", "open in its app"]]],
+        ["[ ]  s  c", "Markdown: headings, source, contents"], ["s", "JSON, YAML: the tree (click to fold), or the code again"], ["⌫", "back after following a link"], ["⌘S", "save"], ["o", "open in its app"]]],
       ["Window", [["?", "this help (any key closes it)"], ["esc", `insert → normal → tree → clear the filter → close the ${panel}`], ["q", `close the ${panel} (from the tree)`],
         ["⌃W <  ⌃W >  ⌃W =", "the tree narrower / wider / as it was (or drag its edge)"]]],
     ];

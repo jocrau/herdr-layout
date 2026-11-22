@@ -25,6 +25,10 @@ at commit a47550e, with these changes by Jochen Rau, 2026-11:
 
 Each changed file starts with a "Modified by" line.
 
+Added here, not from preview-plus: `js-yaml.js` is [js-yaml](https://github.com/nodeca/js-yaml) 4.1.0
+(npm's `dist/js-yaml.mjs`, unmodified, one comment line added on top), MIT, its licence in
+`licenses/js-yaml-MIT.txt`. structured.js reads YAML with it for the tree view.
+
 preview-plus's THIRD_PARTY.md and licenses/ are kept unchanged: they cover the code
 preview-plus took from others (Herdr, Apache-2.0; Herdr Files Plus, MIT; Cria File
 Preview, Apache-2.0; beautiful-mermaid, MIT; elkjs, EPL-2.0; entities, BSD-2-Clause;

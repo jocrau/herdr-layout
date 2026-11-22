@@ -15,8 +15,12 @@ dialogs and the fleet pane.
   repository), `C` (this folder as the tree), `P` (back), `yy Y` (copy the path), `I` (hidden files), `R`, and `l`
   goes into a file. `/` matches names as typed (each term inside one file or folder name; a `/` spans folders),
   finds folders too, and shows the matches as a tree with the matched letters lit; ⏎ on a folder opens the tree
-  down to it. The tree's edge drags (`⌃W < > =`), and a status bar across the window shows the mode, the keys that
+  down to it. A path typed after `/` (`~/Code/x/`, `/tmp/y`, `../z`; `~` is home) lists that folder's names as
+  you type: ⇥ completes it as a shell does (a folder gets its `/`), ⏎ opens a folder as the tree or a file in it. The tree's edge drags (`⌃W < > =`), and a status bar across the window shows the mode, the keys that
   matter there, the line and column, the branch.
+- The file browser opens JSON and YAML as code (highlighted, vim's normal mode, `i` to edit); `s` (or the Tree
+  button) shows their foldable tree instead, and `s` again the code. YAML is read with js-yaml 4.1.0 (MIT, bundled;
+  several documents show as a list).
 - The file browser shows the file you pick again (its tree loader had replaced the viewer's load), Markdown links
   and `[ ]` follow again in it, and a docked browser that moves to another repository while git is still answering
   no longer gets the old repository's tree or file names.
@@ -27,8 +31,10 @@ dialogs and the fleet pane.
 - The fix round's plan in the PR view (pr-flow 0.45.0, its ENGINE.md "Fix plans"): when a fix session on your own PR shows
   its plan, the notes show it too (FIX PLAN: each item's severity, verdict, place, point, reply or proof; the go
   line) and the items with a code place sit on their lines in the diff, on the reading path (`n N`). ⏎ on an item
-  opens its verdicts (`f w a u s`), a text box takes anything else, and ⌘⏎ asks, then types `go`: all typed into
-  the PR's session as you'd type them there, the changed plan replacing the one shown. The PR board's card says
+  opens its verdicts (`f w a u s`), a text box takes anything else, and ⌘⏎ or Go types `go` (no second question; a
+  plan from an older head says `Go anyway: head moved` on the button): all typed into the PR's session as you'd
+  type them there, the changed plan replacing the one shown. A finding the plan takes up is said once, by the
+  plan: it leaves FINDINGS and the diff's finding marks, and the plan's marks carry the item's id and verdict. The PR board's card says
   "Fix plan ready" as your move (not "agents at work"), with `fix plan ↗` (d); space opens it.
 - `preview-plus` is gone: the file browser, which replaced it in the side panel, is the one viewer, so a fix lands
   once. Its Mermaid bundle is the newer build with the elkjs and entities licence notices kept in it.

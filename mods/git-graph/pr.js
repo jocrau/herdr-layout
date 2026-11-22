@@ -887,8 +887,9 @@ export const PrMethods = {
   prSetPlan(pr, view) {
     const p = fixPlanOf(view), was = pr.plan;
     if (p?.version === was?.version && p?.state === was?.state) return;
-    const at = was && pr.pAt >= 0 ? was.items[pr.pAt]?.id : null;
+    const at = was && pr.pAt >= 0 ? was.items[pr.pAt]?.id : null, fid = pr.fAt >= 0 ? this.prFindings()[pr.fAt]?.id : null;
     pr.plan = p;
+    if (fid) pr.fAt = this.prFindings().findIndex((f) => f.id === fid);
     if (pr.planSent && (!p || p.version > pr.planSent.version || !planOpen(p))) pr.planSent = null;
     pr.pAt = at && p ? p.items.findIndex((x) => x.id === at) : -1;
     if (!planOpen(p) || !p.items.some((x) => x.id === pr.planRow)) pr.planRow = null;
@@ -943,16 +944,13 @@ export const PrMethods = {
     cx.notify();
   },
 
-  // ⌘⏎ or Go: asks with the plan's go line, then types go. A plan from an older head asks once more first.
+  // ⌘⏎ or Go: types go. Pressing it is the yes: the go line it answers is right above it, and a plan from an older
+  // head says so on the button (Go anyway: head moved).
   prPlanGo(cx) {
     const pr = this.pr, p = pr?.plan;
     if (!planOpen(p)) return;
     if (pr.planSent) { notify({ title: "Waiting for the session", body: `“${pr.planSent.words}” isn't in the plan shown yet: go once its new version is here.`, level: "info", timeout: 5000 }); return; }
-    if (!this.prPlanSession()) { this.prPlanSend("go", cx); return; } // says why it can't
-    const ask = (cx, text, label, go) => { pr.confirm = { verb: "go", label, text, go }; cx.notify(); };
-    const final = (cx) => ask(cx, `Type go into ${tabName(pr.key)}'s session? ${p.go}`, "go", (cx) => this.prPlanSend("go", cx));
-    if (this.prPlanMoved()) ask(cx, `Planned at ${String(p.sha).slice(0, 8)}, and the PR's head has moved since. Go anyway?`, "go anyway", (cx) => final(cx));
-    else final(cx);
+    this.prPlanSend("go", cx); // without a session, says why it can't
   },
 
   // Has the PR's head moved since the plan was made?
@@ -980,11 +978,12 @@ export const PrMethods = {
       // One slot under the go line, the same height in every state: what was typed, else the keys.
       .when(open, (e) => e.child(div().w_full().h(16).text_size(10.5).truncate().text_color(late ? t.ansi3 ?? t.muted : t.dim)
         .child(sent ? (late ? `no answer from the session yet to “${sent.words}” · t its tab` : `sent: ${sent.words} · waiting for the session's new version`)
-          : session ? "n N its items · ⏎ an item's verdicts (f w a u s) · ⌘⏎ go (asks first)" : "No session to type into: t opens the PR's agent tab")))
+          : session ? "n N its items · ⏎ an item's verdicts (f w a u s) · ⌘⏎ go: fixes, pushes and posts what the go line says" : "No session to type into: t opens the PR's agent tab")))
       .when(open, (e) => e.child(h_flex().gap(6).items_center()
         .child(Input.new(this.planInput).flex_1().h(26).px(8).rounded(6).border_1().border_color(this.planTyping ? c : t.border).bg(t.background).text_size(12).text_color(t.foreground)
           .when(!session, (x) => x.opacity(0.5)))
-        .child(this.prCardButton(t, "pr-plan-go", "Go… ⌘⏎", `Type go into the session (asks first): ${p.go ?? ""}`, (cx) => this.prPlanGo(cx)).when(!session || Boolean(sent), (x) => x.opacity(0.5)))));
+        .child(this.prCardButton(t, "pr-plan-go", moved ? "Go anyway: head moved ⌘⏎" : "Go ⌘⏎", `Type go into the session: ${p.go ?? ""}${moved ? `\nPlanned at ${String(p.sha).slice(0, 8)}; the PR's head has moved since.` : ""}`, (cx) => this.prPlanGo(cx))
+          .when(moved, (x) => x.border_color(t.ansi1).text_color(t.ansi1)).when(!session || Boolean(sent), (x) => x.opacity(0.5)))));
   },
 
   // A plan item: severity, id, verdict (a click: its verdict row), place (goes there), who; its point; the reply
@@ -1065,11 +1064,20 @@ export const PrMethods = {
       onStart: (d) => { this.notesDrag = d; }, onReset: (cx) => this.setNotesHeight(null, cx) });
   },
 
+  // The open findings the notes go through: with a fix plan, those it doesn't take up (a plan's finding item has
+  // the finding's id), as the plan says them already, with their verdicts.
+  prFindings() {
+    const pr = this.pr, fs = pr?.findings ?? [], ids = this.prPlanFindingIds();
+    return ids.size ? fs.filter((f) => !ids.has(f.id)) : fs;
+  },
+
+  prPlanFindingIds() { return new Set((this.pr?.plan?.items ?? []).filter((x) => x.kind === "finding").map((x) => x.id)); },
+
   prFindingsList(t, mono) {
-    const fs = this.pr.findings;
-    if (!fs.length) return div().pt(4).text_size(11.5).text_color(t.dim).child("No open findings from pr-flow.");
+    const fs = this.prFindings(), planned = this.pr.findings.length - fs.length;
+    if (!fs.length) return planned ? div() : div().pt(4).text_size(11.5).text_color(t.dim).child("No open findings from pr-flow.");
     return v_flex().pt(6).gap(6)
-      .child(div().pt(2).text_size(10.5).font_semibold().text_color(t.muted).child(`FINDINGS ${fs.length} · n N go through them and the places below`))
+      .child(div().pt(2).text_size(10.5).font_semibold().text_color(t.muted).child(`FINDINGS ${fs.length}${planned ? " not in the fix plan" : ""} · n N go through them and the places below`))
       .children(fs.map((f, i) => this.prFindingCard(t, mono, f, i)));
   },
 
@@ -1180,16 +1188,20 @@ export const PrMethods = {
   // The file list's mark: the most severe open finding in the file.
   prFileMark(path, t) {
     if (!this.prReviewing()) return null;
-    const f = this.pr.findings.filter((x) => x.path === path).sort(bySeverity)[0];
-    if (f) return div().size(6).flex_none().rounded(3).bg(sevColor(t, f.severity));
+    const f = this.prFindings().filter((x) => x.path === path).sort(bySeverity)[0];
+    if (f) return this.prMarkDot(sevColor(t, f.severity));
     // No finding there, but a draft comment: its colour.
-    if (this.prDraftComments().some((x) => x.path === path)) return div().size(6).flex_none().rounded(3).bg(draftColor(t));
-    return this.pr.plan?.items?.some((x) => x.path === path) ? div().size(6).flex_none().rounded(3).bg(planColor(t)) : null;
+    if (this.prDraftComments().some((x) => x.path === path)) return this.prMarkDot(draftColor(t));
+    // Else a fix plan's item (a finding it takes up is its item now): the plan's colour, as its block and marks.
+    return this.pr.plan?.items?.some((x) => x.path === path) ? this.prMarkDot(planColor(t)) : null;
   },
+
+  // A file's mark. No tooltip: the file list is a virtual list, whose rows take no handlers.
+  prMarkDot(c) { return div().size(6).flex_none().rounded(3).bg(c); },
 
   // A finding: its file selected, its line in the middle of the diff.
   gotoFinding(i, cx) {
-    const f = this.pr?.findings?.[i];
+    const f = this.pr ? this.prFindings()[i] : null;
     if (!f) return;
     this.pr.fAt = i; this.pr.lAt = -1; this.pr.tAt = -1; this.pr.dAt = -1; this.pr.pAt = -1;
     this.pr.range = { path: f.path, from: f.line, to: f.end_line ?? f.line };
@@ -1328,7 +1340,7 @@ export const PrMethods = {
   // (a finding before a place on the same line); n N go through them
 
   prStops() {
-    return readingPath(this.pr.findings, this.prLooks(), (this.details?.files ?? []).map((f) => f.path), this.pr.threads ?? [], this.prDraftComments(), this.pr.plan?.items ?? []);
+    return readingPath(this.prFindings(), this.prLooks(), (this.details?.files ?? []).map((f) => f.path), this.pr.threads ?? [], this.prDraftComments(), this.pr.plan?.items ?? []);
   },
 
   // The stop reached: its index in prStops(), or -1.
@@ -1366,7 +1378,7 @@ export const PrMethods = {
   prDiffRows(path, rows) {
     if (!this.prReviewing()) return rows;
     const notes = [
-      ...this.pr.findings.map((f, i) => ({ f, i })).filter(({ f }) => f.path === path)
+      ...this.prFindings().map((f, i) => ({ f, i })).filter(({ f }) => f.path === path)
         .map(({ f, i }) => ({ line: f.line, end: f.end_line, head: `${f.id} ${f.severity}: ${f.title}`, fix: f.fix, severity: f.severity, cur: i === this.pr.fAt })),
       ...this.prLooks().map((l, i) => ({ l, i })).filter(({ l }) => l.path === path)
         .map(({ l, i }) => ({ line: l.line, end: l.end_line, head: `Look here${l.end_line && l.end_line > l.line ? ` (lines ${l.line}–${l.end_line})` : ""}: ${l.why}`, severity: "look", cur: i === this.pr.lAt })),
@@ -1376,18 +1388,21 @@ export const PrMethods = {
       // The draft's comments, as GitHub will show them: on the new side's line, or a removed line's (LEFT).
       ...this.prDraftComments().map((x, i) => ({ x, i })).filter(({ x }) => x.path === path)
         .map(({ x, i }) => ({ line: x.line, end: x.end, side: x.side, head: `Draft${x.finding ? ` ${x.finding}` : ""}${x.end ? ` (lines ${x.line}–${x.end})` : ""}${x.side === "LEFT" ? " (old side)" : ""}: ${x.body}`, severity: "draft", cur: i === this.pr.dAt })),
-      // The fix plan's items: id, verdict and point; reached, the reply it gets (or how a fix is proven).
+      // The fix plan's items, saying they're the plan's: its id in the gutter, then "fix plan", the verdict and the
+      // point; reached, how the finding it takes up is fixed, the reply it gets, how a fix is proven.
       ...(this.pr.plan?.items ?? []).map((x, i) => ({ x, i })).filter(({ x }) => x.path === path)
-        .map(({ x, i }) => ({ line: x.line, end: x.end_line, head: `Plan ${x.id} ${x.verdict}: ${x.text}`,
-          replies: [x.verdict === "fix" && x.proof ? `proof: ${x.proof}` : null, x.reply ? `reply: ${x.reply}` : null].filter(Boolean),
-          severity: "plan", cur: i === this.pr.pAt })),
+        .map(({ x, i }) => { const f = x.kind === "finding" ? this.pr.findings.find((y) => y.id === x.id) : null;
+          return { line: x.line, end: x.end_line, tag: x.id, head: `Fix plan · ${x.verdict}${x.duplicate_of ? ` of ${x.duplicate_of}` : ""}${x.severity ? ` · ${x.severity}` : ""}: ${x.text}`,
+            fix: x.verdict === "fix" ? f?.fix : null,
+            replies: [x.verdict === "fix" && x.proof ? `proof: ${x.proof}` : null, x.reply ? `reply: ${x.reply}` : null].filter(Boolean),
+            severity: "plan", cur: i === this.pr.pAt }; }),
     ];
     if (!notes.length) return rows;
     const out = [...rows], loose = [];
     const chars = Math.max(40, Math.floor(((this.width ?? 900) - this.filesWidth() - 80) / 6.6));
     for (const n of notes.sort((a, b) => (b.line ?? 0) - (a.line ?? 0))) {
       const i = out.findIndex((r) => (n.side === "LEFT" ? r.kind === "-" : r.kind !== "-") && r.kind !== "F" && r.number === n.line), where = i >= 0 ? "" : `  (line ${n.line ?? "?"}${n.side === "LEFT" ? " of the old side" : ""} isn't in the diff)`;
-      const base = { kind: "F", line: n.line, severity: n.severity };
+      const base = { kind: "F", line: n.line, severity: n.severity, tag: n.tag };
       const note = !n.cur ? [{ ...base, text: `${n.head}${where}` }]
         : [...wrapText(`${n.head}${where}`, chars).map((text, k) => ({ ...base, text, more: k > 0, cur: true })),
           ...(n.fix ? wrapText(`Fix: ${n.fix}`, chars).map((text) => ({ ...base, text, more: true, fix: true, cur: true })) : []),
@@ -1404,7 +1419,7 @@ export const PrMethods = {
   prDiffNote(r, t) {
     const c = r.severity === "look" ? t.accent : r.severity === "thread" ? t.ansi5 ?? t.accent : r.severity === "draft" ? draftColor(t) : r.severity === "plan" ? planColor(t) : sevColor(t, r.severity);
     return h_flex().w_full().h(20).flex_none().gap(8).bg(alpha(c, r.cur ? "30" : "1c")).border_l(2).border_color(c)
-      .child(div().w(40).flex_none().text_right().pr(6).text_color(c).child(r.more ? "" : "◀"))
+      .child(div().w(40).flex_none().text_right().pr(6).text_color(c).when(Boolean(r.tag), (e) => e.font_semibold()).child(r.more ? "" : r.tag ?? "◀"))
       .child(div().flex_1().min_w(0).truncate().text_color(r.fix ? t.muted : t.foreground).child(r.text));
   },
 

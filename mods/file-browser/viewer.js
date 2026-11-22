@@ -2,7 +2,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState, VirtualListScrollHandle } from "gpui-base";
 import { props, shared, spaces, panes, focused, run, readTextFile, writeTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
-import { target, dirname, basename, extension, kind, richText, resolveLink, imageSize, normalize } from "./paths.js";
+import { target, dirname, basename, extension, kind, richText, codeKind, treeKind, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { toTerminal } from "./lib/sidecolumn.js";
 import { loadMedia, openFile } from "./media.js";
@@ -13,7 +13,7 @@ import { structuredView } from "./structured-view.js";
 import { Tree } from "./tree.js";
 
 const TEXT_LIMIT = 400000;
-const LANGUAGE = { md: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
+const LANGUAGE = { md: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", yml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 
 function context() {
   const p = props() || {}, f = focused(), space = spaces().find(s => s.id === f?.space) || spaces().find(s => s.active);
@@ -127,7 +127,7 @@ export default class Viewer extends View {
     const style = sourceStyle(), ext = extension(this.selected.file);
     this.releaseEditor();
     // Code is read-only in normal mode (the vim keys are bound to the browser there), editable in insert mode (i).
-    const readonly = !this.document || (kind(this.selected.file) === "text" && !this.editing);
+    const readonly = !this.document || (this.isCode() && !this.editing);
     const code = this.code = EditorState.new({ language: LANGUAGE[ext] || ext, readonly, soft_wrap: this.wrap, value: this.text, ...style });
     code.on("change", (_event, cx) => this.editorChanged(code, cx));
     code.on("focus", () => { if (this.code === code) this.codeFocused = true; });
@@ -160,8 +160,14 @@ export default class Viewer extends View {
     } catch { this.draftError = "Draft recovery is unavailable. Save before closing."; }
   }
 
+  // Is the file shown as code (vim's normal mode)? JSON is, until s shows its tree.
+  isCode(type = kind(this.selected?.file ?? "")) { return codeKind(type, this.source); }
+
   setSource(source, cx) {
+    const was = this.isCode();
     this.source = source;
+    // JSON's source is code (read-only in normal mode), its tree isn't: the editor made again for it.
+    if (this.code && this.isCode() !== was) { this.editing = false; this.visual = null; this.updateEditor(); }
     if (!source && this.selected && kind(this.selected.file) === "markdown") this.refreshMarkdown(cx);
     else if (!source && this.selected && richText(kind(this.selected.file))) this.refreshData();
     cx.notify();
@@ -180,10 +186,10 @@ export default class Viewer extends View {
       const last = Math.max(0, (this.markdownBlocks?.length ?? 1) - 1), from = this.markdownStart();
       const page = typeof step === "number" && Math.abs(step) > 1 ? Math.sign(step) * 3 : step;
       this.top = step === "top" ? 0 : step === "end" ? last : Math.max(0, Math.min(last, from + page));
-    } else if (type === "text" && this.code && !this.editing) {
+    } else if (this.isCode(type) && this.code && !this.editing) {
       const half = Math.floor(this.pageLines() / 2);
       return this.moveLine(step === "top" ? -Infinity : step === "end" ? Infinity : Math.abs(step) > 1 ? Math.sign(step) * half : step, cx);
-    } else if (type === "json" || type === "csv" || type === "tsv") {
+    } else if (treeKind(type) || type === "csv" || type === "tsv") {
       const rows = this.dataRows, page = Math.max(5, Math.floor((this.viewport.height - 60) / 28 / 2));
       if (!rows) return;
       if (step === "end") { this.dataAt = rows - 1; this.dataScroll.scroll_to_bottom(); }
@@ -390,7 +396,8 @@ export default class Viewer extends View {
     const next = target(value);
     if (!next) return;
     if (remember && this.selected) this.remember();
-    this.selected = next; this.source = false; this.zoom = null; this.page = 1; this.total = 0;
+    // Local change: JSON opens as code (formatted, as the file is), its tree a choice (s).
+    this.selected = next; this.source = treeKind(kind(next.file)); this.zoom = null; this.page = 1; this.total = 0;
     this.anchor = anchor; this.contents = false; this.expanded = new Set([""]); this.top = null;
     this.load(cx, notify);
   }
@@ -439,10 +446,10 @@ export default class Viewer extends View {
             const staged = await stageMarkdown(text, selected, look);
             if (!this.current(request)) return;
             if (text === this.text) this.acceptMarkdown(staged, look, cx);
-          } else if (richText(type)) this.refreshData();
+          } else if (richText(type) && !this.source) this.refreshData(); // the tree read when it is shown (s)
           if (!this.current(request)) return;
           this.updateEditor();
-          if (type === "text") {
+          if (this.isCode(type)) {
             this.dataRows = (this.text ?? "").split("\n").length;
             this.placeCursor(cx, this.refocus);
           }
@@ -662,12 +669,12 @@ export default class Viewer extends View {
           .tooltip(this.selected.rev ? "A committed version is read-only" : this.selected.on ? "Remote file is read-only" : "Truncated file is read-only").accessibility_label("Read-only")
           .child(svg("mods/file-browser/icons/lock.svg").size(12))))
         // Insert mode by pointer too (the keys: i, esc).
-        .when(type === "text" && Boolean(this.code) && Boolean(this.setEditing), el => el
+        .when(this.isCode(type) && Boolean(this.code) && Boolean(this.setEditing), el => el
           .child(button("preview-edit", this.editing ? "View" : "Edit", colors, cx => this.setEditing(!this.editing, cx), true, this.editing)))
         .when(type === "markdown" && !this.source && Boolean(this.headings?.length), el => el
           .child(button("preview-contents", "Contents", colors, cx => { this.contents = !this.contents; cx.notify(); }, true, this.contents)))
         .when(richText(type), el => el
-          .child(button("preview-mode", this.source ? "Preview" : "Source", colors, cx => this.setSource(!this.source, cx), Boolean(this.code), false, this.source ? "preview" : "code")))
+          .child(button("preview-mode", this.source ? (treeKind(type) ? "Tree" : "Preview") : "Source", colors, cx => this.setSource(!this.source, cx), Boolean(this.code), false, this.source ? (treeKind(type) ? "tree" : "preview") : "code")))
         .when(Boolean(file) && !media, el => el
           .child(button("preview-wrap", "Wrap lines", colors, cx => this.toggleWrap(cx), Boolean(this.code) && (!richText(type) || this.source), this.wrap)))
         .when(Boolean(this.document), el => el
@@ -721,7 +728,7 @@ export default class Viewer extends View {
     if (richText(type) && !this.source) return structuredView(this, type, colors);
     if (!this.code) return div().flex_1();
     // Normal mode: the vim keys are the browser's (bound in this context), so the editor never types them.
-    return div().key_context(type === "text" && !this.editing ? "FbNormal" : "FbEdit").flex().flex_col().flex_1().min_h(0)
+    return div().key_context(this.isCode(type) && !this.editing ? "FbNormal" : "FbEdit").flex().flex_col().flex_1().min_h(0)
       .child(Editor.new(this.code).flex_1().min_h(0));
   }
 

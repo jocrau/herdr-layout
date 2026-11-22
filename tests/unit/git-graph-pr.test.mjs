@@ -90,7 +90,7 @@ test("a tracked PR's notes in the plain graph (lite) are shown while its head is
 
 test("a note on a range heads it (above its first line); a note on one line goes under it", async () => {
   const { PrMethods } = await import("../../mods/git-graph/pr.js");
-  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900,
+  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prFindings: PrMethods.prFindings, prPlanFindingIds: PrMethods.prPlanFindingIds,
     pr: { findings: [{ id: "F1", severity: "high", title: "t", path: "a.js", line: 3 }], fAt: -1, lAt: -1, tAt: -1, threads: [] },
     prLooks: () => [{ path: "a.js", line: 2, end_line: 4, why: "w" }], prDraftComments: () => [] };
   const rows = [1, 2, 3, 4, 5].map((n) => ({ kind: " ", number: n, text: `l${n}` }));
@@ -142,7 +142,7 @@ test("draft comments sit on their lines in the diff, marked Draft; one on the ol
   const { PrMethods } = await import("../../mods/git-graph/pr.js");
   const { draftOf, draftNotes } = await import("../../lib/prflow.js");
   const notes = draftNotes(draftOf(VIEW));
-  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prLooks: () => [], prDraftComments: () => notes,
+  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prLooks: () => [], prDraftComments: () => notes, prFindings: PrMethods.prFindings, prPlanFindingIds: PrMethods.prPlanFindingIds,
     pr: { findings: [{ id: "F2", severity: "medium", title: "t", path: "lib/x.js", line: 12 }], fAt: -1, lAt: -1, tAt: -1, dAt: 0, threads: [] } };
   const rows = [6, 7, 8, 9, 10, 11, 12].map((n) => ({ kind: " ", number: n, text: `l${n}` }));
   const label = (r) => (r.kind === "F" ? `[${r.severity}:${r.text.split(":")[0]}${r.cur ? "*" : ""}]` : r.number);
@@ -299,6 +299,20 @@ test("plan items with a code place are stops on the reading path, after findings
   const { readingPath } = await import("../../mods/git-graph/pr.js");
   const stops = readingPath([{ path: "b.py", line: 12 }], [], ["a.py", "b.py"], [], [], PLAN.items);
   assert.deepEqual(stops.map((s) => `${s.kind}${s.i}`), ["p2", "f0", "p0"]);
+});
+
+test("a finding the fix plan takes up is said once, by the plan: out of FINDINGS and the diff, its mark naming the item and verdict", async () => {
+  const { PrMethods } = await import("../../mods/git-graph/pr.js");
+  const findings = [{ id: "F2", severity: "low", title: "nit", path: "a.py", line: 3, fix: "rename it" }, { id: "F5", severity: "medium", title: "other", path: "a.py", line: 5 }];
+  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prLooks: () => [], prDraftComments: () => [], prFindings: PrMethods.prFindings, prPlanFindingIds: PrMethods.prPlanFindingIds,
+    pr: { findings, plan: PLAN, fAt: -1, lAt: -1, tAt: -1, dAt: -1, pAt: -1, threads: [] } };
+  assert.deepEqual(PrMethods.prFindings.call(g).map((f) => f.id), ["F5"], "F2 is the plan's item F2");
+  assert.deepEqual(PrMethods.prFindings.call({ ...g, pr: { ...g.pr, plan: null } }).map((f) => f.id), ["F2", "F5"], "no plan: all of them");
+  const rows = [3, 5].map((n) => ({ kind: " ", number: n, text: `l${n}` }));
+  const notes = PrMethods.prDiffRows.call(g, "a.py", rows).filter((r) => r.kind === "F");
+  assert.deepEqual(notes.map((r) => [r.tag ?? null, r.severity, r.text]), [["F2", "plan", "Fix plan · skip · low: nit"], [null, "medium", "F5 medium: other"]]);
+  const reached = PrMethods.prDiffRows.call({ ...g, pr: { ...g.pr, plan: { ...PLAN, items: PLAN.items.map((x) => (x.id === "F2" ? { ...x, verdict: "fix" } : x)) }, pAt: 2 } }, "a.py", rows);
+  assert.ok(reached.some((r) => r.fix && r.text === "Fix: rename it"), "reached, a fix item shows how its finding is fixed");
 });
 
 test("the review is the commit on the base branch and since base again on another branch; c there doesn't change the preference", async () => {

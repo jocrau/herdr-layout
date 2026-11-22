@@ -2,6 +2,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list } from "gpui-base";
 import { jsonRows, LIMITS } from "./structured.js";
+import { treeKind } from "./paths.js";
 
 export function structuredView(panel, type, colors) {
   const data = panel.dataPreview;
@@ -9,7 +10,7 @@ export function structuredView(panel, type, colors) {
   if (data.error) return v_flex().flex_1().p(16).gap(8).text_size(12)
     .child(div().text_color(colors.ansi1).child(data.error))
     .child(div().text_color(colors.muted).child("Open Source to inspect or edit the original text."));
-  const json = type === "json", visible = json ? jsonRows(data.value, panel.expanded) : data;
+  const json = treeKind(type), visible = json ? jsonRows(data.value, panel.expanded) : data;
   const id = `preview-data-${panel.selected.file}-${type}`, rows = visible.rows;
   panel.dataRows = rows.length;
   const column = v_flex().flex_1().min_h(0).min_w(0);

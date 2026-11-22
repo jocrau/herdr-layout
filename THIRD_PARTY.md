@@ -8,7 +8,7 @@ was changed. Modified source files start with a one-line "Modified by …" comme
 | `beads` | original | MIT ([LICENSE](LICENSE)) | — |
 | `fleet-board` | original | MIT ([LICENSE](LICENSE)) | — |
 | `extras/` (`claude-statusline.py`, `claude-resume`) | original | MIT ([LICENSE](LICENSE)) | — |
-| `file-browser` | `main.js` original; the viewer and renderers from [linziyanleo/herdr-mods](https://github.com/linziyanleo/herdr-mods) preview-plus @ a47550e | MIT for `main.js`; preview-plus: MIT (LICENSE-PREVIEW-PLUS); its bundled components: their own licences in `mods/file-browser/licenses/` and `THIRD_PARTY.md` | yes |
+| `file-browser` | `main.js` original; the viewer and renderers from [linziyanleo/herdr-mods](https://github.com/linziyanleo/herdr-mods) preview-plus @ a47550e | MIT for `main.js`; preview-plus: MIT (LICENSE-PREVIEW-PLUS); its bundled components: their own licences in `mods/file-browser/licenses/` and `THIRD_PARTY.md`; `js-yaml.js`: [js-yaml](https://github.com/nodeca/js-yaml) 4.1.0 from npm, unmodified, MIT (`licenses/js-yaml-MIT.txt`) | yes |
 | `git-graph` | [rabeeh-ta/herdr-git-graph](https://github.com/rabeeh-ta/herdr-git-graph) 0.3.1 | MIT (Rabeeh T A) | yes |
 | `worktree-support` | [natelandau/herdr-worktree-support](https://github.com/natelandau/herdr-worktree-support) @ 711e079, from Herdr's `spaces` | MIT (Nate Landau), Apache-2.0 (Herdr) | yes |
 | `worktree-actions` | [natelandau/herdr-worktree-support](https://github.com/natelandau/herdr-worktree-support) @ 711e079 | MIT (Nate Landau) | yes |

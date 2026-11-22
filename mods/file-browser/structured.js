@@ -1,6 +1,9 @@
+// Modified by Jochen Rau, 2026-11, from linziyanleo/herdr-mods preview-plus: see NOTICE.md in this folder.
 // JSON Pointer rows and a quote-state CSV parser follow the pure-data approach of
 // gsydler/cria-file-preview (Apache-2.0). This implementation adds strict parsing,
 // bounded traversal and keeps the original source as the only editable value.
+import { loadAll, CORE_SCHEMA } from "./js-yaml.js";
+
 export const LIMITS = { rows: 10000, columns: 100, depth: 64, cell: 500 };
 export const pointer = (path, key) => `${path}/${String(key).replaceAll("~", "~0").replaceAll("/", "~1")}`;
 const container = value => value !== null && typeof value === "object";
@@ -75,6 +78,8 @@ export function structuredPreview(type, text, truncated = false) {
   if (truncated) return { error: "This file is truncated. Use Source to inspect the available text." };
   try {
     if (type === "json") return { value: JSON.parse(text.replace(/^\uFEFF/, "")) };
+    // Local change: YAML as JSON's tree. The core schema keeps dates as strings; several documents (---) as a list.
+    if (type === "yaml") { const docs = loadAll(text.replace(/^\uFEFF/, ""), null, { schema: CORE_SCHEMA }); return { value: docs.length === 1 ? docs[0] : docs }; }
     return parseDelimited(text, delimiterOf(type, text));
   } catch (error) { return { error: String(error.message || error) }; }
 }
