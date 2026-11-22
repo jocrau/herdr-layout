@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list } from "gpui-base";
 import { exec, readTextFile, settings, props, shared, setShared, openOverlay, notify } from "herdr";
-import { fileArgs, joinFiles, diffArgs, diffRows, baseCandidates, rangeFileArgs, rangeDiffArgs, READ, wrapDiff, ignoringSpace, fileRows } from "./git.js";
+import { fileArgs, joinFiles, diffArgs, diffRows, baseCandidates, isBaseBranch, rangeFileArgs, rangeDiffArgs, READ, wrapDiff, ignoringSpace, fileRows } from "./git.js";
 import { openDialog, showChanges } from "./act.js";
 import { ago, stamp, count, keep, VIEWER_CLOSED, ROW, DIFF_ROW, DETAILS } from "./common.js";
 import { exists, background, openInEditor } from "./tools.js";
@@ -49,11 +49,11 @@ export const ReviewMethods = {
 
   loadDetails(commit, cx) {
     const hash = commit.hash, git = (args) => exec("git", [...READ, ...args], { cwd: this.root, on: this.on });
-    // Since base needs a HEAD to start from; without one the uncommitted row stays as it is.
-    const since = this.sinceBase && (!commit.uncommitted || Boolean(this.head));
+    const since = this.reviewsSince(commit);
+    this.detailsSince = since;
     const key = `${this.on}\0${this.root}\0${hash}`, known = !since && !commit.uncommitted && this.commitDetails.get(key);
     if (known) { this.details = known; return; }
-    const current = () => this.selected === hash && this.sinceBase === since;
+    const current = () => this.selected === hash && this.reviewsSince(commit) === since;
     cx.spawn(async (cx) => {
       try {
         let details;
@@ -142,16 +142,61 @@ export const ReviewMethods = {
     return details;
   },
 
-  // `c`: this commit ⇄ everything since the base branch; remembered across openings.
+  // Local change: the review is since base when that's the preference, except on the base branch itself (since base
+  // is empty or the base's own history there): there it's the commit, unless `c` chose since base on this branch.
+  // Since base needs a HEAD to start from; without one the uncommitted row stays as it is.
+  reviewsSince(commit) {
+    const on = this.onBase() ? this.sinceOnBase?.branch === this.current : this.sinceBase;
+    return on && (!commit.uncommitted || Boolean(this.head));
+  },
+
+  // The checked-out branch is the base the review compares against (as resolved by checkBase; never in the PR view
+  // or a review another mod asked for, which bring their own base).
+  onBase() {
+    const b = this.baseRef;
+    return !this.ask && !this.prRevs && Boolean(b) && b.root === this.root && b.on === this.on && isBaseBranch(b.name, this.current, this.tracking);
+  },
+
+  // After a load: the base branch's name, resolved again when the repository or the base setting changed, then the
+  // open review follows a checkout onto or off the base branch.
+  checkBase(cx) {
+    const key = `${this.on}\0${this.root}\0${String(shared("git-graph.base") ?? "").trim()}`;
+    const follow = () => {
+      if (this.sinceOnBase && this.sinceOnBase.branch !== this.current) this.sinceOnBase = null; // chosen for one stay on the branch
+      const commit = this.selected && this.details ? this.commits[this.index.get(this.selected)] : null;
+      if (commit && this.detailsSince !== this.reviewsSince(commit)) this.reloadReview(commit, cx);
+    };
+    if (this.ask || this.prRevs || !this.root) return;
+    if (this.baseRef?.key === key) return follow();
+    const { root, on } = this, git = (args) => exec("git", [...READ, ...args], { cwd: root, on });
+    cx.spawn(async (cx) => {
+      let name = null;
+      try { name = (await this.resolveBase(git)).name; } catch { /* no base: never on it */ }
+      if (this.root !== root || this.on !== on) return;
+      this.baseRef = { key, root, on, name };
+      follow(); cx.notify();
+    });
+  },
+
+  // `c`: this commit ⇄ everything since the base branch; remembered across openings. On the base branch it switches
+  // for that branch only, the preference left as it is.
   toggleSince(cx) {
-    this.sinceBase = !this.sinceBase;
-    if (!this.ask) setShared("git-graph.since", this.sinceBase); // an asked-for review leaves the preference alone
     const commit = this.selected ? this.commits[this.index.get(this.selected)] : null;
-    if (commit) {
-      this.details = null; this.diff = null; this.diffWant = null; this.fileAt = 0; this.diffAt = 0;
-      this.fileScroll.scroll_to_item(0);
-      this.loadDetails(commit, cx);
+    if (this.onBase()) {
+      this.sinceOnBase = this.sinceOnBase?.branch === this.current ? null : { branch: this.current };
+    } else {
+      this.sinceBase = !this.sinceBase;
+      if (!this.ask) setShared("git-graph.since", this.sinceBase); // an asked-for review leaves the preference alone
     }
+    if (commit) this.reloadReview(commit, cx);
+    cx.notify();
+  },
+
+  // The open review again, from its first file (the mode changed).
+  reloadReview(commit, cx) {
+    this.details = null; this.diff = null; this.diffWant = null; this.fileAt = 0; this.diffAt = 0;
+    this.fileScroll.scroll_to_item(0);
+    this.loadDetails(commit, cx);
     cx.notify();
   },
 
@@ -276,7 +321,7 @@ export const ReviewMethods = {
     const zone = this.zone ?? "graph";
     const close = div().id("graph-details-close").px(6).py(1).rounded(4).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
       .on_click((_e, cx) => this.closeDetails(cx)).child("×");
-    const since = this.sinceBase && (!commit.uncommitted || Boolean(this.head)), s = d?.since;
+    const since = this.reviewsSince(commit), s = d?.since;
     const upTo = commit.uncommitted ? "working tree" : commit.hash.slice(0, 8);
     const title = since ? (s?.base ? `${s.base} … ${upTo} · ${count(s.commits, "commit")}` : `Since base … ${upTo}`)
       : commit.uncommitted ? "Uncommitted changes" : `Commit ${commit.hash.slice(0, 8)}`;

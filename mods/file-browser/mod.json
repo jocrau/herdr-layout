@@ -1,1 +1,1 @@
-{ "place": "none", "title": "Files", "overlay": { "kind": "dialog", "width": 0.92, "height": 0.9 } }
+{ "place": "none", "title": "Files", "overlay": { "kind": "window", "width": 0.92, "height": 0.9 } }

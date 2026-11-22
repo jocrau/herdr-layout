@@ -121,13 +121,17 @@ export default class Viewer extends View {
     return !this.closed && this.request === request && this.owner === request.owner && this.contextKey() === request.owner.key;
   }
 
-  releaseEditor() { this.code?.release(); this.code = null; this.codeStyle = null; }
+  releaseEditor() { this.code?.release(); this.code = null; this.codeStyle = null; this.codeFocused = false; }
 
   updateEditor() {
     const style = sourceStyle(), ext = extension(this.selected.file);
     this.releaseEditor();
-    const code = this.code = EditorState.new({ language: LANGUAGE[ext] || ext, readonly: !this.document, soft_wrap: this.wrap, value: this.text, ...style });
+    // Code is read-only in normal mode (the vim keys are bound to the browser there), editable in insert mode (i).
+    const readonly = !this.document || (kind(this.selected.file) === "text" && !this.editing);
+    const code = this.code = EditorState.new({ language: LANGUAGE[ext] || ext, readonly, soft_wrap: this.wrap, value: this.text, ...style });
     code.on("change", (_event, cx) => this.editorChanged(code, cx));
+    code.on("focus", () => { if (this.code === code) this.codeFocused = true; });
+    code.on("blur", () => { if (this.code === code) this.codeFocused = false; });
     this.codeStyle = JSON.stringify(style);
     // Local change: opened at a line (props.line): it is selected, which brings it into view.
     if (this.goLine && this.goLine.file === this.selected.file && typeof this.text === "string") {
@@ -168,13 +172,17 @@ export default class Viewer extends View {
   // Local change: j k ⌃D ⌃U g G scroll a rendered view (`step`: rows, or "top" / "end").
   // Only lists of known row heights scroll from code, so Markdown, whose blocks have
   // none, starts at a later block instead (as a heading link does); JSON and CSV scroll
-  // by row, keeping `dataAt` in the middle. Code shows in an editor that scrolls itself.
+  // by row, keeping `dataAt` in the middle. Code (vim's normal mode) moves the editor's
+  // selected line, which the editor brings into view.
   scrollView(step, cx) {
     const type = kind(this.selected?.file ?? "");
     if (type === "markdown") {
       const last = Math.max(0, (this.markdownBlocks?.length ?? 1) - 1), from = this.markdownStart();
       const page = typeof step === "number" && Math.abs(step) > 1 ? Math.sign(step) * 3 : step;
       this.top = step === "top" ? 0 : step === "end" ? last : Math.max(0, Math.min(last, from + page));
+    } else if (type === "text" && this.code && !this.editing) {
+      const half = Math.floor(this.pageLines() / 2);
+      return this.moveLine(step === "top" ? -Infinity : step === "end" ? Infinity : Math.abs(step) > 1 ? Math.sign(step) * half : step, cx);
     } else if (type === "json" || type === "csv" || type === "tsv") {
       const rows = this.dataRows, page = Math.max(5, Math.floor((this.viewport.height - 60) / 28 / 2));
       if (!rows) return;
@@ -187,6 +195,113 @@ export default class Viewer extends View {
         this.dataScroll.scroll_to_item(this.dataAt, "center");
       }
     } else return;
+    cx.notify();
+  }
+
+  // Every file's line (normal mode's line, or the editor's cursor while editing) is kept, here and across opens, so
+  // coming back to a file shows it where it was. The last 200 files.
+  lineKey(sel) { return sel ? `${sel.on || ""}|${sel.rev || ""}|${sel.file}` : null; }
+  lines() {
+    if (!this.lineMemory) { try { this.lineMemory = new Map(JSON.parse(localStorage.getItem("file-browser.lines") || "[]")); } catch { this.lineMemory = new Map(); } }
+    return this.lineMemory;
+  }
+  lineOf(sel) { return this.lines().get(this.lineKey(sel)) ?? 0; }
+  rememberLine() {
+    if (!this.atKey) return;
+    let at = this.dataAt || 0;
+    if (this.editing && this.code) at = this.code.value().slice(0, this.code.selected_range().start).split("\n").length - 1;
+    const m = this.lines(); m.delete(this.atKey);
+    if (at > 0) m.set(this.atKey, at);
+    while (m.size > 200) m.delete(m.keys().next().value);
+    try { localStorage.setItem("file-browser.lines", JSON.stringify([...m])); } catch {}
+  }
+
+  // Normal mode's line, highlighted: selected whole, to the start of the next line (the editor has no current-line
+  // highlight of its own; ending at the next line's start keeps a long line from scrolling the view sideways). In
+  // visual line mode (V) the lines from where it started to this one. In insert mode a plain cursor in the column
+  // it was in.
+  editorLine(cx) {
+    const t = this.textIndex();
+    if (!this.code || !t) return;
+    const last = t.lines.length - 1, n = Math.max(0, Math.min(this.dataAt, last));
+    let range;
+    if (this.editing) { const at = t.offsets[n] + Math.min(this.col || 0, t.lines[n].length); range = { start: at, end: at }; }
+    else {
+      const a = Math.max(0, Math.min(this.visual ?? n, last)), from = Math.min(a, n), to = Math.max(a, n);
+      range = { start: t.offsets[from], end: to < last ? t.offsets[to + 1] : t.text.length };
+    }
+    this.placed = range;
+    if (range.start === range.end || !cx?.timer) return this.code.set_selected_range(range);
+    // The editor scrolls to where its cursor is, the selection's end: the next line. First a plain cursor on this
+    // line brings it into view (moving up past the top), then the highlight.
+    const code = this.code;
+    code.set_selected_range({ start: range.start, end: range.start });
+    cx.timer.after(0, () => { if (this.code === code && this.placed === range) code.set_selected_range(range); });
+  }
+
+  // A new editor takes a cursor only once it has been drawn: normal mode's place (and the keyboard) after that.
+  placeCursor(cx, focus) {
+    const code = this.code;
+    this.editorLine(cx);
+    for (const ms of [0, 60]) cx.timer.after(ms, (cx) => { if (this.code !== code || this.closed) return; this.editorLine(cx); if (focus) code.focus(); });
+  }
+
+  // The editor's cursor as normal mode's line and column, when a click or the arrow keys moved it (not the line
+  // highlight this view put there).
+  syncCursor() {
+    if (!this.code || this.visual != null || !this.textIndex()) return;
+    const r = this.code.selected_range();
+    if (this.placed && r.start === this.placed.start && r.end === this.placed.end) return;
+    this.dataAt = this.lineAt(r.start); this.col = r.start - this.textIndex().offsets[this.dataAt];
+  }
+
+  // The shown text's lines and where each starts (UTF-16 offsets, as the editor counts), kept until the text changes.
+  textIndex() {
+    if (typeof this.text !== "string") return null;
+    if (this.textIdx?.text !== this.text) {
+      const lines = this.text.split("\n"), offsets = new Array(lines.length);
+      for (let i = 0, at = 0; i < lines.length; i++) { offsets[i] = at; at += lines[i].length + 1; }
+      this.textIdx = { text: this.text, lines, offsets, lower: null };
+    }
+    return this.textIdx;
+  }
+
+  // The line an offset is on.
+  lineAt(offset) {
+    const o = this.textIndex()?.offsets ?? [0];
+    let lo = 0, hi = o.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (o[mid] <= offset) lo = mid; else hi = mid - 1; }
+    return lo;
+  }
+
+  // Normal mode: the line `delta` lines on, or line `n` (1-based) for gotoLine.
+  moveLine(delta, cx) { this.dataAt = Math.max(0, Math.min((this.dataRows || 1) - 1, this.dataAt + delta)); this.editorLine(cx); cx.notify(); }
+  gotoLine(n, cx) { this.dataAt = 0; this.moveLine(n - 1, cx); }
+  pageLines() { return Math.max(5, Math.floor(((this.viewport?.height || 600) - 60) / 21)); }
+
+  // Lines from..to (0-based, inclusive) as text, with the newline vim's yy puts on the clipboard.
+  linesText(from, to) {
+    const t = this.textIndex();
+    return t ? t.lines.slice(Math.max(0, from), Math.min(t.lines.length, to + 1)).join("\n") + "\n" : "";
+  }
+
+  // `query` from offset `from` on (dir 1) or back (dir -1), round the end; smart case (a capital: case matters).
+  // The offset of the match, or -1.
+  findText(query, from, dir) {
+    const t = this.textIndex();
+    if (!t || !query) return -1;
+    const exact = query !== query.toLowerCase();
+    const hay = exact ? t.text : (t.lower ??= t.text.toLowerCase()), q = exact ? query : query.toLowerCase();
+    let at = dir > 0 ? hay.indexOf(q, Math.max(0, from)) : (from < 0 ? -1 : hay.lastIndexOf(q, from));
+    if (at < 0) at = dir > 0 ? hay.indexOf(q) : hay.lastIndexOf(q);
+    return at;
+  }
+
+  // A found match: selected in the editor, its line normal mode's line.
+  showMatch(at, length, cx) {
+    if (!this.code || at < 0) return;
+    this.visual = null; this.dataAt = this.lineAt(at);
+    this.code.set_selected_range({ start: at, end: at + length });
     cx.notify();
   }
 
@@ -283,8 +398,11 @@ export default class Viewer extends View {
   load(cx, notify = true) {
     if (!this.selected) return;
     const selected = this.selected, type = kind(selected.file), request = { owner: this.owner, selected, page: this.page };
+    this.rememberLine();
+    // Code that had the keyboard gets it again once the next file's editor is there.
+    this.refocus = this.codeFocused || Boolean(this.viewFocus?.is_focused());
     this.request = request; this.releaseEditor(); this.document = null; this.confirmDiscard = false; this.text = null; this.markdownBlocks = null; this.media = null;
-    this.dataAt = 0;
+    this.dataAt = this.lineOf(selected); this.col = 0; this.atKey = this.lineKey(selected); this.editing = false; this.visual = null;
     this.markdownRequest = null; this.markdownBusy = false; this.markdownLook = null; this.headings = []; this.dataPreview = null;
     this.zoomDirty = false; this.zoomEditing = false;
     this.pan = { x: 0, y: 0 }; this.drag = null;
@@ -324,6 +442,10 @@ export default class Viewer extends View {
           } else if (richText(type)) this.refreshData();
           if (!this.current(request)) return;
           this.updateEditor();
+          if (type === "text") {
+            this.dataRows = (this.text ?? "").split("\n").length;
+            this.placeCursor(cx, this.refocus);
+          }
         }
       } catch (error) { if (this.current(request)) this.error = String(error.message || error); }
       finally {
@@ -404,7 +526,11 @@ export default class Viewer extends View {
       else if (link.file && link.file !== this.selected.file) this.show({ ...this.selected, file: link.file }, cx, true, true, link.anchor || "");
       else if (link.anchor !== undefined && kind(this.selected.file) === "markdown") {
         if (link.anchor && !this.headings?.some(h => h.slug === link.anchor)) throw new Error(`Heading not found: #${link.anchor}`);
-        if (this.anchor === link.anchor && !this.source) return;
+        // Already there: back to the heading if the keys scrolled away from it, with no history entry.
+        if (this.anchor === link.anchor && !this.source) {
+          if (this.top !== null) { this.top = null; this.actionError = null; cx.notify(); }
+          return;
+        }
         this.remember(); this.anchor = link.anchor; this.top = null; this.source = false; this.actionError = null; cx.notify();
       }
     } catch (error) { this.actionError = String(error.message || error); cx.notify(); }
@@ -535,6 +661,9 @@ export default class Viewer extends View {
         .when(Boolean(this.code) && !this.document, el => el.child(div().size(16).flex_none().flex().items_center().justify_center().text_color(colors.dim)
           .tooltip(this.selected.rev ? "A committed version is read-only" : this.selected.on ? "Remote file is read-only" : "Truncated file is read-only").accessibility_label("Read-only")
           .child(svg("mods/file-browser/icons/lock.svg").size(12))))
+        // Insert mode by pointer too (the keys: i, esc).
+        .when(type === "text" && Boolean(this.code) && Boolean(this.setEditing), el => el
+          .child(button("preview-edit", this.editing ? "View" : "Edit", colors, cx => this.setEditing(!this.editing, cx), true, this.editing)))
         .when(type === "markdown" && !this.source && Boolean(this.headings?.length), el => el
           .child(button("preview-contents", "Contents", colors, cx => { this.contents = !this.contents; cx.notify(); }, true, this.contents)))
         .when(richText(type), el => el
@@ -590,7 +719,10 @@ export default class Viewer extends View {
     }
     if (type === "markdown" && !this.source) return markdownView(this, colors);
     if (richText(type) && !this.source) return structuredView(this, type, colors);
-    return this.code ? Editor.new(this.code).flex_1().min_h(0) : div().flex_1();
+    if (!this.code) return div().flex_1();
+    // Normal mode: the vim keys are the browser's (bound in this context), so the editor never types them.
+    return div().key_context(type === "text" && !this.editing ? "FbNormal" : "FbEdit").flex().flex_col().flex_1().min_h(0)
+      .child(Editor.new(this.code).flex_1().min_h(0));
   }
 
   measure(size, cx) {
@@ -600,6 +732,7 @@ export default class Viewer extends View {
   }
 
   async close() {
+    try { this.rememberLine(); } catch {}
     this.closed = true; this.request = null; this.watchers.clear(); this.releaseEditor(); this.zoomInput.release(); this.dataScroll.release();
     this.persistDrafts(); await localStorage.flush();
   }

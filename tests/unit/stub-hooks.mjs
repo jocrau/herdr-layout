@@ -1,6 +1,6 @@
 // Module hooks for tests: "herdr", "gpui-kit" and "gpui-base" exist only inside Herdr. Each import of them gets
-// a stub module exporting exactly the names that file imports (functions doing nothing), so any mod module can
-// be loaded and linked in Node. Registered by mods-load.test.mjs.
+// a stub module exporting exactly the names that file imports (functions doing nothing unless a test sets
+// globalThis.__herdrStubs), so any mod module can be loaded and linked in Node. Registered by mods-load.test.mjs.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +21,7 @@ export async function resolve(specifier, context, next) {
 export async function load(url, context, next) {
   if (!url.startsWith("stub:")) return next(url, context);
   const names = url.split("?")[1].split(",").filter(Boolean);
-  const source = names.map((n) => `export const ${n} = function ${n}() {};`).join("\n");
+  // A test can give a stub behaviour: globalThis.__herdrStubs = { exec: async (...args) => ... }.
+  const source = names.map((n) => `export const ${n} = function ${n}(...a) { return globalThis.__herdrStubs?.${n}?.apply(this, a); };`).join("\n");
   return { format: "module", source, shortCircuit: true };
 }

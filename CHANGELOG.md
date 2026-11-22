@@ -7,6 +7,23 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- The file browser (⌘⇧O) is a window you drive like vim and NERDTree. Source shows in vim's normal mode: the line
+  you're on is highlighted, `j k` `⌃D ⌃U` `⌃F ⌃B` `gg G` and counts (`42G`, `5j`) move, `/` finds in the file
+  (as you type, smart case) with `n N`, `V` selects lines and `y` copies them, `yy` `3yy` copy lines, `Y` the whole
+  file; `i` edits in place and Esc steps back: insert, normal, the tree, the filter, closing the window (`q` too).
+  Each file opens on the line you left it at. The tree gains `gg G`, `u` (the folder above, even above the
+  repository), `C` (this folder as the tree), `P` (back), `yy Y` (copy the path), `I` (hidden files), `R`, and `l`
+  goes into a file. `/` matches names as typed (each term inside one file or folder name; a `/` spans folders),
+  finds folders too, and shows the matches as a tree with the matched letters lit; ⏎ on a folder opens the tree
+  down to it. The tree's edge drags (`⌃W < > =`), and a status bar across the window shows the mode, the keys that
+  matter there, the line and column, the branch.
+- The file browser shows the file you pick again (its tree loader had replaced the viewer's load), Markdown links
+  and `[ ]` follow again in it, and a docked browser that moves to another repository while git is still answering
+  no longer gets the old repository's tree or file names.
+- Markdown view: picking the heading you're already under, after scrolling, goes back to it.
+- Git view: on the base branch itself the review shows the commit (since base stays the choice on other branches),
+  and an open review follows a checkout onto or off it.
+
 - The fix round's plan in the PR view (pr-flow 0.45.0, its ENGINE.md "Fix plans"): when a fix session on your own PR shows
   its plan, the notes show it too (FIX PLAN: each item's severity, verdict, place, point, reply or proof; the go
   line) and the items with a code place sit on their lines in the diff, on the reading path (`n N`). ⏎ on an item

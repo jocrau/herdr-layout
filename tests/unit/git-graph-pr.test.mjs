@@ -300,3 +300,42 @@ test("plan items with a code place are stops on the reading path, after findings
   const stops = readingPath([{ path: "b.py", line: 12 }], [], ["a.py", "b.py"], [], [], PLAN.items);
   assert.deepEqual(stops.map((s) => `${s.kind}${s.i}`), ["p2", "f0", "p0"]);
 });
+
+test("the review is the commit on the base branch and since base again on another branch; c there doesn't change the preference", async () => {
+  const { ReviewMethods } = await import("../../mods/git-graph/review.js");
+  const { isBaseBranch } = await import("../../mods/git-graph/git.js");
+  assert.ok(isBaseBranch("main", "main", {}));
+  assert.ok(isBaseBranch("origin/main", "main", { main: { short: "origin/main" } }), "main tracking the base");
+  assert.ok(!isBaseBranch("origin/main", "feat", { feat: { short: "origin/feat" } }));
+  assert.ok(!isBaseBranch(null, "main", {}) && !isBaseBranch("main", null, {}), "no base, or detached: never on it");
+
+  const saved = [];
+  globalThis.__herdrStubs = { setShared: (k, v) => saved.push([k, v]) };
+  const loads = [];
+  const g = Object.assign(Object.create(ReviewMethods), {
+    root: "/r", on: null, head: "a".repeat(40), current: "main", tracking: { main: { short: "origin/main" } },
+    sinceBase: true, ask: null, prRevs: null, baseRef: { key: "null\0/r\0", root: "/r", on: null, name: "origin/main" },
+    selected: "c1", index: new Map([["c1", 0]]), commits: [{ hash: "c1", parents: [] }], details: {}, detailsSince: true,
+    fileScroll: { scroll_to_item() {} },
+  });
+  g.loadDetails = (commit) => { g.details = {}; g.detailsSince = g.reviewsSince(commit); loads.push(g.detailsSince); };
+  const cx = { notify() {}, spawn() { throw new Error("the base is known: no git"); } };
+  const commit = g.commits[0];
+  try {
+    assert.equal(g.reviewsSince(commit), false, "on the base branch: the commit");
+    g.checkBase(cx);
+    assert.deepEqual(loads, [false], "an open since-base review follows onto the base branch");
+    g.toggleSince(cx);
+    assert.equal(g.reviewsSince(commit), true, "c on the base branch: since base");
+    assert.deepEqual(saved, [], "...for that branch only, the preference left alone");
+    g.current = "feat"; g.checkBase(cx);
+    assert.equal(g.reviewsSince(commit), true, "another branch: the preference");
+    g.current = "main"; g.checkBase(cx);
+    assert.equal(g.reviewsSince(commit), false, "back on the base branch: the commit again (c was for one stay)");
+    assert.deepEqual(loads, [false, true, false], "a reload only where the mode changed (main → feat kept since base)");
+    g.current = "feat"; g.checkBase(cx); g.toggleSince(cx);
+    assert.equal(g.sinceBase, false); assert.deepEqual(saved, [["git-graph.since", false]], "off the base branch c sets the preference");
+    g.ask = { head: "c1", base: "origin/main" }; g.current = "main"; g.sinceBase = true;
+    assert.equal(g.reviewsSince(commit), true, "a review another mod asked for keeps since base, on any branch");
+  } finally { globalThis.__herdrStubs = undefined; }
+});

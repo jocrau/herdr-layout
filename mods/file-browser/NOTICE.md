@@ -1,7 +1,7 @@
 # file-browser: origin, changes and licences
 
 **main.js** is original work by Jochen Rau (MIT, see the repository's LICENSE): the
-keyboard-driven tree, the fuzzy filter and the dialog around the viewer.
+keyboard-driven tree, the name filter and the window around the viewer.
 
 **Everything else in this folder** (viewer.js, tree.js, paths.js, appearance.js,
 media.js, markdown*.js, structured*.js, mermaid.js, mermaid.bundle.js, icons/) is

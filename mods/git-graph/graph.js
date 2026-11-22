@@ -169,6 +169,7 @@ export class Graph {
         }
         this.build();
         if (this.selected === UNCOMMITTED && this.details) this.loadDetails(this.commits[0], cx);
+        this.checkBase(cx);
         this.openAsked(cx);
       } catch (e) {
         if (!stale()) { this.state = "error"; this.error = String(e?.message ?? e); }

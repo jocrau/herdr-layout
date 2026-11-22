@@ -629,6 +629,12 @@ export function baseCandidates(setting, originHead) {
   return [...new Set([originHead, "main", "master", "origin/main", "origin/master"].filter(refName))];
 }
 
+// The checked-out branch is the base itself: its own name, or the remote branch it tracks (main ⇄ origin/main).
+export function isBaseBranch(base, current, tracking) {
+  if (!base || !current) return false;
+  return base === current || base === tracking?.[current]?.short;
+}
+
 function rangeOf(from, to) {
   if (!objectId(from) || (to !== null && !objectId(to))) throw new Error("Invalid commit range");
   return to ? [from, to] : [from];
