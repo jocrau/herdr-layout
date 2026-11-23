@@ -6,7 +6,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, setBadge } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -310,6 +310,15 @@ export default class Agents extends View {
     return div().size(7).mx(3).flex_none().rounded(4).bg(a.status === "done" ? color : t.dim + "00");
   }
 
+  // The Dock icon (macOS) says how many agents need you, so a hidden window still tells you. Set when the
+  // count changes; Herdr forgets it when it quits, so the first render sets it again.
+  badge(list) {
+    const blocked = list.filter((a) => a.status === "blocked").length;
+    if (blocked === this.badgeCount) return;
+    this.badgeCount = blocked;
+    try { setBadge(blocked ? String(blocked) : null); } catch {}
+  }
+
   render(cx) {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
@@ -318,6 +327,7 @@ export default class Agents extends View {
     const sort = sortOf();
     let list = this.unread(agents());
     this.listed = new Map(list.map((a) => [a.address, a.status]));
+    this.badge(list);
     const all = terminals();
     const byAddress = new Map(all.map((k) => [k.address, k]));
     this.migratePins(all);
@@ -382,6 +392,8 @@ export default class Agents extends View {
     const labels = new Map(list.map(a => {
       const tab = tabs.get(a.tab);
       const many = tabCounts.get(a.tab) > 1;
+      // A name someone gave the agent's pane (Rename in its menu) says it best.
+      if (a.pane_name) return [a.address, a.pane_name];
       return [a.address, tab ? title(many ? { ...tab, named: false } : tab, many ? a : leads.get(a.tab)) : (a.title || a.program?.name || "")];
     }));
     const label = (a) => labels.get(a.address);

@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list } from "gpui-base";
 import { exec, readTextFile, settings, props, shared, setShared, openOverlay, notify } from "herdr";
-import { fileArgs, joinFiles, diffArgs, diffRows, baseCandidates, isBaseBranch, rangeFileArgs, rangeDiffArgs, READ, wrapDiff, ignoringSpace, fileRows } from "./git.js";
+import { fileArgs, joinFiles, diffArgs, diffRows, baseCandidates, isBaseBranch, rangeFileArgs, rangeDiffArgs, READ, wrapDiff, ignoringSpace, fileRows, mentions, commitUrl, branchUrl, issueUrl, splitRemote } from "./git.js";
 import { openDialog, showChanges } from "./act.js";
 import { ago, stamp, count, keep, VIEWER_CLOSED, ROW, DIFF_ROW, DETAILS } from "./common.js";
 import { exists, background, openInEditor } from "./tools.js";
@@ -341,7 +341,22 @@ export const ReviewMethods = {
       this.fileAt = Math.max(0, Math.min(this.fileAt ?? 0, files.length - 1));
       this.filePath = files[this.fileAt]?.path ?? null;
     }
-    const meta = (k, v, color) => h_flex().gap(8).text_size(11.5).child(div().w(64).flex_none().text_color(t.dim).child(k)).child(div().min_w(0).truncate().text_color(color ?? t.muted).child(v));
+    const meta = (k, v, color, url) => h_flex().gap(8).text_size(11.5).child(div().w(64).flex_none().text_color(t.dim).child(k))
+      .child(url ? this.linkText(v, url, t).truncate() : div().min_w(0).truncate().text_color(color ?? t.muted).child(v));
+    // Links to GitHub, when origin is there: the commit, a remote branch on origin, #123 in the message.
+    const web = this.webBase?.() ?? null;
+    const remoteUrl = (name) => {
+      const { remote, branch } = splitRemote(name, this.remoteNames ?? []);
+      return web && remote === "origin" ? branchUrl(web, branch) : null;
+    };
+    const linked = (text, color, el = div()) => {
+      const parts = web ? mentions(text) : [{ text }];
+      if (parts.length === 1) return el.text_color(color).child(text);
+      // Word by word, so the line still wraps.
+      return h_flex().flex_wrap().text_color(color).children(parts.flatMap((p) => (p.n
+        ? [this.linkText(p.text, issueUrl(web, p.n), t)]
+        : p.text.split(/(?<= )/).map((w) => div().whitespace_nowrap().child(w)))));
+    };
     const lines = commit.uncommitted || !d?.message ? "" : d.message.split("\n").slice(1).join("\n").trim();
     // Local change: in the PR view the notes are as tall as what they say (up to a cap), or the height the line
     // under them was dragged to.
@@ -352,20 +367,23 @@ export const ReviewMethods = {
         .child(meta("Up to", commit.uncommitted ? "uncommitted changes" : commit.subject))
         .child(meta("Commits", String(s.commits))))
       .when(!since && !commit.uncommitted, (el) => el
-        .child(div().font_semibold().child(commit.subject))
-        .child(meta("Commit", commit.hash, t.accent).font_family(mono))
+        .child(linked(commit.subject, t.foreground, div()).font_semibold())
+        .child(meta("Commit", commit.hash, t.accent, web ? commitUrl(web, commit.hash) : null).font_family(mono))
         .child(meta("Parents", commit.parents.map((p) => p.slice(0, 8)).join(", ") || "none"))
         // The labels in the graph are shortened: their full names, one per line.
         .children(["branch", "remote", "tag"].map((kind) => [kind, (commit.refs ?? []).filter((r) => r.kind === kind).map((r) => r.name)])
           .filter(([, names]) => names.length)
           .map(([kind, names]) => h_flex().gap(8).text_size(11.5).items_start()
             .child(div().w(64).flex_none().text_color(t.dim).child({ branch: "Branches", remote: "Remotes", tag: "Tags" }[kind]))
-            .child(v_flex().min_w(0).flex_1().font_family(mono).children(names.map((n) => div().text_color(t.accent).child(n))))))
+            .child(v_flex().min_w(0).flex_1().font_family(mono).children(names.map((n) => {
+              const url = kind === "remote" ? remoteUrl(n) : null;
+              return url ? this.linkText(n, url, t) : div().text_color(t.accent).child(n);
+            })))))
         .child(meta("Author", `${commit.author} <${commit.email}>`))
         .child(meta("Date", `${stamp(commit.time)} · ${ago(commit.time)}`)))
       .when(Boolean(d?.committer && d.committer !== d.author), (el) => el.child(meta("Committer", d.committer)))
       .when(this.prReviewing(), (el) => el.child(this.prNotes(t, mono)))
-      .when(Boolean(lines), (el) => el.child(v_flex().pt(6).children(lines.split("\n").map((line) => div().text_color(t.muted).child(line || " ")))))
+      .when(Boolean(lines), (el) => el.child(v_flex().pt(6).children(lines.split("\n").map((line) => linked(line || " ", t.muted)))))
       .when(Boolean(d?.error), (el) => el.child(div().text_color(t.ansi1).child(d.error)));
     const add = files.reduce((n, f) => n + f.add, 0), del = files.reduce((n, f) => n + f.del, 0);
     const filesId = `${this.listId}-files`;
@@ -502,6 +520,13 @@ export const ReviewMethods = {
   // `v`: the file in the file viewer (the file-browser mod, over the graph; esc comes back),
   // as it was at the commit, read from git: before it for a file it deleted. Uncommitted
   // changes show the working-tree file, editable there.
+  // Text that opens `url` in the browser: the accent colour, underlined while the pointer is on it.
+  linkText(text, url, t) {
+    return div().id(`link-${url}`).min_w(0).text_color(t.accent).cursor_pointer().hover((s) => s.underline())
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => cx.open_url(url)).child(text);
+  },
+
   viewFile(cx) {
     const at = this.reviewTarget();
     if (at) this.viewAt(at);

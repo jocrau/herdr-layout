@@ -169,6 +169,47 @@ export function labelsOf(commit, remotesShown = true, worktrees = {}) {
   return labels;
 }
 
+// ---------- links to the repository's GitHub pages (origin on github.com: web = https://github.com/owner/repo)
+
+export const prUrl = (web, n) => `${web}/pull/${n}`;
+export const commitUrl = (web, hash) => `${web}/commit/${hash}`;
+export const branchUrl = (web, branch) => `${web}/tree/${branch.split("/").map(encodeURIComponent).join("/")}`;
+// #123 in a commit message: an issue or a pull request (GitHub's /issues/123 goes on to the PR when it is one).
+export const issueUrl = (web, n) => `${web}/issues/${n}`;
+
+// A line of text cut where it mentions #123 (not in a word, an HTML entity or a URL's fragment):
+// [{ text }, { text: "#123", n: 123 }, ...]. No mention: one piece.
+export function mentions(text) {
+  const out = [], re = /(^|[^\w&/#])#(\d{1,7})\b/g;
+  let at = 0, m;
+  while ((m = re.exec(text))) {
+    const start = m.index + m[1].length;
+    if (start > at) out.push({ text: text.slice(at, start) });
+    out.push({ text: `#${m[2]}`, n: Number(m[2]) });
+    at = start + m[2].length + 1;
+  }
+  if (at < text.length || !out.length) out.push({ text: text.slice(at) });
+  return out;
+}
+
+// A PR chip in a commit row (#232 · agents at work): its width, fixed so a click can be placed on it in a row of
+// the virtual list, which takes no handlers of its own. All mono, as the labels are, so the width is known.
+export const CHIP = { PAD: 5, GAP: 4, CHAR: LABEL.CHAR * 10.5 / LABEL.FONT, FONT: 10.5 };
+export const chipWidth = (num, stage) => Math.ceil(CHIP.PAD * 2 + CHIP.GAP + (String(num).length + 1 + stage.length) * CHIP.CHAR) + 2;
+
+// The chip at `x` in a row: chips follow the labels (each LABEL.GAP before it), from a `start`-wide graph.
+export function hitChip(labels, chips, x, start, limit = Infinity) {
+  if (x >= limit) return null;
+  let left = start;
+  for (const label of labels ?? []) left += LABEL.GAP + label.width;
+  for (const chip of chips ?? []) {
+    left += LABEL.GAP;
+    if (x >= left && x < left + chip.width) return chip;
+    left += chip.width;
+  }
+  return null;
+}
+
 // The label part at `x` in a row whose labels start after a `start`-wide graph
 // and are cut off at `limit` (the description column's right edge).
 export function hitLabel(labels, x, start, limit = Infinity) {
@@ -271,7 +312,12 @@ export function menuFor(target, ctx) {
       })(),
         current && ctx.tracking?.[name] && !ctx.tracking[name].gone && ctx.tracking[name].ahead > 0 && item(`Push to ${ctx.tracking[name].short}…`, "push", { type: "pushCurrent", name, short: ctx.tracking[name].short }),
         ctx.remotes.length > 0 && item("Push branch…", "push", { type: "push", name })),
-      section(item("Copy branch name", "copy", { type: "copy", text: name }),
+      section((() => {
+        const up = ctx.tracking?.[name];
+        const { remote, branch } = up && !up.gone && up.short ? splitRemote(up.short, ctx.remotes) : {};
+        return ctx.web && remote === "origin" && item("Open branch on GitHub", "cloud", { type: "openUrl", url: branchUrl(ctx.web, branch) });
+      })(),
+        item("Copy branch name", "copy", { type: "copy", text: name }),
         wt && item("Copy worktree path", "copy", { type: "copy", text: wt })),
       // Never the main checkout (seen from a linked worktree, its branch has a worktree path too).
       section(wt && wt !== ctx.mainRoot && item("Remove worktree…", "trash", { type: "removeWorktree", name, path: wt })),
@@ -285,7 +331,8 @@ export function menuFor(target, ctx) {
         : item("Checkout branch…", "branch", { type: "checkoutRemote", name, remote, branch }))),
       section(item(`Merge into ${cur}…`, "merge", { type: "merge", ref: name, what: `remote branch ${name}` })),
       section(item("Delete remote branch…", "trash", { type: "deleteRemoteBranch", name, remote, branch })),
-      section(item("Copy branch name", "copy", { type: "copy", text: name })),
+      section(ctx.web && remote === "origin" && item("Open branch on GitHub", "cloud", { type: "openUrl", url: branchUrl(ctx.web, branch) }),
+        item("Copy branch name", "copy", { type: "copy", text: name })),
     ];
   } else if (target.kind === "tag") {
     const name = target.name;
@@ -307,7 +354,8 @@ export function menuFor(target, ctx) {
         item(`Reset ${cur} to this commit…`, "reset", { type: "reset", hash, short }),
         // As Fork does: move another local branch here (only its pointer; no working tree is touched).
         movable(ctx).length > 0 && item("Reset a branch to this commit…", "reset", { type: "resetBranch", hash, short })),
-      section(item("Copy commit hash", "copy", { type: "copy", text: hash }),
+      section(ctx.web && item("Open commit on GitHub", "cloud", { type: "openUrl", url: commitUrl(ctx.web, hash) }),
+        item("Copy commit hash", "copy", { type: "copy", text: hash }),
         item("Copy commit subject", "copy", { type: "copy", text: c.subject })),
     ];
   }

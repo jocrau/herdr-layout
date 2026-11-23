@@ -7,6 +7,14 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- The git graph links to GitHub (origin on github.com): a click on a commit's PR chip (`#232 agents at work`) opens the
+  pull request; in a commit's details the hash, the remote branches on origin and every `#123` in the message are
+  links; right-click a commit or a branch for "Open … on GitHub".
+- ⌘-click a file path in a terminal (`src/x.rs:42`, `Foo.cs(42,7)`, a folder) and it opens in the file browser, at
+  that line, with its repository as the tree (Herdr 0.1.17's link handlers; the layout lists `file-browser` in
+  `link_handlers`). Archives, binaries and paths that aren't there go on to Herdr's own opener.
+- Herdr's Dock icon shows how many agents need you (macOS), so a hidden window still says so.
+- A pane you named (Rename in its menu) goes by that name in the agents list and in ⌥Tab's recent panes.
 - The file browser (⌘⇧O) is a window you drive like vim and NERDTree. Source shows in vim's normal mode: the line
   you're on is highlighted, `j k` `⌃D ⌃U` `⌃F ⌃B` `gg G` and counts (`42G`, `5j`) move, `/` finds in the file
   (as you type, smart case) with `n N`, `V` selects lines and `y` copies them, `yy` `3yy` copy lines, `Y` the whole

@@ -51,21 +51,35 @@ BURN_FROM, BURN_HIGH = 150_000, 400_000  # tokens read per call: hint, then red
 BLUE, GREEN, YELLOW, RED, GRAY, RESET = "\033[34m", "\033[32m", "\033[33m", "\033[31m", "\033[38;5;245m", "\033[0m"
 
 
-def freshest(mine, saved):
-    """Per window, the newer of this session's limits and the saved ones:
-    the later reset, else (same window) the higher share, since usage only
-    grows within a window. Each session only knows the limits from its own
-    last API call, so an idle one would otherwise show, and save, old numbers."""
+def freshest(mine, saved, news):
+    """Per window, the limits to keep: this session's when they are news (see
+    is_news) and not from an older window than the saved ones, else this session's
+    only for a later window. News is taken as is, also when lower: a limit reset
+    gives usage back within the same window. Each session only knows the limits
+    from its own last API call, so an idle one would otherwise show, and save, old numbers."""
     merged = dict(saved or {})
     for key, window in (mine or {}).items():
         other = merged.get(key)
         if not isinstance(window, dict) or not isinstance(other, dict):
             merged[key] = window or other
             continue
-        newer = (window.get("resets_at") or 0, window.get("used_percentage") or 0)
-        older = (other.get("resets_at") or 0, other.get("used_percentage") or 0)
-        merged[key] = window if newer >= older else other
+        ours, theirs = window.get("resets_at") or 0, other.get("resets_at") or 0
+        if ours > theirs or (news and ours == theirs):
+            merged[key] = window
     return merged
+
+
+def is_news(limits, data, sessions, seen):
+    """Whether this session's limits come from an API call made since it last
+    reported them: they changed since then, or, for a session not seen before,
+    its transcript was written after the saved limits were."""
+    last = sessions.get(data.get("session_id") or "")
+    if isinstance(last, dict):
+        return last.get("limits") != limits
+    try:
+        return os.path.getmtime(data.get("transcript_path") or "") > seen
+    except (OSError, TypeError):
+        return not seen
 
 
 def marker(term, suffix=""):
@@ -139,23 +153,31 @@ def forget_session():
 
 def save_usage(data):
     """The rate limits merged with the saved ones (shown here and in herdr-app's
-    status bar); written atomically. Returns the merged limits."""
+    status bar); written atomically. Returns the merged limits. Also keeps what
+    each session last reported (sessions), to tell its news from old numbers."""
     try:
         with open(USAGE, encoding="utf-8") as f:
             stored = json.load(f)
         saved, seen = stored.get("rate_limits"), stored.get("seen_at") or 0
+        sessions = stored.get("sessions") if isinstance(stored.get("sessions"), dict) else {}
     except (OSError, ValueError, AttributeError):
-        saved, seen = None, 0
-    limits = freshest(data.get("rate_limits"), saved)
+        saved, seen, sessions = None, 0, {}
+    mine, sid, now = data.get("rate_limits"), data.get("session_id"), int(time.time())
+    limits = freshest(mine, saved, mine and is_news(mine, data, sessions, seen))
     # Written only when Claude Code handed us limits (seen_at says when they were seen, so stale ones must not
-    # look fresh), and then when they changed or a minute passed: not on every render.
-    if not data.get("rate_limits") or (limits == saved and time.time() - seen < 60):
+    # look fresh), and then when they or this session's report changed, or a minute passed: not on every render.
+    reported = sid and (sessions.get(sid) or {}).get("limits") != mine
+    if not mine or (limits == saved and not reported and time.time() - seen < 60):
         return limits
+    if sid:
+        sessions[sid] = {"limits": mine, "at": now}
+    # Sessions gone quiet for longer than a week: their numbers are from a past window anyway.
+    sessions = {k: v for k, v in sessions.items() if isinstance(v, dict) and now - (v.get("at") or 0) < 8 * 86400}
     try:
         os.makedirs(os.path.dirname(USAGE), exist_ok=True)
         tmp = f"{USAGE}.{os.getpid()}"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"seen_at": int(time.time()), "rate_limits": limits or None}, f)
+            json.dump({"seen_at": now, "rate_limits": limits or None, "sessions": sessions}, f)
         os.replace(tmp, USAGE)
     except OSError:
         pass

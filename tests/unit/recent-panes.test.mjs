@@ -34,3 +34,10 @@ test("recent panes: an agent reads by its tab's name, a shell by its title, a mo
 test("recent panes: a pane whose tab isn't in any space is left out; no list at all is fine", () => {
   assert.deepEqual(recentRows(null, [{ pane: "x", tab: "nowhere" }], spaces).length, 0);
 });
+
+test("a pane someone named reads by that name, over its agent's tab name", () => {
+  const named = panes.map((p) => (p.pane === "p3" ? { ...p, name: "TSDB review" } : p));
+  const row = recentRows(["p3"], named, spaces, agents).find((r) => r.pane === "p3");
+  assert.equal(row.title, "TSDB review");
+  assert.equal(row.tabName, "tuning");
+});

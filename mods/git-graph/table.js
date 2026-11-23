@@ -3,7 +3,7 @@
 import { div, svg, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list, Input } from "gpui-base";
 import { settings, props, setShared, openOverlay, home, notify, run } from "herdr";
-import { LABEL, hitLabel, menuFor, menuHeight, fastForwardable, worktreeOf, splitRemote } from "./git.js";
+import { LABEL, hitLabel, hitChip, menuFor, menuHeight, fastForwardable, worktreeOf, splitRemote } from "./git.js";
 import { perform, openDialog, goToWorktree } from "./act.js";
 import { icon } from "./menu.js";
 import { splitter, dragTo } from "./lib/splitter.js";
@@ -287,6 +287,9 @@ export const TableMethods = {
       if (hit) this.checkout(hit.part, cx);
       return;
     }
+    // A PR chip (#232 agents at work): its page on GitHub.
+    const chip = press ? hitChip(this.labels.get(key), this.prChipsAt(commit), press.x, this.graphWidth(), this.labelLimit()) : null;
+    if (chip?.url) return cx.open_url(chip.url);
     this.pick(commit, cx);
   },
 
@@ -332,8 +335,10 @@ export const TableMethods = {
     const target = commit.uncommitted ? { kind: "uncommitted", commit: brief(commit), staged: this.files.some((f) => f.staged) }
       : hit && hit.part.kind !== "head" ? { kind: hit.part.kind, name: hit.part.name, commit: brief(commit) }
       : { kind: "commit", commit: brief(commit) };
-    const items = menuFor(target, this.ctx);
-    openOverlay({ mod: "git-graph", kind: "popup", at: "pointer", width: 268, height: menuHeight(items), props: { role: "menu", target, ctx: this.ctx } });
+    // The repository's GitHub page, for the menu's "Open … on GitHub".
+    const ctx = { ...this.ctx, web: this.webBase() };
+    const items = menuFor(target, ctx);
+    openOverlay({ mod: "git-graph", kind: "popup", at: "pointer", width: 268, height: menuHeight(items), props: { role: "menu", target, ctx } });
   },
 
   pick(commit, cx) {

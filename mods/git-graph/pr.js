@@ -13,7 +13,7 @@ import { OPEN_PR, VIEW_OPEN, lastQueue, readQueue, queueRows, showPr, findingsOf
   draftView, draftOf, draftVersions, versionLabel, draftText, draftNotes, draftCommand, rewordDraft, jobShow, capabilities, prView, viewRow, openFromView, viewIsFull, notesOf, detailJob,
   fixPlanOf, PLAN_VERDICTS, planWords, planOpen, typeIntoTab } from "./lib/prflow.js";
 import { prRow, sevColor, SEVERITIES, findingsBadge, ciGlyph, alpha, numWidth, repoWidth, tabDot } from "./lib/prrows.js";
-import { READ } from "./git.js";
+import { READ, CHIP, chipWidth, prUrl } from "./git.js";
 import { actionsFor, agentWaits, arrange, moveOf, nextStep, GROUPS } from "./lib/prmodel.js";
 import { tipText } from "./lib/tiptext.js";
 import { PAGE, VIEWER_CLOSED, count, DIFF_ROW } from "./common.js";
@@ -1623,15 +1623,31 @@ export const PrMethods = {
     return this.prQueueRows().filter((r) => r.key.startsWith(`${slug}#`) && r.rec?.headRef && names.has(r.rec.headRef));
   },
 
-  prChips(commit, t, mono) {
+  // The PR chips of a commit row: [{ r, n, stage, width, url }]. A click on one opens the PR on GitHub (table.js clicked).
+  prChipsAt(commit) {
+    const web = this.webBase();
     return this.prsAt(commit).map((r) => {
-      // In the pane's words and colours: your move's action (red for a problem), else "waiting", "later", "dormant".
-      const [grp, what] = moveOf(r), stage = grp === "you" ? what.toLowerCase() : grp;
-      const c = grp !== "you" ? t.muted : nextStep(r).problem ? t.ansi1 : t.accent;
-      return h_flex().flex_none().h(18).px(5).gap(4).items_center().rounded(5).bg(alpha(c, "22"))
-        .child(div().font_family(mono).text_size(10.5).text_color(c).child(`#${r.key.split("#")[1]}`))
-        .child(div().text_size(10.5).text_color(c).child(stage));
+      // In the pane's words: your move's action, else "waiting", "later", "dormant".
+      const [grp, what] = moveOf(r), stage = grp === "you" ? what.toLowerCase() : grp, n = r.key.split("#")[1];
+      return { r, n, stage, grp, width: chipWidth(n, stage), url: r.url || (web ? prUrl(web, n) : null) };
     });
+  },
+
+  prChips(commit, t, mono) {
+    return this.prChipsAt(commit).map(({ r, n, stage, grp, width, url }) => {
+      // In the pane's colours: red for a problem, else the accent for your move, muted for the rest.
+      const c = grp !== "you" ? t.muted : nextStep(r).problem ? t.ansi1 : t.accent;
+      return h_flex().w(width).flex_none().h(18).px(CHIP.PAD).gap(CHIP.GAP).items_center().rounded(5).bg(alpha(c, "22")).overflow_hidden()
+        .when(Boolean(url), (e) => e.cursor_pointer().hover((st) => st.bg(alpha(c, "44"))))
+        .child(div().flex_none().font_family(mono).text_size(CHIP.FONT).text_color(c).child(`#${n}`))
+        .child(div().min_w(0).truncate().font_family(mono).text_size(CHIP.FONT).text_color(c).child(stage));
+    });
+  },
+
+  // https://github.com/owner/repo of the graph's repository, once prSlug has read origin; else null.
+  webBase() {
+    const slug = this.slugs?.get(this.root);
+    return slug ? `https://github.com/${slug}` : null;
   },
 
   // p: the PR view of the cursor row's PR: this dialog becomes it (a docked graph opens it as a dialog).
