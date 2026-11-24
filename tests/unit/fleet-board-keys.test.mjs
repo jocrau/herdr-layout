@@ -9,7 +9,7 @@ const { ActionsMethods, ACTION_KEYS } = await import("../../mods/fleet-board/act
 test("each fleet action has its own key, none of them a key the board moves or views with", () => {
   const keys = Object.values(ACTION_KEYS);
   assert.equal(new Set(keys).size, keys.length, "one action per key");
-  for (const k of ["j", "k", "g", "l", "h", "x", "e", "r", "/", "?", "0", "1", "2", "[", "]", "-", "=", "p"]) assert.ok(!keys.includes(k), `${k} is the board's own`);
+  for (const k of ["j", "k", "g", "l", "h", "x", "e", "r", "/", "?", "0", "1", "2", "[", "]", "{", "}", "<", ">", "-", "=", "p"]) assert.ok(!keys.includes(k), `${k} is the board's own`);
   // Where the PR board has the same action, the same letter.
   assert.equal(ACTION_KEYS.approve, "a"); assert.equal(ACTION_KEYS.resume, "f"); assert.equal(ACTION_KEYS.tail, "w"); assert.equal(ACTION_KEYS.pr, "o");
 });

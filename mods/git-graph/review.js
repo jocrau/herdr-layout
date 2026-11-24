@@ -358,9 +358,11 @@ export const ReviewMethods = {
         : p.text.split(/(?<= )/).map((w) => div().whitespace_nowrap().child(w)))));
     };
     const lines = commit.uncommitted || !d?.message ? "" : d.message.split("\n").slice(1).join("\n").trim();
-    // Local change: in the PR view the notes are as tall as what they say (up to a cap), or the height the line
-    // under them was dragged to.
-    const info = v_flex().id("graph-details").flex_none().when(this.prReviewing(), (e) => this.notesFit(e)).when(!this.prReviewing(), (e) => e.max_h(230)).overflow_y_scrollbar().px(14).py(10).gap(4)
+    // Local change: the details (in the PR view, its notes) are as tall as what they say, up to a cap, or the height
+    // the line under them was dragged to; longer, they scroll. Outside the PR view their height is measured here
+    // (the PR view's notes measure their own).
+    const body = v_flex().flex_none().gap(4)
+      .when(!this.prReviewing(), (e) => e.on_size_change((size, cx) => { const h = size.height / this.unit(); if (Math.abs(h - (this.notesContent ?? 0)) > 1) { this.notesContent = h; cx.notify(); } }))
       .when(since && Boolean(s?.base) && !this.prReviewing(), (el) => el
         .child(meta("Base", s.base, t.accent))
         .child(meta("Branched", s.from?.slice(0, 8) ?? "").font_family(mono))
@@ -385,6 +387,7 @@ export const ReviewMethods = {
       .when(this.prReviewing(), (el) => el.child(this.prNotes(t, mono)))
       .when(Boolean(lines), (el) => el.child(v_flex().pt(6).children(lines.split("\n").map((line) => linked(line || " ", t.muted)))))
       .when(Boolean(d?.error), (el) => el.child(div().text_color(t.ansi1).child(d.error)));
+    const info = this.notesFit(v_flex().id("graph-details").flex_none().overflow_y_scrollbar().px(14).py(10).child(body));
     const add = files.reduce((n, f) => n + f.add, 0), del = files.reduce((n, f) => n + f.del, 0);
     const filesId = `${this.listId}-files`;
     const fileList = v_virtual_list(filesId, files.length, 24, (i) => String(i), (range) => files.slice(range.start, range.end).map((f, o) => {
@@ -412,8 +415,8 @@ export const ReviewMethods = {
           .on_click(() => showChanges()).child("Open Changes")))
         .child(close))
       .child(info)
-      .when(this.prReviewing(), (e) => e.child(this.notesHandle(t)))
-      .child(h_flex().h(26).flex_none().px(14).gap(8).items_center().text_size(11.5).when(!this.prReviewing(), (e) => e.border_t(1).border_color(t.border))
+      .child(this.notesHandle(t))
+      .child(h_flex().h(26).flex_none().px(14).gap(8).items_center().text_size(11.5)
         .child(div().text_color(zone === "files" ? t.accent : t.muted).when(zone === "files", (e) => e.font_semibold()).child(d ? count(files.filter((f) => !f.fold).length + (d.noise?.length ?? 0) + (d.more ?? 0), "file") : "Loading files…"))
         .when(add > 0 || del > 0, (e) => e.child(div().text_color(t.ansi2).child(`+${add}`)).child(div().text_color(t.ansi1).child(`−${del}`)))
         .child(div().flex_1()).child(this.prViewedCount(t) ?? div()))

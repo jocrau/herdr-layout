@@ -7,6 +7,19 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- `fleet-board`, Lanes (docked and the ⌘⌥F dialog): zoom into a window in the past to look at earlier waves. Drag
+  across the time axis, click a wave's number, `< >` the wave before / after, `{ }` (or a sideways swipe) move back /
+  on, `[ ]` or ⌘-scroll / pinch zoom; the axis then shows clock times. Esc, a double-click on the axis or the window's
+  label (`w12 · 14:13–14:15 ×`) goes back to following now.
+- `fleet-board`: an epic check its wave stopped before a result (`epic.check` status `stopped`) reads "Epic check
+  stopped at … · not checked", with the last head that passed, instead of "Epic check failed". Only `fail` (or
+  `passed: false`) is a failure.
+- PR view, fix plan: a click on an item goes to its line in the diff when the PR changes the file, and never opens the
+  file viewer (only its blue place link does). The item reached shows the fix of the finding it takes up and, when its
+  line isn't in the diff, the code there.
+- Git view: a commit's details fit their text up to a cap and scroll past it (a long message was cut off); the line
+  under them drags them taller or shorter (double-click: back to fitting), as in the PR view, where letting go of
+  that drag no longer fails.
 - The git graph links to GitHub (origin on github.com): a click on a commit's PR chip (`#232 agents at work`) opens the
   pull request; in a commit's details the hash, the remote branches on origin and every `#123` in the message are
   links; right-click a commit or a branch for "Open … on GitHub".

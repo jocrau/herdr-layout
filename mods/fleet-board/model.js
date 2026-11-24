@@ -4,6 +4,8 @@ export const STEPS = ["implement", "fix", "review", "check", "merge"];
 export const VIEWS = [{ id: "board", label: "Board" }, { id: "lanes", label: "Lanes" }];
 // Lanes' time window: "fit" spans the run from its first step to now (or its last activity), filling the width.
 export const SPANS = ["fit", ...[1, 4, 12, 48, 168].map((h) => h * 3600000)];
+// A window pinned in the past ({ from, to }, epoch ms) is at least this long.
+export const MIN_WINDOW = 120000;
 export const IDLE_POLL = 60000; // the watch is the main signal; this catches what it misses
 export const REMOTE_POLL = 15000; // the fleet on another machine: no watch, the run on screen is read this often
 export const SCAN_EVERY = 60000; // the run list is read (`fleet runs --json`, cheap) this often
@@ -77,6 +79,45 @@ export function dur(ms) {
   return h < 24 ? `${h}h${String(m % 60).padStart(2, "0")}` : `${Math.floor(h / 24)}d${h % 24}h`;
 }
 export const spanLabel = (ms) => (ms === "fit" ? "fit" : ms >= 86400000 ? `${ms / 86400000}d` : `${ms / 3600000}h`);
+// Lanes' window pinned in the past ({ from, to }): kept at least MIN_WINDOW long, never past `head` (now while
+// the run is live, else its last activity) and starting at most a little before the run's first step (`start`).
+export function clampWindow(w, start, head) {
+  const most = Math.max(MIN_WINDOW, (head - start) * 1.1);
+  const span = Math.min(most, Math.max(MIN_WINDOW, w.to - w.from));
+  const lo = start - span * 0.05;
+  let to = Math.min(head, w.to), from = to - span;
+  if (from < lo) { from = lo; to = Math.min(head, from + span); }
+  return { from, to };
+}
+// The window `factor` times as long, the time under `at` (0 the left edge, 1 the right) staying where it is.
+export function zoomWindow(w, factor, at = 0.5) {
+  const span = w.to - w.from, anchor = w.from + at * span, next = span * factor;
+  return { from: anchor - at * next, to: anchor - at * next + next };
+}
+export const panWindow = (w, ms) => ({ from: w.from + ms, to: w.to + ms });
+// Each wave's time: from its first step's start to its last step's end (a step still running ends at `head`).
+export function waveRanges(beads, head) {
+  const out = new Map();
+  for (const b of beads) for (const h of b.history) {
+    if (h.wave === null || h.wave === undefined || !Number.isFinite(h.start) || h.start <= 0) continue;
+    const end = h.end ?? (h.outcome ? h.start : head), r = out.get(h.wave);
+    if (!r) out.set(h.wave, { from: h.start, to: Math.max(h.start, end) });
+    else { r.from = Math.min(r.from, h.start); r.to = Math.max(r.to, end); }
+  }
+  return out;
+}
+// A wave's window: its time with a little room on both sides, at least MIN_WINDOW.
+export function waveWindow(r) {
+  const span = Math.max(MIN_WINDOW, (r.to - r.from) * 1.1), mid = (r.from + r.to) / 2;
+  return { from: mid - span / 2, to: mid + span / 2 };
+}
+// The wave before (dir -1) or after (dir 1) the time `at`, by when it started; null when there is none.
+export function nextWave(ranges, at, dir) {
+  const list = [...ranges].sort((a, b) => a[1].from - b[1].from);
+  const hit = dir < 0 ? list.filter(([, r]) => r.from < at).at(-1) : list.find(([, r]) => r.from > at);
+  return hit ? hit[0] : null;
+}
+
 // Agent steps take a worker (as agent-fleet counts workers); checks and merges run in the coordinator.
 export const AGENT_STEPS = new Set(["implement", "review", "fix"]);
 export const hm = (ms) => new Date(ms).toTimeString().slice(0, 5);

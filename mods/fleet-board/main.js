@@ -8,15 +8,16 @@
 // It re-reads when the run's state directory changes (watchFolder), and every minute anyway.
 // Keys (when focused), as in the git graph and the beads view: j k / ↑ ↓ move · ⏎ ⇥ l → details in, h ← x out ·
 // space act · a f i approve, resume, drop · p answer · t session · v gate · d diff · o PR · w tail · b in the beads
-// view · / filter · ? keys · 1 2 views · 0 done · [ ] zoom lanes · r refresh (pr-board's letters where they match);
-// ⌘← ⌘→ (keys.json, mod:fleet-board) the previous / next run.
+// view · / filter · ? keys · 1 2 views · 0 done · [ ] zoom lanes · < > a wave · { } move back / on · r refresh
+// (pr-board's letters where they match). Lanes: drag across the time axis, click a wave or ⌘-scroll to zoom into the past;
+// esc goes back to now. ⌘← ⌘→ (keys.json, mod:fleet-board) the previous / next run.
 // A bead that starts waiting for you posts a notification; while the docked pane is hidden it still looks every
 // 2 minutes (`fleet runs --json` when agent-fleet has it, else one `fleet status --json` of the last run shown).
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle } from "gpui-base";
 import { theme, settings, nextCommand, props, focused, run, shared, setShared, layout } from "herdr";
-import { VIEWS, SPANS, HIDDEN_CHECK, dur, shortener, graph, tipText } from "./model.js";
+import { VIEWS, SPANS, HIDDEN_CHECK, dur, shortener, graph, tipText, clampWindow, zoomWindow, panWindow, waveWindow, nextWave } from "./model.js";
 import { closeSide, focusFrame, toTerminal } from "./lib/sidecolumn.js";
 import { splitTarget } from "./env.js";
 import { boardHeader, boardTop } from "./lib/boardheader.js";
@@ -52,6 +53,9 @@ export default class FleetBoard extends View {
     this.busy = null; // the command running now: { text, bead, at, until? } (actions.js runFleet)
     // Lanes' zoom, remembered: the last hour unless set; [ ] zoom (out to 7 days, in to "fit": the whole run).
     this.span = SPANS.includes(shared("fleet-board.span")) ? shared("fleet-board.span") : 3600000;
+    // A window pinned in the past, to look at earlier waves: { from, to, wave, key } (key: the run's), else null.
+    this.win = null;
+    this.sel = null; // a drag across Lanes' time axis: { a, b } (0 to 1 along it), and where the axis is: { x, w }
     this.h = cx.focus_handle();
     this.s = null; // the snapshot shown
     this.problem = null; // why the focused folder shows nothing: { kind, message, cwd }
@@ -90,7 +94,12 @@ export default class FleetBoard extends View {
     cx.spawn((cx) => this.worker(cx, this.gen));
     // Shown (⌘⇧F): the keyboard comes here. Not when the layout loads with it shown already.
     this.wasShown = shownHere();
-    cx.timer.every(200, (cx) => { const now = shownHere(); if (now && !this.wasShown) { this.h.focus(); cx.notify(); } this.wasShown = now; });
+    cx.timer.every(200, (cx) => {
+      const now = shownHere(); if (now && !this.wasShown) { this.h.focus(); cx.notify(); } this.wasShown = now;
+      // A dialog keeps the keyboard: when it slips away (a click on something that takes no focus), it comes back,
+      // so no key goes to the terminal behind. Not while the filter or an answer field has it.
+      if (props()?.overlay) this.keepKeys();
+    });
     // As a dialog (⌘⌥F), like the git graph and the file browser: the keyboard is on it at once.
     if (props()?.overlay) { this.h.focus(); cx.timer.after(300, () => this.h.focus()); }
   }
@@ -162,21 +171,98 @@ export default class FleetBoard extends View {
     else if (is("b") && b) this.inBeads(b);
     else if (is("escape") && this.filter) { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; }
     else if (is("escape") && this.openId) this.openId = null;
+    else if (is("escape") && this.win) this.unpin();
     // Esc undoes one thing at a time (the filter, then the open bead); with nothing left, it closes the column.
     else if (is("escape")) closeSide("fleet-board");
     else if (is("0")) this.showDone = !this.showDone; // digits change what's shown
-    else if (is("[")) this.zoom(SPANS[Math.max(0, SPANS.indexOf(this.span) - 1)]);
-    else if (is("]")) this.zoom(SPANS[Math.min(SPANS.length - 1, SPANS.indexOf(this.span) + 1)]);
+    // [ ] zoom: through the spans up to now, or a window pinned in the past, around its middle.
+    else if (is("[")) { if (this.pinnedWin()) this.pinWindow(zoomWindow(this.pinnedWin(), 0.5)); else this.zoom(SPANS[Math.max(0, SPANS.indexOf(this.span) - 1)]); }
+    else if (is("]")) { if (this.pinnedWin()) this.pinWindow(zoomWindow(this.pinnedWin(), 2)); else this.zoom(SPANS[Math.min(SPANS.length - 1, SPANS.indexOf(this.span) + 1)]); }
+    // < > the wave before / after (past the last one, back to now); { } move the window by a quarter.
+    else if (is("<", "shift-,", "shift-<")) this.stepWave(-1);
+    else if (is(">", "shift-.", "shift->")) this.stepWave(1);
+    else if (is("{", "shift-[", "shift-{")) this.panLanes(-0.25);
+    else if (is("}", "shift-]", "shift-}")) this.panLanes(0.25);
     else if (is("r")) this.refresh(cx, true);
-    else return;
+    // A dialog keeps its plain keys, used or not: one it lets through types into the terminal behind it.
+    // ⌘, ctrl and alt chords still reach Herdr (⌘⌥F closes it, ⌘← ⌘→ change the run).
+    else if (!props()?.overlay || /(^|-)(cmd|ctrl|alt|fn)-/.test(k)) return;
     cx.stop_propagation();
     cx.notify();
   }
 
-  // Lanes' time window (one of SPANS), kept for the next session.
+  // In a dialog, the keyboard back on the board unless one of its fields has it.
+  keepKeys() {
+    if (props()?.overlay && !this.filtering && !this.typing && !this.h.is_focused()) this.h.focus();
+  }
+
+  // Lanes' time window (one of SPANS), kept for the next session; it follows now again.
   zoom(span) {
-    this.span = span;
+    this.span = span; this.win = null;
     setShared("fleet-board.span", span);
+  }
+
+  // ---------- Lanes pinned to a window in the past (lanesAt: what the last Lanes frame showed)
+
+  pinnedWin() { return this.win?.key === this.runKey() && this.lanesAt ? { from: this.lanesAt.from, to: this.lanesAt.to } : null; }
+  // What Lanes shows now, pinned or not.
+  shownWin() { return this.lanesAt ? { from: this.lanesAt.from, to: this.lanesAt.to } : null; }
+  pinWindow(w, wave = null) {
+    const a = this.lanesAt;
+    if (!a) return;
+    this.win = { ...clampWindow(w, a.first, a.head), wave, key: this.runKey() };
+    this.view = "lanes";
+  }
+  unpin() { this.win = null; this.sel = null; }
+  zoomWave(w) {
+    const r = this.lanesAt?.ranges.get(w);
+    if (r) this.pinWindow(waveWindow(r), w);
+  }
+  // The wave before or after the one shown (or the window's middle); after the last, back to now.
+  stepWave(dir) {
+    const a = this.lanesAt;
+    if (!a || this.view !== "lanes") return;
+    const pinned = this.pinnedWin(), w = this.win?.wave;
+    if (!pinned && dir > 0) return;
+    const at = !pinned ? Infinity : w !== null && w !== undefined && a.ranges.has(w) ? a.ranges.get(w).from : (pinned.from + pinned.to) / 2;
+    const next = nextWave(a.ranges, at, dir);
+    if (next !== null) this.zoomWave(next);
+    else if (dir > 0) this.unpin();
+  }
+  panLanes(f) {
+    const w = this.shownWin();
+    if (w && this.view === "lanes") this.pinWindow(panWindow(w, f * (w.to - w.from)));
+  }
+  // Over the axis or a lane: ⌘ (or ctrl, alt) with the wheel zooms at the pointer; a sideways swipe moves the
+  // window. A plain up/down scroll still scrolls the lanes.
+  wheelLanes(e, cx) {
+    const w = this.shownWin();
+    if (!w || !e.bounds || !e.local_position) return;
+    const at = Math.max(0, Math.min(1, e.local_position.x / e.bounds.width)), m = e.modifiers;
+    if ((m.platform || m.control || m.alt) && e.delta.y) this.pinWindow(zoomWindow(w, Math.exp(-e.delta.y / 200), at));
+    else if (Math.abs(e.delta.x) > Math.abs(e.delta.y)) this.pinWindow(panWindow(w, (-e.delta.x / e.bounds.width) * (w.to - w.from)));
+    else return;
+    cx.stop_propagation(); cx.notify();
+  }
+  pinchLanes(e, cx) {
+    const w = this.shownWin();
+    if (!w || !e.bounds || !e.local_position || !e.delta) return;
+    this.pinWindow(zoomWindow(w, 1 / (1 + e.delta), Math.max(0, Math.min(1, e.local_position.x / e.bounds.width))));
+    cx.stop_propagation(); cx.notify();
+  }
+  // The drag across the axis follows the pointer anywhere over the pane and zooms in on release (a click alone
+  // does nothing).
+  selMove(e, cx) {
+    if (!this.sel) return;
+    this.sel.b = Math.max(0, Math.min(1, (e.position.x - this.sel.x) / this.sel.w)); cx.notify();
+  }
+  selEnd(cx) {
+    const s = this.sel, w = this.shownWin();
+    if (!s) return;
+    this.sel = null;
+    const lo = Math.min(s.a, s.b), hi = Math.max(s.a, s.b);
+    if (w && (hi - lo) * s.w >= 6) this.pinWindow({ from: w.from + lo * (w.to - w.from), to: w.from + hi * (w.to - w.from) });
+    cx.notify();
   }
 
   // ---------- pieces
@@ -192,9 +278,9 @@ export default class FleetBoard extends View {
         if (Math.abs((this.width ?? 0) - size.width) > 1 || Math.abs((this.height ?? 0) - size.height) > 1) { this.width = size.width; this.height = size.height; cx.notify(); }
       })
       // The tail's top edge drags over the whole pane; a drag ends when the pointer leaves it (a release outside never arrives).
-      .on_mouse_move((e, cx) => this.tailSize.move(e, cx))
-      .on_mouse_up("left", (_e, cx) => this.tailSize.end(this.height, cx))
-      .on_hover((hovered, cx) => { if (!hovered) this.tailSize.end(this.height, cx); })
+      .on_mouse_move((e, cx) => { this.tailSize.move(e, cx); this.selMove(e, cx); })
+      .on_mouse_up("left", (_e, cx) => { this.tailSize.end(this.height, cx); this.selEnd(cx); })
+      .on_hover((hovered, cx) => { if (!hovered) { this.tailSize.end(this.height, cx); this.selEnd(cx); } })
       .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx)), t, this.h.is_focused() || this.filtering);
     // No run shown yet: the same header (the run list behind its title), then what's missing.
     if (!this.s) {

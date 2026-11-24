@@ -84,18 +84,26 @@ export function normalize(raw, cwd) {
 }
 
 // The epic-level phase, from the run's epic.* events (events.jsonl; `fleet status --json` carries neither):
-//   check: the last epic check on the epic branch: { state: "running", head, since } or { state: "pass" | "fail",
-//     head, at, log }; null before the first.
+//   check: the last epic check on the epic branch: { state: "running", head, since }, { state: "pass" | "fail",
+//     head, at, log }, or { state: "stopped", head, at, lastPass: { head, at } | null } (its wave stopped it with
+//     no result: not checked, never a failure); null before the first. Only status "fail" (or passed: false) fails.
 //   status: the last epic.status: statusOf's shape (pr: the epic's PR to main, or null).
 export function epicPhase(lines) {
-  let check = null, status = null;
+  let check = null, status = null, lastPass = null;
   for (const line of lines) {
     let ev;
     try { ev = JSON.parse(line); } catch { continue; }
     const d = ev?.detail ?? {};
     if (ev?.type === "epic.check") {
-      check = d.status === "started" ? { state: "running", head: d.head ?? null, since: ms(ev.ts) }
-        : { state: d.status === "pass" ? "pass" : "fail", head: d.head ?? null, at: ms(ev.ts), log: d.log ?? null };
+      const head = d.head ?? null, at = ms(ev.ts);
+      const state = d.status === "started" ? "running"
+        : d.status === "pass" || d.passed === true ? "pass"
+        : d.status === "fail" || d.passed === false ? "fail"
+        : "stopped"; // "stopped" (or anything else with no result): not checked
+      check = state === "running" ? { state, head, since: at }
+        : state === "stopped" ? { state, head, at, lastPass }
+        : { state, head, at, log: d.log ?? null };
+      if (state === "pass") lastPass = { head, at };
     } else if (ev?.type === "epic.status") {
       status = statusOf(d);
     }

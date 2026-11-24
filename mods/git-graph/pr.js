@@ -896,16 +896,19 @@ export const PrMethods = {
     if (pr.status === "ready") { this.prShape(); this.prRenote(); }
   },
 
-  // A plan item, as a finding: reached (its card marked), its line in the middle of the diff when it has one.
-  gotoPlan(i, cx) {
+  // A plan item, as a finding: reached (its card marked, its fix and code on it), its line in the middle of the
+  // diff when the PR changes its file. A file outside the diff opens in the file viewer only from its place link
+  // (`viewer`): the card shows its code instead.
+  gotoPlan(i, cx, viewer = false) {
     const x = this.pr.plan?.items?.[i];
     if (!x) return;
     this.pr.pAt = i; this.pr.fAt = -1; this.pr.lAt = -1; this.pr.tAt = -1; this.pr.dAt = -1;
     if (this.pr.planRow !== x.id) this.pr.planRow = null;
-    if (!x.path) { this.prRenote(); cx.notify(); return; }
-    this.pr.range = { path: x.path, from: x.line, to: x.end_line ?? x.line };
+    this.pr.range = x.path ? { path: x.path, from: x.line, to: x.end_line ?? x.line } : null;
     this.prRenote();
-    this.gotoLine(x.path, x.line, cx);
+    const files = this.details?.orig?.files ?? this.details?.files ?? [];
+    if (x.path && (viewer || files.some((f) => f.path === x.path))) this.gotoLine(x.path, x.line, cx);
+    else cx.notify();
   },
 
   // ⏎ on an item (or a click on its verdict): its verdict row, open or closed.
@@ -992,6 +995,9 @@ export const PrMethods = {
     const pr = this.pr, here = i === pr.pAt, row = open && pr.planRow === x.id, c = planColor(t);
     const vc = x.verdict === "fix" ? t.ansi2 : x.verdict === "skip" ? t.dim : x.verdict === "won't-fix" ? t.ansi1 : t.accent;
     const sent = pr.planSent?.id === x.id ? pr.planSent : null;
+    // Reached: the fix of the finding it takes up, and its code, unless the diff's note beside the code says them.
+    const whole = here && !(x.path && this.prInDiff(x.path, x.line));
+    const fix = whole && x.verdict === "fix" && x.kind === "finding" ? (pr.findings ?? []).find((f) => f.id === x.id)?.fix : null;
     return v_flex().id(`pr-plan-${x.id}`).px(8).py(5).gap(3).rounded(6).cursor_pointer().bg(here ? t.hover : alpha(t.foreground, "08")).hover((e) => e.bg(t.hover))
       .on_click((_e, cx) => this.gotoPlan(i, cx))
       .child(h_flex().gap(6).items_center()
@@ -1000,10 +1006,14 @@ export const PrMethods = {
         .child(div().id(`pr-plan-v-${x.id}`).flex_none().px(5).rounded(4).text_size(10.5).font_semibold().text_color(vc).bg(alpha(vc, row ? "33" : "18"))
           .when(open, (e) => e.cursor_pointer().tooltip(tipText("Change its verdict (⏎ on the item)")).on_click((_e, cx) => { cx.stop_propagation(); this.prPlanRow(x.id, cx); }))
           .child(`${x.verdict}${x.duplicate_of ? ` of ${x.duplicate_of}` : ""}`))
-        .when(Boolean(x.path), (e) => e.child(this.prPlace(t, mono, x.path, x.line, x.end_line, (cx) => this.gotoPlan(i, cx))))
+        .when(Boolean(x.path), (e) => e.child(this.prPlace(t, mono, x.path, x.line, x.end_line, (cx) => this.gotoPlan(i, cx, true))))
         .when(Boolean(x.who), (e) => e.child(div().flex_none().max_w(140).truncate().text_size(11).text_color(t.dim).child(x.who)))
         .child(div().flex_1()))
       .child(div().w_full().text_size(12).text_color(x.verdict === "skip" ? t.muted : t.foreground).child(x.text ?? ""))
+      .when(Boolean(fix), (e) => e.child(h_flex().gap(6).items_start()
+        .child(div().flex_none().pt(1).text_size(10).font_semibold().text_color(t.ansi2).child("FIX"))
+        .child(div().flex_1().min_w(0).text_size(11.5).text_color(t.muted).child(fix))))
+      .when(whole && Boolean(x.path && x.line), (e) => e.child(this.prCode(t, mono, x.path, x.line, x.end_line)))
       .when(x.verdict === "fix" && Boolean(x.proof), (e) => e.child(div().w_full().text_size(11).text_color(t.muted).child(`proof: ${x.proof}`)))
       .when(Boolean(x.reply), (e) => e.child(div().w_full().text_size(11).text_color(t.muted).child(`reply: ${x.reply}`)))
       .when(Boolean(sent), (e) => e.child(div().w_full().text_size(10.5).text_color(c).child(`sent: ${sent.words}`)))
@@ -1053,6 +1063,13 @@ export const PrMethods = {
     // Not dragged: the notes' own height (their text measured, plus the panel's padding) up to the cap.
     const want = this.notesSplit ?? (this.notesContent ? Math.min(this.notesContent + 20, this.notesCap()) : this.notesCap());
     return Math.round(Math.max(40, Math.min(want, this.notesRoom() - 3 * 24)));
+  },
+
+  // A height dragged to (remembered), or null: back to fitting what they say.
+  setNotesHeight(h, cx) {
+    this.notesSplit = h === null ? null : Math.round(h);
+    setShared("git-graph.notes-dragged", this.notesSplit);
+    cx.notify();
   },
 
   // The notes' element: always a definite height (a scroll area with only a maximum doesn't scroll): dragged, or

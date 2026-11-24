@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { dur, timeline, graph, shortener, natural, wordsOf, readOnly, shq, gateText, fixRounds, tipText, fleetTailLines } from "../../mods/fleet-board/model.js";
+import { dur, timeline, graph, shortener, natural, wordsOf, readOnly, shq, gateText, fixRounds, tipText, fleetTailLines, clampWindow, zoomWindow, panWindow, waveRanges, waveWindow, nextWave, MIN_WINDOW } from "../../mods/fleet-board/model.js";
 import { normalize, gatesOf, summarize, runKey, parseRuns, parseSnapshot, failure, changedRepos, relevant, stateRoot, epicPhase, statusOf, currentStatus, followupCounts } from "../../mods/fleet-board/snapshot.js";
 
 const T = (min) => new Date(Date.UTC(2026, 10, 16, 10, min)).toISOString();
@@ -163,6 +163,12 @@ test("the epic phase: the last epic check (running, passed, failed) and the last
   assert.equal(epicPhase([started, passed]).check.state, "pass");
   const failed = ev("epic.check", "2026-11-17T23:00:00+00:00", { head: "abc", status: "fail", log: "/l" });
   assert.deepEqual(epicPhase([failed]).check, { state: "fail", head: "abc", at: Date.parse("2026-11-17T23:00:00Z"), log: "/l" });
+  assert.equal(epicPhase([ev("epic.check", "2026-11-17T23:00:00+00:00", { head: "abc", passed: false })]).check.state, "fail");
+  // A check its wave stopped has no result: not checked, never failed, with the last green head.
+  const stopped = ev("epic.check", "2026-11-17T23:05:00+00:00", { head: "05e25658", status: "stopped" });
+  assert.deepEqual(epicPhase([passed, started, stopped]).check,
+    { state: "stopped", head: "05e25658", at: Date.parse("2026-11-17T23:05:00Z"), lastPass: { head: "cbcdd52e74fd", at: Date.parse("2026-11-17T22:44:18Z") } });
+  assert.equal(epicPhase([failed, stopped]).check.lastPass, null);
   assert.deepEqual(epicPhase([]), { check: null, status: null });
   const pr = (v) => epicPhase([ev("epic.status", "2026-11-17T23:00:00+00:00", { closed: 6, total: 6, followups: [], pr: v })]).status.pr;
   assert.deepEqual(pr("https://github.com/acme/api/pull/42"), { url: "https://github.com/acme/api/pull/42", label: "api#42" });
@@ -253,4 +259,37 @@ test("a parked bead whose gate you resolved waits for the next wave, not for you
   const open = raw();
   open.beads[1].gates = [{ id: "g1", kind: "questions", opened: T(10), resolved: null }];
   assert.equal(normalize(open, "/r").beads[1].state, "parked", "an open gate still waits for you");
+});
+
+test("Lanes' window in the past: zoom keeps the time under the pointer, pan moves it, clamp keeps it in the run", () => {
+  const m = 60_000;
+  assert.deepEqual(zoomWindow({ from: 0, to: 100 * m }, 0.5, 0.5), { from: 25 * m, to: 75 * m });
+  assert.deepEqual(zoomWindow({ from: 0, to: 100 * m }, 2, 0), { from: 0, to: 200 * m });
+  assert.deepEqual(panWindow({ from: 10, to: 20 }, -5), { from: 5, to: 15 });
+  // Never past the run's end, never much before its first step, never shorter than MIN_WINDOW.
+  assert.deepEqual(clampWindow({ from: 50 * m, to: 150 * m }, 0, 120 * m), { from: 20 * m, to: 120 * m });
+  assert.deepEqual(clampWindow({ from: -100 * m, to: 0 }, 0, 1000 * m), { from: -5 * m, to: 95 * m });
+  const tiny = clampWindow({ from: 500 * m, to: 500 * m + 1000 }, 0, 1000 * m);
+  assert.equal(tiny.to - tiny.from, MIN_WINDOW);
+  // Wider than the whole run: the run, with a little room before its first step.
+  const wide = clampWindow({ from: -1e9, to: 100 * m }, 0, 100 * m);
+  assert.ok(wide.to === 100 * m && wide.from < 0 && wide.from > -10 * m);
+});
+
+test("waves: each one's time from its steps, a window around it, and the one before or after", () => {
+  const m = 60_000;
+  const beads = [
+    { history: [{ wave: 1, start: 2 * m, end: 10 * m, outcome: "done" }, { wave: 2, start: 30 * m, end: 40 * m, outcome: "pass" }] },
+    { history: [{ wave: 1, start: 5 * m, end: 20 * m, outcome: "done" }, { wave: 3, start: 50 * m, end: null }, { wave: 2, start: null, end: 41 * m, outcome: "merged" }] },
+  ];
+  const r = waveRanges(beads, 60 * m);
+  assert.deepEqual(r.get(1), { from: 2 * m, to: 20 * m });
+  assert.deepEqual(r.get(2), { from: 30 * m, to: 40 * m }); // a step without a start counts for nothing
+  assert.deepEqual(r.get(3), { from: 50 * m, to: 60 * m }); // running: up to head
+  const w = waveWindow(r.get(1));
+  assert.ok(w.from < 2 * m && w.to > 20 * m && Math.abs((w.from + w.to) / 2 - 11 * m) < 1);
+  assert.equal(nextWave(r, Infinity, -1), 3);
+  assert.equal(nextWave(r, 30 * m, -1), 1);
+  assert.equal(nextWave(r, 30 * m, 1), 3);
+  assert.equal(nextWave(r, 50 * m, 1), null);
 });

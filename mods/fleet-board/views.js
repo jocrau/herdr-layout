@@ -3,7 +3,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Textarea } from "gpui-base";
 import { theme, run } from "herdr";
-import { STEPS, VIEWS, SPANS, fleetTailLines, SECTIONS, ROW, OK, PHASES, phaseOf, dur, spanLabel, AGENT_STEPS, hm, timeline, gateText, asks, fixRounds, fixSessions, natural, mergedAt, tipText } from "./model.js";
+import { STEPS, VIEWS, SPANS, fleetTailLines, SECTIONS, ROW, OK, PHASES, phaseOf, dur, spanLabel, AGENT_STEPS, hm, timeline, gateText, asks, fixRounds, fixSessions, natural, mergedAt, tipText, clampWindow, waveRanges } from "./model.js";
 import { phaseColor, shaped, swatch } from "./ui.js";
 import { followupCounts } from "./snapshot.js";
 import { shown } from "./env.js";
@@ -191,6 +191,7 @@ export const ViewsMethods = {
     else if (chk?.state === "pass") rows.push(row("✓", t.ansi2, `Epic check passed at ${sha(chk.head)} · ${dur(now - (chk.at ?? now))} ago`, t.muted));
     else if (chk?.state === "fail") rows.push(row("✗", t.ansi1, `Epic check failed at ${sha(chk.head)} · ${dur(now - (chk.at ?? now))} ago`, t.ansi1,
       chk.log ? btn("epic-log", "log", chk.log, () => this.inTerminal(["less", "+G", chk.log], `epic check ${e.id}`)) : null));
+    else if (chk?.state === "stopped") rows.push(row("○", t.dim, `Epic check stopped at ${sha(chk.head)} · ${dur(now - (chk.at ?? now))} ago, not checked${chk.lastPass ? ` · last passed at ${sha(chk.lastPass.head)}` : ""}`, t.muted));
     if (st) {
       const open = Math.max(0, st.total - st.closed), { triage, rest, known } = followupCounts(st);
       rows.push(row(open ? "○" : "✓", open ? t.dim : t.ansi2, `${st.closed} of ${st.total} epic beads done${open ? ` · ${open} open` : ""}`, t.muted));
@@ -305,10 +306,14 @@ export const ViewsMethods = {
       .child(div().flex_1())
       .when(Boolean(this.busy) && !this.drawn?.has(this.busy.bead), (el) => el.child(div().pb(5).px(4).text_size(11).text_color(t.accent).loop("opacity", { from: 0.4, to: 1, period: 900 }).child(`${this.busy.text}${this.busy.bead ? ` ${this.busy.bead}` : ""}…`)))
       .when(this.loading, (el) => el.child(div().pb(5).px(4).text_size(11).text_color(t.dim).loop("opacity", { from: 0.3, to: 1, period: 900 }).child("●")))
-      .when(this.view === "lanes", (el) => el.child(div().id("span").pb(5).px(4).text_size(11.5).text_color(t.muted)
-        .hover((x) => x.text_color(t.foreground)).tooltip("Time shown: [ ] or click")
-        .on_click((_e, cx) => { this.zoom(SPANS[(SPANS.indexOf(this.span) + 1) % SPANS.length]); cx.notify(); })
-        .child(spanLabel(this.span))));
+      .when(this.view === "lanes", (el) => {
+        // Pinned in the past: the window's times and × (back to now); else the span up to now ([ ] or a click).
+        const pinned = this.win?.key === this.runKey() && this.lanesAt;
+        return el.child(div().id("span").pb(5).px(4).text_size(11.5).text_color(pinned ? t.accent : t.muted)
+          .hover((x) => x.text_color(t.foreground)).tooltip(pinned ? "Back to now: click or esc" : "Time shown: [ ] or click")
+          .on_click((_e, cx) => { if (pinned) this.unpin(); else this.zoom(SPANS[(SPANS.indexOf(this.span) + 1) % SPANS.length]); cx.notify(); })
+          .child(pinned ? `${this.win.wave !== null && this.win.wave !== undefined ? `w${this.win.wave} · ` : ""}${hm(this.lanesAt.from)}–${hm(this.lanesAt.to)} ×` : spanLabel(this.span)));
+      });
   },
 
   // What the row adds to its section: the step it is at, the gate, what it waits for. Nothing for queued and
@@ -329,7 +334,7 @@ export const ViewsMethods = {
   // The bead's id as every view draws it: monospace, the critical path in the accent colour.
   idCell(t, b, g, short, mono) {
     return div().min_w(0).truncate().font_family(mono).text_size(ROW.id)
-      .text_color(g.critical.has(b.id) ? t.accent : b.state === "done" ? t.muted : t.foreground).child(short(b.id));
+      .text_color(g.critical.has(b.id) ? t.accent : ["done", "dropped"].includes(b.state) ? t.muted : t.foreground).child(short(b.id));
   },
 
   // A title's colour by state, the same in every view: what's live is bright, what's over is dim.
@@ -622,13 +627,18 @@ export const ViewsMethods = {
     const s = this.s;
     // Live: up to now. Otherwise up to the last thing that happened, so a finished run still shows its end.
     const live = s.epic.wave.running || s.beads.some((b) => b.state === "running");
-    const starts = s.beads.flatMap((b) => b.history.map((h) => h.start));
+    const starts = s.beads.flatMap((b) => b.history.map((h) => h.start)).filter((x) => Number.isFinite(x) && x > 0);
     const lastEnd = Math.max(0, ...s.beads.flatMap((b) => b.history.map((h) => h.end ?? h.start)));
-    const to = live || !lastEnd ? now : lastEnd;
+    const head = live || !lastEnd ? now : lastEnd;
+    const first = starts.length ? Math.min(...starts) : head - 3600000;
+    // A window pinned in the past (a drag on the axis, a wave, < > { } or ⌘-scroll), else the last [ ] span up to head.
+    const win = this.win?.key === this.runKey() ? clampWindow(this.win, first, head) : null;
     // "fit": from the run's first step, with a little room on the left; at least ten minutes.
-    const span = this.span === "fit" ? Math.max(600000, starts.length ? (to - Math.min(...starts)) * 1.02 : 3600000) : this.span;
-    const from = to - span;
-    const endOf = (h) => h.end ?? (h.outcome ? h.start : to);
+    const span = win ? win.to - win.from : this.span === "fit" ? Math.max(600000, starts.length ? (head - first) * 1.02 : 3600000) : this.span;
+    const to = win ? win.to : head, from = to - span;
+    const ranges = waveRanges(s.beads, head);
+    this.lanesAt = { from, to, span, head, first, ranges }; // what the keys and the mouse move from
+    const endOf = (h) => h.end ?? (h.outcome ? h.start : head);
     const pos = (ms) => `${Math.max(0, Math.min(100, ((ms - from) / span) * 100))}%`;
     const width = (a, b) => `${Math.max(0.5, ((Math.min(b, to) - Math.max(a, from)) / span) * 100)}%`;
     const inWindow = (h) => endOf(h) > from && h.start < to;
@@ -637,9 +647,7 @@ export const ViewsMethods = {
     const firstIn = (b) => Math.min(...b.history.filter(inWindow).map((h) => h.start));
     shown.sort((a, b) => (order[a.state] ?? 4) - (order[b.state] ?? 4) || firstIn(a) - firstIn(b));
     // Where each wave began, inside the window.
-    const waves = new Map();
-    for (const b of s.beads) for (const h of b.history) if (h.wave !== null && h.wave !== undefined) waves.set(h.wave, Math.min(waves.get(h.wave) ?? Infinity, h.start));
-    const marks = [...waves].filter(([, at]) => at > from && at < to).sort((a, b) => a[1] - b[1]);
+    const marks = [...ranges].map(([w, r]) => [w, r.from]).filter(([, at]) => at > from && at < to).sort((a, b) => a[1] - b[1]);
     // Labels only where they don't run into the one before (about 6% of the width apart).
     let lastLabel = -Infinity;
     const labelled = marks.filter(([, at]) => { const x = ((at - from) / span) * 100; if (x - lastLabel < 6) return false; lastLabel = x; return true; });
@@ -647,14 +655,38 @@ export const ViewsMethods = {
     // row were noise once an epic had run thirty waves.
     const ticks = marks.map(([, at]) => div().absolute().top(26).h(5).w(1).bg(t.muted).left(pos(at)));
     const quarter = span / 4;
+    // Pinned: clock times (the window's day on the left); else how long ago, up to now or the run's end.
+    // (toLocaleString's options aren't honoured here: the day is spelled out by hand.)
+    const day = (ms) => { const d = new Date(ms); return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()]} ${d.getDate()}`; };
+    const clock = (ms) => (span >= 2 * 86400000 ? `${day(ms)} ${hm(ms)}` : span < 600000 ? new Date(ms).toTimeString().slice(0, 8) : hm(ms));
+    const zoomed = this.win?.wave ?? null, zr = zoomed !== null ? ranges.get(zoomed) : null;
+    const sel = this.sel ? [Math.min(this.sel.a, this.sel.b), Math.max(this.sel.a, this.sel.b)] : null;
     const axis = h_flex().px(10).pt(8).pb(2).gap(6)
       .child(div().w(this.idW + 18).flex_none().text_size(10.5).text_color(t.dim)
-        .child(live ? "" : new Date(to).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })))
-      .child(div().flex_1().relative().h(31)
+        .child(win ? day(from) : live ? "" : new Date(to).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })))
+      // Drag across it to look at that time; a wave's number shows that wave; a double-click goes back to now.
+      .child(div().id("axis").flex_1().relative().h(31).cursor_crosshair()
+        .tooltip(win ? "Drag to zoom in · < > waves · { } move · [ ] zoom · esc or double-click: back to now" : "Drag to zoom into a time · click a wave · < > waves · ⌘-scroll zooms")
+        .on_mouse_down("left", (e, cx) => {
+          this.keepKeys();
+          if (e.click_count >= 2) { this.unpin(); cx.notify(); return; }
+          if (!e.bounds || !e.local_position) return;
+          const f = Math.max(0, Math.min(1, e.local_position.x / e.bounds.width));
+          this.sel = { a: f, b: f, x: e.bounds.x, w: e.bounds.width }; cx.notify();
+        })
+        .on_scroll_wheel((e, cx) => this.wheelLanes(e, cx))
+        .on_pinch((e, cx) => this.pinchLanes(e, cx))
+        .when(Boolean(zr), (el) => el.child(div().absolute().top(12).h(19).rounded(2).bg(t.hover).left(pos(zr.from)).w(width(zr.from, zr.to))))
+        .when(Boolean(sel), (el) => el.child(div().absolute().top(0).h(31).rounded(2).bg(t.accent).opacity(0.25)
+          .left(`${sel[0] * 100}%`).w(`${Math.max(0.3, (sel[1] - sel[0]) * 100)}%`)))
         .children([4, 3, 2, 1, 0].map((k, i) => (k ? div().absolute().left(`${i * 25}%`) : div().absolute().right(0))
-          .top(0).text_size(10.5).text_color(t.dim).child(k ? `-${dur(k * quarter)}` : live ? "now" : "end")))
+          .top(0).text_size(10.5).text_color(t.dim).child(win ? clock(to - k * quarter) : k ? `-${dur(k * quarter)}` : live ? "now" : "end")))
         .children(ticks)
-        .children(labelled.map(([w, at]) => div().absolute().top(12).text_size(10).text_color(t.dim).left(pos(at)).child(`w${w}`))));
+        .children(labelled.map(([w, at]) => div().id(`wave-${w}`).absolute().top(12).px(2).rounded(2).text_size(10).cursor_pointer()
+          .text_color(w === zoomed ? t.foreground : t.dim).hover((x) => x.text_color(t.foreground).bg(t.hover)).left(pos(at))
+          .tooltip(`Wave ${w}: ${hm(ranges.get(w).from)}–${hm(ranges.get(w).to)}, ${dur(ranges.get(w).to - ranges.get(w).from)} · click to zoom in`)
+          .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.keepKeys(); this.zoomWave(w); cx.notify(); })
+          .child(`w${w}`))));
     // How many steps ran at once: the fleet's parallelism.
     const buckets = 48, max = Math.max(1, s.epic.workers.max ?? 1);
     const conc = Array.from({ length: buckets }, (_, k) => {
@@ -668,7 +700,9 @@ export const ViewsMethods = {
     const rows = shown.map((b) => this.item(t, b, g, now, `lane-${b.id}`, h_flex().px(10).h(ROW.h).gap(6).items_center()
       .child(this.glyph(t, b))
       .child(this.idCell(t, b, g, short, mono).w(this.idW).flex_none())
-      .child(div().flex_1().relative().h(12)
+      // The bar's row, the full height of the line, so ⌘-scroll and a sideways swipe reach it between the bars.
+      .child(div().flex_1().h_full().flex().items_center().on_scroll_wheel((e, cx) => this.wheelLanes(e, cx)).on_pinch((e, cx) => this.pinchLanes(e, cx))
+        .child(div().w_full().relative().h(12)
         .children(b.history.filter(inWindow).map((h, i) => {
           const running = h.end === null && !h.outcome, failed = !running && !OK.has(h.outcome);
           const bar = shaped(div().id(`seg-${b.id}-${i}`).absolute().left(pos(h.start)).w(width(h.start, endOf(h))), t, h.step)
@@ -680,12 +714,12 @@ export const ViewsMethods = {
           div().absolute().top(0).h(12).w(2).rounded(1).bg(t.ansi1).left(pos(endOf(h)))))
         .when(b.state === "waiting for CI", (el) => {
           const at = b.history.filter((h) => h.step === "merge").at(-1)?.start ?? b.history.at(-1)?.end;
-          return at ? el.child(shaped(div().absolute().left(pos(at)).w(width(at, to)), t, "merge").loop("opacity", { from: 0.35, to: 1, period: 1400 })) : el;
+          return at && at < to ? el.child(shaped(div().absolute().left(pos(at)).w(width(at, head)), t, "merge").loop("opacity", { from: 0.35, to: 1, period: 1400 })) : el;
         })
         // Every wait for you: from the gate opening to your answer (or to now while it waits).
-        .children(b.gates.filter((w) => (w.resolved ?? to) > from && w.opened < to).map((w, i) =>
-          div().id(`wait-${b.id}-${i}`).absolute().top(5).h(2).rounded(1).bg(t.ansi1).left(pos(w.opened)).w(width(w.opened, w.resolved ?? to))
-            .tooltip(tipText(`waited for you: ${w.shown ?? w.kind}, ${dur((w.resolved ?? now) - w.opened)}${w.resolved ? (w.how ? ` (${w.how})` : "") : " so far"}${w.reason ? `\n${w.reason}` : ""}`)))))));
+        .children(b.gates.filter((w) => (w.resolved ?? head) > from && w.opened < to).map((w, i) =>
+          div().id(`wait-${b.id}-${i}`).absolute().top(5).h(2).rounded(1).bg(t.ansi1).left(pos(w.opened)).w(width(w.opened, w.resolved ?? head))
+            .tooltip(tipText(`waited for you: ${w.shown ?? w.kind}, ${dur((w.resolved ?? now) - w.opened)}${w.resolved ? (w.how ? ` (${w.how})` : "") : " so far"}${w.reason ? `\n${w.reason}` : ""}`))))))));
     const legend = h_flex().px(10).py(8).gap(8).flex_wrap()
       .children(PHASES.map((ph) => h_flex().id(`ph-${ph.id}`).gap(4).items_center().h(12)
         .tooltip(`${ph.steps.filter((x) => STEPS.includes(x)).join(", ")}: ${ph.agent ? "an agent at work (a full bar)" : "no agent (a thin line)"}`)
@@ -693,7 +727,7 @@ export const ViewsMethods = {
         .child(div().text_size(11).text_color(t.dim).child(ph.label))))
       .child(h_flex().gap(4).items_center().h(12).child(div().w(2).h(12).rounded(1).bg(t.ansi1)).child(div().text_size(11).text_color(t.dim).child("sent back")))
       .child(h_flex().gap(4).items_center().h(12).child(div().w(14).h(2).bg(t.ansi1)).child(div().text_size(11).text_color(t.dim).child("waiting for you")));
-    if (!rows.length) rows.push(div().px(10).py(6).text_size(12).text_color(t.dim).child(`Nothing ran in this ${dur(span)}: ] shows more.`));
+    if (!rows.length) rows.push(div().px(10).py(6).text_size(12).text_color(t.dim).child(win ? `Nothing ran from ${clock(from)} to ${clock(to)}: [ zooms out, { } move, esc goes back to now.` : `Nothing ran in this ${dur(span)}: ] shows more.`));
     // The time axis and the busy row stay put above the scrolling lanes (render() draws them).
     this.pinned = v_flex().border_b_1().border_color(t.border).child(axis).child(concRow);
     return [...rows, legend];
@@ -718,7 +752,9 @@ export const ViewsMethods = {
       ["e", "every fleet run, in a list under the title (j k, ⏎ shows one, esc closes)"],
       ["⌘← ⌘→", "the previous / next fleet run"],
       ["0", "show or fold Done"],
-      ["[ ]", "zoom Lanes"],
+      ["[ ]", "zoom Lanes (or drag across its time axis, ⌘-scroll)"],
+      ["< >", "Lanes: the wave before / after (click a wave's number); after the last, back to now"],
+      ["{ }", "Lanes: move back / on in time (or swipe sideways); esc goes back to now"],
       ["r", "read the run again"],
       ["?", "this list (any key closes it)"],
     ];
