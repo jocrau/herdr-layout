@@ -6,7 +6,7 @@ import { exec, readTextFile, settings, props, shared, setShared, openOverlay, no
 import { fileArgs, joinFiles, diffArgs, diffRows, baseCandidates, isBaseBranch, rangeFileArgs, rangeDiffArgs, READ, wrapDiff, ignoringSpace, fileRows, mentions, commitUrl, branchUrl, issueUrl, splitRemote } from "./git.js";
 import { openDialog, showChanges } from "./act.js";
 import { ago, stamp, count, keep, VIEWER_CLOSED, ROW, DIFF_ROW, DETAILS } from "./common.js";
-import { exists, background, openInEditor } from "./tools.js";
+import { background } from "./tools.js";
 import { splitter } from "./lib/splitter.js";
 import { alpha } from "./lib/prrows.js";
 
@@ -509,15 +509,19 @@ export const ReviewMethods = {
     if (!commit || !file || file.fold) return;
     const pr = this.pr?.status === "ready" && this.selected === this.pr.head ? this.pr : null;
     const root = pr?.root ?? this.root, on = pr ? pr.on ?? null : this.on ?? null;
-    const at = { commit, file, since: this.details?.since, root, on };
-    cx.spawn(async () => {
-      const there = file.status !== "D" && (await exec("test", ["-f", file.path], { cwd: root, on }).then((r) => r.code === 0, () => false));
-      const checkedOut = commit.uncommitted || (await exec("git", ["rev-parse", "HEAD"], { cwd: root, on }).then((r) => r.stdout.trim() === commit.hash, () => false));
-      if (!there || (pr && !checkedOut)) return this.viewAt(at);
-      this.viewing = `${Date.now()}`; // the file list takes the keyboard back when the viewer closes (returnFromViewer)
-      openOverlay({ mod: "file-browser", kind: "dialog", width: 0.92, height: 0.9,
-        props: { folder: root, on, path: file.path, closedKey: VIEWER_CLOSED, closedToken: this.viewing } });
-    });
+    cx.spawn(async () => this.editAt({ commit, file, since: this.details?.since, root, on }, Boolean(pr)));
+  },
+
+  // The working-tree file in the file viewer, editable; else (deleted, or a PR whose head isn't checked out there)
+  // the version at the commit, read-only, as `v`.
+  async editAt(at, pr = false) {
+    const { commit, file, root, on = this.on ?? null } = at;
+    const there = file.status !== "D" && (await exec("test", ["-f", file.path], { cwd: root, on }).then((r) => r.code === 0, () => false));
+    const checkedOut = commit.uncommitted || (await exec("git", ["rev-parse", "HEAD"], { cwd: root, on }).then((r) => r.stdout.trim() === commit.hash, () => false));
+    if (!there || (pr && !checkedOut)) return this.viewAt(at);
+    this.viewing = `${Date.now()}`; // the file list takes the keyboard back when the viewer closes (returnFromViewer)
+    openOverlay({ mod: "file-browser", kind: "dialog", width: 0.92, height: 0.9,
+      props: { folder: root, on, path: file.path, closedKey: VIEWER_CLOSED, closedToken: this.viewing } });
   },
 
   // `d`: the change in git's diff tool (`git difftool`: diff.guitool, else diff.tool), the
@@ -541,12 +545,11 @@ export const ReviewMethods = {
     if (r.code !== 0) notify({ title: "Couldn't start the diff tool", body: r.stderr.trim(), level: "error" });
   },
 
-  // The one version of an added or deleted file: the working-tree file in the editor when
-  // it's there, else that version in the file viewer.
+  // The one version of an added or deleted file, in the file viewer: the working-tree file (editable) when it's
+  // there, else that version.
   async openVersion(at) {
-    const { commit, file, root } = at;
-    if (file.status !== "D" && (commit.uncommitted || (await exists(`${root}/${file.path}`)))) return openInEditor(`${root}/${file.path}`, at);
-    this.viewAt(at);
+    const pr = this.pr?.status === "ready" && this.selected === this.pr.head;
+    return this.editAt(at, pr);
   },
 
   // `v`: the file in the file viewer (the file-browser mod, over the graph; esc comes back),

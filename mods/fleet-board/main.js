@@ -17,6 +17,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle } from "gpui-base";
 import { theme, settings, nextCommand, props, focused, run, shared, setShared, layout } from "herdr";
+import { passBehind } from "./lib/behind.js";
 import { VIEWS, SPANS, HIDDEN_CHECK, dur, shortener, graph, tipText, clampWindow, zoomWindow, panWindow, waveWindow, nextWave } from "./model.js";
 import { closeSide, focusFrame, toTerminal } from "./lib/sidecolumn.js";
 import { splitTarget } from "./env.js";
@@ -72,6 +73,8 @@ export default class FleetBoard extends View {
     cx.spawn(async (cx) => {
       for (;;) {
         const c = String(await nextCommand()).replace(/^fleet-board\./, "");
+        // The window's keys (tabs, spaces, agents, panes): kept while it's a dialog, run when it's docked.
+        if (passBehind(c, Boolean(props()?.overlay), run)) { cx.notify(); continue; }
         if (c === "focus") this.h.focus();
         else if (c === "leave") toTerminal();
         else if (VIEWS.some((v) => v.id === c)) this.view = c;

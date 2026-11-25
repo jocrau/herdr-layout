@@ -48,3 +48,19 @@ test("repoMenuProps: the git view's repository menu for the status bar's branch,
   assert.deepEqual([first.label, first.action], ["Open in git view", { type: "openGitView", folder: "/r" }]);
   assert.equal(repoMenuProps(null, [], { root: "/r" }), null);
 });
+
+test("behind: a dialog keeps the window's keys; docked, the mod runs them as the global key would", async () => {
+  const { behindCommand, passBehind, BEHIND_KEYS } = await import("../../lib/behind.js");
+  assert.deepEqual(behindCommand("behind.tab.prev"), { name: "tab.prev", args: {} });
+  assert.deepEqual(behindCommand("behind.tab.select.3"), { name: "tab.select", args: { index: 3 } });
+  assert.deepEqual(behindCommand("behind.pane.go.left"), { name: "pane.go", args: { direction: "left" } });
+  assert.equal(behindCommand("prev-pr"), null);
+  const ran = [];
+  const run = (n, a) => ran.push([n, a]);
+  assert.equal(passBehind("behind.space.next", true, run), true);
+  assert.deepEqual(ran, [], "in a dialog: kept");
+  assert.equal(passBehind("behind.space.next", false, run), true);
+  assert.deepEqual(ran, [["space.next", {}]], "docked: run");
+  assert.equal(passBehind("leave", false, run), false);
+  for (const cmd of Object.values(BEHIND_KEYS)) assert.ok(behindCommand(`behind.${cmd}`), cmd);
+});

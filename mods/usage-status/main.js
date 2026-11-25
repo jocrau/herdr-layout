@@ -151,12 +151,13 @@ export default class WorkspaceStatus extends View {
       // you (the sidebar lists them all, but it can be hidden).
       .when(Boolean(space?.machine), el => el.child(label("server", space.machine)))
       .when(Boolean(g?.repo), el => el.child(label("folder", g.repo)))
-      // A right-click on the branch and its marks: pull, push, fetch (the git view's menu).
-      .when(Boolean(g), el => el.child(h_flex().id("git-branch").gap(6).px(6).py(1).rounded(5).items_center()
+      // A click (or right-click) on the branch and its marks: pull, push, fetch (the git view's menu).
+      .when(Boolean(g), el => el.child(h_flex().id("git-branch").gap(6).px(6).py(1).rounded(5).items_center().cursor_pointer()
         .hover(s => s.bg(t.hover).text_color(t.foreground))
+        .on_click((_e, cx) => this.syncMenu(cx))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.syncMenu(cx); })
-        .child(div().id("git-branch-name").tooltip("Right-click: pull, push, fetch").child(label("branch", g.branch ?? "detached")))
-        .children(syncMarks(g).map((m, i) => div().id(`git-mark-${i}`).text_color(m.tone === "push" ? t.ansi2 : m.tone === "pull" ? t.ansi3 : t.dim).tooltip(`${m.tip}\nRight-click: pull, push, fetch`).child(m.text)))))
+        .child(div().id("git-branch-name").tooltip("Click: open in git view, pull, push, fetch").child(label("branch", g.branch ?? "detached")))
+        .children(syncMarks(g).map((m, i) => div().id(`git-mark-${i}`).text_color(m.tone === "push" ? t.ansi2 : m.tone === "pull" ? t.ansi3 : t.dim).tooltip(`${m.tip}\nClick: open in git view, pull, push, fetch`).child(m.text)))))
       .when(Boolean(pr), el => el.child(h_flex().id("branch-pr").gap(6).px(6).py(1).rounded(5).items_center().cursor_pointer()
         .hover(s => s.bg(t.hover).text_color(t.foreground))
         .tooltip(`${pr.short} · ${pr.title}${pr.next_step?.text ? `\n${pr.next_step.text}` : ""}\nClick: the PR view`)

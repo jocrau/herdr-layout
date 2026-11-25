@@ -56,7 +56,7 @@ export function repoMenuProps(g, remotes, { root, on = null } = {}) {
   const remote = remotes.length > 0, web = g.slug ? `https://github.com/${g.slug}` : null;
   const target = { kind: "repo", path: root, status: { branch: g.branch, upstream: g.upstream, gone: g.gone, ahead: g.ahead, behind: g.behind, dirty: g.dirty, staged: g.staged }, agents: [], web, gitView: true };
   const ctx = { root, on, current: g.branch, head: g.head, branches: [], remotes };
-  const sections = [2, [remote && g.upstream && !g.gone, remote && g.branch, remote].filter(Boolean).length, g.dirty > 0 ? 3 : 0, 1 + (web ? 1 : 0) + (g.branch ? 1 : 0)].filter((n) => n > 0);
+  const sections = [2, [remote && g.upstream && !g.gone, remote && g.branch, remote].filter(Boolean).length, g.dirty > 0 ? 3 : 0, 1 + (web ? 1 : 0) + (on ? 0 : 1) + (g.branch ? 1 : 0)].filter((n) => n > 0);
   const height = 10 + 30 * sections.reduce((a, b) => a + b, 0) + 9 * (sections.length - 1);
   return { target, ctx, height };
 }

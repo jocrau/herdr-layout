@@ -15,7 +15,8 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle, Popup } from "gpui-base";
-import { theme, settings, nextCommand, props, layout, notify, watchFolder, checking, closeOverlay } from "herdr";
+import { theme, settings, nextCommand, props, layout, notify, watchFolder, checking, closeOverlay, run } from "herdr";
+import { passBehind } from "./lib/behind.js";
 import { readQueue, lastQueue, queueRows, stateDir, doVerb, verbPlan, jobFor, jobText, jobLabel, jobModel, detailJob, jobActive, jobDetail, findingsText, oldFindingsText, jobShow, jobStop, jobTerminal, jobLog, openPrView, talkTab, prTab, tabName, parseKey, draftReady, storedDraft, capabilities, prflowMachine } from "./lib/prflow.js";
 import { tabDot, alpha, numWidth } from "./lib/prrows.js";
 import { GROUPS, arrange, moveOf, nextStep, people, waitingOn, splitTitle, ago, actionsFor, agentWaits, agentAtWork, planWaits, placeText, saidAlready, readableTimes } from "./model.js";
@@ -113,6 +114,8 @@ export default class PrBoard extends View {
     cx.spawn(async (cx) => {
       for (;;) {
         const c = String(await nextCommand()).replace(/^pr-board\./, "");
+        // The window's keys (tabs, spaces, agents, panes): kept while it's a dialog, run when it's docked.
+        if (passBehind(c, Boolean(props()?.overlay), run)) { cx.notify(); continue; }
         if (c === "focus") { this.h.focus(); if (!this.order.includes(this.sel)) this.sel = this.order.find((x) => !isGrp(x)) ?? this.order[0] ?? null; this.reveal = true; }
         else if (c === "leave") toTerminal();
         else if (c === "view") this.openView();

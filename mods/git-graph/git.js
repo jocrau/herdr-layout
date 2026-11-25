@@ -294,7 +294,7 @@ export function menuFor(target, ctx) {
       section(item("Commit…", "commit", { type: "commit", staged: Boolean(target.staged) })),
       section(item("Stash uncommitted changes…", "stash", { type: "stash" })),
       section(item("Reset uncommitted changes…", "reset", { type: "resetUncommitted" })),
-      section(item("Show in Changes panel", "mods/changes/changes.svg", { type: "showChanges" })),
+      section(item("Show changes", "mods/changes/changes.svg", { type: "showChanges" })),
     ];
   } else if (target.kind === "branch") {
     const name = target.name, current = name === ctx.current, wt = worktreeOf(ctx, name);
@@ -304,25 +304,27 @@ export function menuFor(target, ctx) {
         // Local change: Checkout runs at once, here; a new worktree is the second item (a double-click checks out here).
         !current && !wt && item("Checkout", "branch", { type: "checkout", name, where: "here" }),
         !current && !wt && item("Checkout in a new worktree", "folder", { type: "checkout", name, where: "worktree" }),
-        item("Rename branch…", "rename", { type: "renameBranch", name }),
-        !current && !wt && item("Delete branch…", "trash", { type: "deleteBranch", name })),
-      section(!current && item(`Merge into ${cur}…`, "merge", { type: "merge", ref: name, what: `branch ${name}` }),
-        !current && item(`Rebase ${cur} on this branch…`, "rebase", { type: "rebase", ref: name, what: `branch ${name}` })),
+        item("Rename branch…", "rename", { type: "renameBranch", name })),
+      // Every menu: open, then in step with the remote (pull, push), then the branch's work, links, and last what
+      // deletes or removes.
       section((() => {
         const tr = ctx.tracking?.[name];
-        return tr && tr.behind > 0 && !tr.ahead && !tr.gone && item(`Fast-forward to ${tr.short}${wt ? " (in its worktree)" : ""}`, "fetch", { type: "ffBranch", name, upstream: tr.upstream, short: tr.short, current });
+        return tr && tr.behind > 0 && !tr.ahead && !tr.gone && item(`Fast-forward to ${tr.short}${wt ? " (in its worktree)" : ""}`, "pull", { type: "ffBranch", name, upstream: tr.upstream, short: tr.short, current });
       })(),
         current && ctx.tracking?.[name] && !ctx.tracking[name].gone && ctx.tracking[name].ahead > 0 && item(`Push to ${ctx.tracking[name].short}…`, "push", { type: "pushCurrent", name, short: ctx.tracking[name].short }),
         ctx.remotes.length > 0 && item("Push branch…", "push", { type: "push", name })),
+      section(!current && item(`Merge into ${cur}…`, "merge", { type: "merge", ref: name, what: `branch ${name}` }),
+        !current && item(`Rebase ${cur} on this branch…`, "rebase", { type: "rebase", ref: name, what: `branch ${name}` })),
       section((() => {
         const up = ctx.tracking?.[name];
         const { remote, branch } = up && !up.gone && up.short ? splitRemote(up.short, ctx.remotes) : {};
-        return ctx.web && remote === "origin" && item("Open branch on GitHub", "cloud", { type: "openUrl", url: branchUrl(ctx.web, branch) });
+        return ctx.web && remote === "origin" && item("Open branch on GitHub", "external", { type: "openUrl", url: branchUrl(ctx.web, branch) });
       })(),
         item("Copy branch name", "copy", { type: "copy", text: name }),
         wt && item("Copy worktree path", "copy", { type: "copy", text: wt })),
       // Never the main checkout (seen from a linked worktree, its branch has a worktree path too).
-      section(wt && wt !== ctx.mainRoot && item("Remove worktree…", "trash", { type: "removeWorktree", name, path: wt })),
+      section(!current && !wt && item("Delete branch…", "trash", { type: "deleteBranch", name }),
+        wt && wt !== ctx.mainRoot && item("Remove worktree…", "trash", { type: "removeWorktree", name, path: wt })),
     ];
   } else if (target.kind === "remote") {
     const name = target.name, { remote, branch } = splitRemote(name, ctx.remotes);
@@ -336,16 +338,16 @@ export function menuFor(target, ctx) {
           item(`Checkout as ${branch} in a new worktree`, "folder", { type: "checkoutRemote", name, remote, branch, where: "worktree" }),
           item("Checkout as…", "rename", { type: "checkoutRemote", name, remote, branch })])),
       section(item(`Merge into ${cur}…`, "merge", { type: "merge", ref: name, what: `remote branch ${name}` })),
-      section(item("Delete remote branch…", "trash", { type: "deleteRemoteBranch", name, remote, branch })),
-      section(ctx.web && remote === "origin" && item("Open branch on GitHub", "cloud", { type: "openUrl", url: branchUrl(ctx.web, branch) }),
+      section(ctx.web && remote === "origin" && item("Open branch on GitHub", "external", { type: "openUrl", url: branchUrl(ctx.web, branch) }),
         item("Copy branch name", "copy", { type: "copy", text: name })),
+      section(item("Delete remote branch…", "trash", { type: "deleteRemoteBranch", name, remote, branch })),
     ];
   } else if (target.kind === "tag") {
     const name = target.name;
     sections = [
-      section(item("Delete tag…", "trash", { type: "deleteTag", name })),
       section(ctx.remotes.length > 0 && item("Push tag…", "push", { type: "pushTag", name })),
       section(item("Copy tag name", "copy", { type: "copy", text: name })),
+      section(item("Delete tag…", "trash", { type: "deleteTag", name })),
     ];
   } else {
     const hash = c.hash, short = shortHash(hash), here = hash === ctx.head, merge = c.parents.length > 1;
@@ -360,7 +362,7 @@ export function menuFor(target, ctx) {
         item(`Reset ${cur} to this commit…`, "reset", { type: "reset", hash, short }),
         // As Fork does: move another local branch here (only its pointer; no working tree is touched).
         movable(ctx).length > 0 && item("Reset a branch to this commit…", "reset", { type: "resetBranch", hash, short })),
-      section(ctx.web && item("Open commit on GitHub", "cloud", { type: "openUrl", url: commitUrl(ctx.web, hash) }),
+      section(ctx.web && item("Open commit on GitHub", "external", { type: "openUrl", url: commitUrl(ctx.web, hash) }),
         item("Copy commit hash", "copy", { type: "copy", text: hash }),
         item("Copy commit subject", "copy", { type: "copy", text: c.subject })),
     ];
@@ -385,11 +387,11 @@ const mergeNote = (a) => (a.merge ? " It's a merge commit: its changes against i
 // its uncommitted changes, and its links.
 function repoMenu(r, ctx) {
   const st = r.status ?? {}, branch = st.branch, remote = ctx.remotes.length > 0;
-  const pull = remote && st.upstream && !st.gone && item("Pull…", "fetch", { type: "pull", upstream: st.upstream });
+  // Always Fetch, Pull, Push (as Fork's toolbar and every menu here), so each is where it was last time.
+  const pull = remote && st.upstream && !st.gone && item("Pull…", "pull", { type: "pull", upstream: st.upstream });
   const push = remote && branch && item(st.upstream ? "Push…" : "Push and set upstream…", "push", { type: "push", name: branch });
-  const fetch = remote && item("Fetch", "refresh", { type: "fetch" });
-  const sync = st.behind && !st.ahead ? [pull, fetch, push] : st.ahead && !st.behind ? [push, fetch, pull]
-    : !st.upstream ? [push, fetch] : [fetch, pull, push];
+  const fetch = remote && item("Fetch", "sync", { type: "fetch" });
+  const sync = [fetch, pull, push];
   return [
     // From outside the git view (the status bar's branch): the repository in it.
     [...(r.gitView ? [item("Open in git view", "graph", { type: "openGitView", folder: r.path })] : []),
@@ -399,7 +401,8 @@ function repoMenu(r, ctx) {
     st.dirty > 0 ? section(item("Commit…", "commit", { type: "commit", staged: st.staged > 0 }),
       item("Stash uncommitted changes…", "stash", { type: "stash" }),
       item("Reset uncommitted changes…", "reset", { type: "resetUncommitted" })) : [],
-    section(r.web && item(`Open on ${r.web.split("/")[2]}`, "cloud", { type: "openUrl", url: r.web }),
+    section(r.web && item(r.web.split("/")[2] === "github.com" ? "Open on GitHub" : `Open on ${r.web.split("/")[2]}`, "external", { type: "openUrl", url: r.web }),
+      !ctx.on && item("Reveal in Finder", "folder", { type: "reveal", path: r.path }),
       item("Copy path", "copy", { type: "copy", text: r.path }),
       branch && item("Copy branch name", "copy", { type: "copy", text: branch })),
   ].filter((s) => s.length).flatMap((s, i) => (i ? [{ separator: true }, ...s] : s));

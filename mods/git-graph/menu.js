@@ -2,7 +2,7 @@
 // { role: "menu", target, ctx }. Styled like Herdr's own menu.
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, closeOverlay, openOverlay, notify, theme, run } from "herdr";
+import { props, closeOverlay, openOverlay, notify, theme, run, exec } from "herdr";
 import { menuFor } from "./git.js";
 import { perform, openDialog, showChanges, goToWorktree, checkoutNow } from "./act.js";
 
@@ -29,6 +29,9 @@ export class Menu {
     } else if (a.type === "openGitView") {
       closeOverlay(overlay);
       openOverlay({ mod: "git-graph", kind: "dialog", width: 0.92, height: 0.9, props: { folder: a.folder, ...(ctx.on ? { on: ctx.on } : {}) } });
+    } else if (a.type === "reveal") {
+      closeOverlay(overlay);
+      exec("open", ["-R", a.path]).catch(() => {});
     } else if (a.type === "openUrl") {
       closeOverlay(overlay);
       cx.open_url(a.url);

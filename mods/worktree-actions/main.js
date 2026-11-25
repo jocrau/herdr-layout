@@ -33,26 +33,37 @@ function editorItems(p) {
       : e.cli ? exec(e.cli, [p.path]) : exec("open", ["-a", e.app, p.path])]);
 }
 
+// Links and copies, as in the git view's menus: Reveal in Finder, Copy path, Copy branch name (set apart).
 function folderItems(p) {
-  return [
-    ["Copy path", "file-text", (cx) => cx.write_to_clipboard(p.path)],
-    ...(p.machine ? [] : [["Reveal in Finder", "folder", () => exec("open", ["-R", p.path])]]),
+  const list = [
+    ...(p.machine ? [] : [["Reveal in Finder", "@git-graph/icons/folder", () => exec("open", ["-R", p.path])]]),
+    ["Copy path", "@git-graph/icons/copy", (cx) => cx.write_to_clipboard(p.path)],
+    ...(p.branch ? [["Copy branch name", "@git-graph/icons/copy", (cx) => cx.write_to_clipboard(p.branch)]] : []),
   ];
+  list[0].push(true);
+  return list;
 }
+
+// The repository in the git view (on its machine too).
+const gitView = (p) => ["Open in git view", "@git-graph/icons/graph", () =>
+  openOverlay({ mod: "git-graph", kind: "dialog", width: 0.92, height: 0.9, props: { folder: p.path, ...(p.machine ? { on: p.machine } : {}) } })];
 
 function items(p) {
   // A top-level space row: where its terminal is now.
+  // Every menu's order: open, then Fetch / Pull / Push, then the branch's work, links and copies, and last
+  // what closes or removes.
   if (p.kind === "space") return [
+    ...(p.git ? [gitView(p)] : []),
     ...editorItems(p),
-    ...folderItems(p),
     ...(p.git ? syncItems(p) : []),
     // Herdr's own worktree dialog, sized as the shipped menu opens it.
     ...(p.git ? [
       ["New worktree", "git-branch", () => openOverlay({ mod: "worktree", kind: "dialog", width: 440, height: 260, props: { space: p.space, action: "new" } }), true],
       ["Open worktree", "git-branch", () => openOverlay({ mod: "worktree", kind: "dialog", width: 560, height: 480, props: { space: p.space, action: "open" } })],
     ] : []),
+    ...folderItems(p),
+    ["Rename space", "square-pen", () => run("space.rename", { id: p.space }), true],
     ...(p.linked ? [herdrRemove(p.space)] : []),
-    ["Rename", "square-pen", () => run("space.rename", { id: p.space }), !p.git],
     ["Close space", "x", () => run("space.close", { id: p.space })],
   ];
   const at = p.machine ? { machine: p.machine } : {};
@@ -72,27 +83,26 @@ function items(p) {
       p.space ? run("space.select", { id: p.space })
         // Asks for its name (see `new-space`), the branch's in words to start with.
         : openOverlay({ mod: "new-space", kind: "dialog", width: 520, height: 560, props: { value: branchTitle(p.branch), folder: p.path, ...at } })],
-    // worktree-support does this one: it needs the new space's id.
-    ["Show changes", "git-compare", () =>
-      sendRequest({ id: `${Date.now()}-${Math.random()}`, at: Date.now(), action: "changes", path: p.path, machine: p.machine })],
+    gitView(p),
     ...editorItems(p),
     ...gitItems(p),
   ];
   // Local change: finished (merged, PR closed, remote gone): clean it up in one go, after asking.
   // worktree-support works out what it would take away and asks (this popup is gone by then).
   if (p.finished && p.branch) {
-    const after = list.findIndex((it) => it[1] === "folder-plus") + 1;
-    list.splice(after, 0, [`Clean up (${p.finished})…`, "archive", () => sendRequest({
+    // After the ways to open it, before Fetch (set apart either side).
+    const after = list.findIndex((it) => it[0] === "Fetch");
+    list.splice(after, 0, [`Clean up (${p.finished})…`, "@git-graph/icons/trash", () => sendRequest({
       id: `${Date.now()}-${Math.random()}`, at: Date.now(), action: "askCleanup",
       path: p.path, branch: p.branch, base: p.base ?? null, machine: p.machine ?? null, main: p.main, space: p.space ?? null,
       tab: p.tab ?? null, tabSpaceName: p.tabSpaceName ?? null, repoSpace: p.repoSpace, repoName: p.repoName, remove: p.remove ?? null, dirty: Boolean(p.dirty), finished: p.finished }), true]);
-    if (list[after + 1] && list[after + 1].length < 4) list[after + 1].push(true);
   }
-  list.push(...folderItems(p));
+  if (p.pr) list.push(["Open pull request on GitHub", "@git-graph/icons/external", (cx) => cx.open_url(p.pr), true]);
+  list.push(...folderItems(p).map((it, i) => (i === 0 && p.pr ? it.slice(0, 3) : it)));
   if (p.space) list.push(["Close space", "x", () => run("space.close", { id: p.space }), true]);
   if (p.remove) {
     const cmd = customRemove(p.remove, p.path, p.branch ?? "");
-    list.push(["Remove worktree…", "archive", () => openOverlay({
+    list.push(["Remove worktree…", "@git-graph/icons/trash", () => openOverlay({
       mod: "confirm", kind: "dialog", width: 420, height: 180,
       props: {
         title: `Remove ${p.branch ?? p.path}?`,
@@ -114,12 +124,11 @@ const gitOp = (p, op) => () => sendRequest({
 
 // In step with the remote, set apart as a group; pull and push need a branch.
 function syncItems(p) {
-  const list = [];
+  const list = [["Fetch", "@git-graph/icons/sync", gitOp(p, "fetch")]];
   if (p.branch) list.push(
-    ["Pull", "@git-graph/icons/fetch", gitOp(p, "pull")],
+    ["Pull", "@git-graph/icons/pull", gitOp(p, "pull")],
     ["Push", "@git-graph/icons/push", gitOp(p, "push")],
   );
-  list.push(["Fetch", "@git-graph/icons/cloud", gitOp(p, "fetch")]);
   list[0].push(true);
   return list;
 }
@@ -127,21 +136,21 @@ function syncItems(p) {
 function gitItems(p) {
   const git = (op) => gitOp(p, op);
   const list = syncItems(p);
-  if (p.branch && p.base && p.behind > 0) list.push(
+  const work = [];
+  if (p.branch && p.base && p.behind > 0) work.push(
     [`Rebase onto ${p.base} (\u2193${p.behind})`, "@git-graph/icons/rebase", git("rebase")],
     [`Merge ${p.base} into ${p.branch}`, "@git-graph/icons/merge", git("merge")],
   );
-  if (p.pr) list.push(["Open pull request", "git-branch", (cx) => cx.open_url(p.pr)]);
-  else if (p.branch && p.github) list.push(["Create pull request", "git-branch", git("pr")]);
-  // The graph reads the folder on this computer only.
-  if (!p.machine) list.push(["Open in Git graph", "@git-graph/icons/graph", () =>
-    openOverlay({ mod: "git-graph", kind: "dialog", width: 0.92, height: 0.9, props: { folder: p.path } })]);
-  if (p.branch) list.push(["Copy branch name", "@git-graph/icons/copy", (cx) => cx.write_to_clipboard(p.branch)]);
-  return list;
+  if (!p.pr && p.branch && p.github) work.push(["Create pull request", "git-branch", git("pr")]);
+  if (work.length) work[0].push(true);
+  // Its changes (worktree-support opens them: it needs the new space's id), then the branch's work.
+  const changes = ["Show changes", "@changes/changes", () =>
+    sendRequest({ id: `${Date.now()}-${Math.random()}`, at: Date.now(), action: "changes", path: p.path, machine: p.machine }), true];
+  return [...list, changes, ...work];
 }
 
 // Herdr's own removal of a worktree space, as the shipped menu offers it.
-const herdrRemove = (space, apart) => ["Remove worktree", "archive",
+const herdrRemove = (space, apart) => ["Remove worktree…", "@git-graph/icons/trash",
   () => openOverlay({ mod: "worktree", kind: "dialog", width: 440, height: 260, props: { space, action: "remove" } }), apart];
 
 export default class WorktreeActions extends View {
@@ -212,7 +221,7 @@ export default class WorktreeActions extends View {
       .children(list.map((it, i) =>
         v_flex()
           // it[3]: the first of a group (git, or the destructive items), set apart.
-          .when(Boolean(it[3]), (el) => el.child(div().mx(7).my(4).h(1).bg(t.border)))
+          .when(Boolean(it[3]) && i > 0, (el) => el.child(div().mx(7).my(4).h(1).bg(t.border)))
           .child(h_flex()
             .id(`wa-${i}`)
             .h(31)

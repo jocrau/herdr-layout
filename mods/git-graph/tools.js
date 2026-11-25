@@ -15,8 +15,11 @@ export const attempt = (p) => p.catch((e) => ({ code: -1, stdout: "", stderr: St
 export const exists = (path) => readTextFile(path).then((t) => t !== null, () => true);
 // A program in the background through herdr-core: no time limit, so it can wait on the user
 // (`code --wait`, `git difftool`), and it goes when the program ends.
+// Herdr's runner starts it with a bare PATH, so Homebrew's and /usr/local's programs (VS Code's `code`, which
+// `git difftool` runs) are added in front (not on Windows).
+export const WITH_PATH = ["/bin/sh", "-c", 'PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH" exec "$@"', "sh"];
 export const background = (cwd, argv, label) =>
-  attempt(hc(["run", "--bg", "--rm", "--no-parent", "--cwd", cwd, "--label", `git-graph.${label}=1`, "--", ...argv]));
+  attempt(hc(["run", "--bg", "--rm", "--no-parent", "--cwd", cwd, "--label", `git-graph.${label}=1`, "--", ...(platform() === "windows" ? [] : WITH_PATH), ...argv]));
 
 // Git's editor (`git var GIT_EDITOR`: GIT_EDITOR, core.editor, VISUAL, EDITOR) as words.
 // Git runs it through a shell; here it's split at spaces, so a quoted path with spaces in it

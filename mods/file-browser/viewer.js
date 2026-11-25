@@ -2,6 +2,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState, VirtualListScrollHandle } from "gpui-base";
 import { props, shared, spaces, panes, focused, run, readTextFile, writeTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
+import { passBehind } from "./lib/behind.js";
 import { target, dirname, basename, extension, kind, richText, codeKind, treeKind, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { toTerminal } from "./lib/sidecolumn.js";
@@ -86,6 +87,8 @@ export default class Viewer extends View {
     cx.spawn(async cx => {
       for (;;) {
         const command = String(await nextCommand()).replace(/^file-browser\./, "");
+        // The window's keys (tabs, spaces, agents, panes): kept while it's a dialog, run when it's the side panel.
+        if (passBehind(command, Boolean(props()?.overlay), run)) continue;
         if (command === "leave") toTerminal();
         else if (command === "back") this.back(cx);
         else if (command === "source") this.setSource(true, cx);

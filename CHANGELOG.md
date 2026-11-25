@@ -7,6 +7,17 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- Dialogs keep the window's keys: the `mod:` sections of `keys.json` bind the tab, space, agent and pane keys
+  (⌘← ⌘→, ⌘↑ ⌘↓, ⌘1…9, ⌘T, ⌘W, ⌘D, …) to `<mod>.behind.<command>`. While the git view, PR view, file browser or a
+  board is open as a dialog they do nothing (no tab switches behind it); docked, the mod runs them as before.
+- Menus: one order everywhere (open · Fetch, Pull, Push · changes · branch work · links and copies ·
+  delete/remove/close), with the same words and icons in the git view's, the status bar's and the sidebar's menus.
+- Git view header: Fetch, Fast-forward and Push sit beside the branch; the ahead/behind counts show only beside the
+  upstream. Fetch keeps the two-arrow sync icon, Refresh a single arrow, and a repository here has no Refresh button
+  (it's watched; `r` still refreshes), only one on another machine has.
+- `usage-status`: a plain click on the status bar's branch opens its menu too (open in git view, pull, push, fetch).
+- Git view: `d` on an added or deleted file opens it in the file viewer; the diff tool starts again (background
+  programs get Homebrew's and `/usr/local`'s PATH, so `git difftool` finds `code`).
 - Git view: the branch at the top opens the branch finder (as `b`; the toolbar's "Branches & tags" button is gone),
   and a right-click on it or on its upstream (`origin/main ↑1`) opens the repository menu: pull, push and fetch first
   as they fit, commit and stash when there are changes, copy, open on GitHub.

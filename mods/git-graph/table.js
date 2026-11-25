@@ -502,15 +502,19 @@ export const TableMethods = {
         .child(div().text_color(t.dim).child(tr.gone ? `${tr.short} (gone)` : tr.short))
         .when(tr.ahead > 0, (el) => el.child(div().text_color(t.ansi2).child(`\u2191${tr.ahead}`)))
         .when(tr.behind > 0, (el) => el.child(div().text_color(t.ansi1).child(`\u2193${tr.behind}`)))))
+      // Local change: in step with the remote beside the branch it's about, in every menu's order: Fetch, Pull
+      // (fast-forward), Push. Refresh and settings stay at the far end.
+      .when(ready && this.remoteNames?.length > 0, (e) => e.child(this.iconButton("graph-fetch", "sync", this.fetching ? "Fetching…" : "Fetch", false, (_e, cx) => this.fetch(cx), t)))
+      .when(ready && ffCount > 0, (e) => e.child(this.iconButton("graph-ff", "pull", this.syncing === "ff" ? "Fast-forwarding…" : `Fast-forward ${ffCount}`, false, (_e, cx) => this.syncAction("ff", cx), t)))
+      .when(ready && canPush, (e) => e.child(this.iconButton("graph-push", "push", this.syncing === "push" ? "Pushing…" : tr && !tr.gone ? "Push" : "Publish", false, (_e, cx) => this.syncAction("push", cx), t)))
       .child(div().flex_1())
-      .when(ready && ffCount > 0, (e) => e.child(this.iconButton("graph-ff", "fetch", this.syncing === "ff" ? "Fast-forwarding…" : `Fast-forward ${ffCount}`, false, (_e, cx) => this.syncAction("ff", cx), t)))
-      .when(ready && canPush, (e) => e.child(this.iconButton("graph-push", "push", this.syncing === "push" ? "Pushing…" : tr && !tr.gone ? `Push \u2191${tr.ahead}` : "Publish", false, (_e, cx) => this.syncAction("push", cx), t)))
-      .when(ready && this.remoteNames?.length > 0, (e) => e.child(this.iconButton("graph-fetch", "fetch", this.fetching ? "Fetching…" : null, false, (_e, cx) => this.fetch(cx), t)))
       .when(this.state === "workspace", (e) => {
         const run = this.fetchAll?.root === ws.root ? this.fetchAll : null;
-        return e.child(this.iconButton("graph-fetch-all", "fetch", run ? `Fetching ${run.done}/${run.total}…` : "Fetch all", Boolean(run), (_e, cx) => this.fetchEvery(cx), t));
+        return e.child(this.iconButton("graph-fetch-all", "sync", run ? `Fetching ${run.done}/${run.total}…` : "Fetch all", Boolean(run), (_e, cx) => this.fetchEvery(cx), t));
       })
-      .when(this.state !== "nofolder", (e) => e.child(this.iconButton("graph-refresh", "refresh", null, false, (_e, cx) => this.refresh(cx), t)))
+      // Local change: a repository here is watched (a change redraws it, Fetch reads again), so Refresh shows only for
+      // one on another machine and for Manygit; r still refreshes anywhere.
+      .when(this.state !== "nofolder" && (Boolean(this.on) || this.state === "workspace"), (e) => e.child(this.iconButton("graph-refresh", "reload", null, false, (_e, cx) => this.refresh(cx), t)))
       .when(settingsShown, (e) => e.child(this.iconButton("graph-settings", "settings", null, false, () => this.openSettings(), t)));
   },
 

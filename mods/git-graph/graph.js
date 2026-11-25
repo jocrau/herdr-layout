@@ -12,6 +12,7 @@ import { perform } from "./act.js";
 import { location, PAGE, withDefaults, isRefChange, inGitDir, tilde, sameFiles, scopeOf, SEEN, keep, depthSetting, tagsShown } from "./common.js";
 import { folderState, readFolder, readLog } from "./reads.js";
 import { platform } from "./tools.js";
+import { passBehind } from "./lib/behind.js";
 
 export class Graph {
   init(cx) {
@@ -79,10 +80,12 @@ export class Graph {
     // spaces as they do everywhere else in a plain graph.
     cx.spawn(async (cx) => {
       for (;;) {
-        const c = String(await nextCommand()).replace(/^git-graph\./, "");
+        const c = String(await nextCommand()).replace(/^git-graph\./, ""), inDialog = Boolean(props()?.overlay);
+        // The window's keys (tabs, spaces, agents, panes): kept while it's a dialog (keys.json's mod:git-graph).
+        if (passBehind(c, inDialog, run)) { cx.notify(); continue; }
         if (c === "prev-pr" || c === "next-pr") {
           if (this.prPick) this.prPickMove(c === "next-pr" ? 1 : -1);
-          else if (this.prMode()) this.prStep(c === "next-pr" ? 1 : -1, cx); else run(c === "next-pr" ? "space.next" : "space.prev");
+          else if (this.prMode()) this.prStep(c === "next-pr" ? 1 : -1, cx); else if (!inDialog) run(c === "next-pr" ? "space.next" : "space.prev");
         }
         cx.notify();
       }
