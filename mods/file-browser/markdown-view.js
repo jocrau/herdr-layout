@@ -1,6 +1,7 @@
 // Modified by Jochen Rau, 2026-11, from linziyanleo/herdr-mods preview-plus: see NOTICE.md in this folder.
 import { div, image, uniform_list } from "gpui-kit";
 import { v_flex, TextView, Scrollbar } from "gpui-base";
+import { TYPE } from "./lib/type.js";
 
 export function markdownView(panel, colors) {
   const blocks = panel.markdownBlocks || [{ text: panel.text || "" }], headings = panel.headings || [];
@@ -10,12 +11,12 @@ export function markdownView(panel, colors) {
     const id = "preview-contents-list";
     body.child(div().relative().h(Math.min(180, headings.length * 28)).flex_none().border_b(0.5).border_color(colors.border)
       .child(uniform_list(id, headings.length, i => headings[i].slug, range => headings.slice(range.start, range.end).map(h =>
-        div().h(28).pl(16 + (h.level - 1) * 12).pr(12).flex().items_center().text_size(12).truncate()
+        div().h(28).pl(16 + (h.level - 1) * 12).pr(12).flex().items_center().text_size(TYPE.meta).truncate()
           .when(h.slug === panel.anchor, el => el.bg(colors.selected)).child(h.title)))
         .size_full().on_item_click((slug, cx) => panel.follow("#" + encodeURIComponent(slug), cx)))
       .child(Scrollbar.vertical(id).absolute().right(0).top(0).bottom(0)));
   }
-  if (panel.anchor || start > 0) body.child(div().id("preview-whole-document").h(28).px(16).flex_none().flex().items_center().text_size(12)
+  if (panel.anchor || start > 0) body.child(div().id("preview-whole-document").h(28).px(16).flex_none().flex().items_center().text_size(TYPE.meta)
     .border_b(0.5).border_color(colors.border).text_color(colors.muted).cursor_default().role("button").accessibility_label("Show whole document")
     .hover(s => s.bg(colors.hover).text_color(colors.foreground))
     .on_click((_event, cx) => { cx.stop_propagation(); panel.top = null; if (panel.anchor) panel.follow("#", cx); else cx.notify(); }).child("↑ Whole document"));
@@ -24,7 +25,7 @@ export function markdownView(panel, colors) {
     .children(blocks.slice(start).map((block, offset) => {
       const index = start + offset;
       if (block.diagram) {
-        if (block.error) return v_flex().gap(6).flex_none().text_size(12)
+        if (block.error) return v_flex().gap(6).flex_none().text_size(TYPE.meta)
           .child(div().text_color(colors.ansi1).child(`Mermaid: ${block.error}`))
           .child(TextView.markdown(`preview-diagram-source-${index}`, block.text).selectable(true).scrollable(false).w_full());
         // The native scrollbar wrapper otherwise defaults to the full available height.
@@ -32,7 +33,7 @@ export function markdownView(panel, colors) {
           .child(image(block.media.path).w(block.media.width).h(block.media.height));
       }
       if (!block.media) return TextView.markdown(`preview-markdown-${panel.selected.file}-${index}`, block.text)
-        .selectable(true).scrollable(false).w_full().flex_none().text_size(13).text_color(colors.foreground).on_link_click((url, cx) => panel.follow(url, cx));
+        .selectable(true).scrollable(false).w_full().flex_none().text_size(TYPE.title).text_color(colors.foreground).on_link_click((url, cx) => panel.follow(url, cx));
       const width = Math.min(block.media.width, Math.max(1, panel.viewport.width - 32));
       return div().id(`preview-markdown-image-${index}`).w(width).h(width * block.media.height / block.media.width).flex_none().cursor_default()
         .on_click((_event, cx) => panel.follow(block.href, cx)).child(image(block.media.path).size_full());

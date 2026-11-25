@@ -7,6 +7,7 @@ import { props, closeOverlay, theme } from "herdr";
 import { dialogFor, initialValues, validate, createdWorktree } from "./git.js";
 import { perform, goToWorktree } from "./act.js";
 import { icon } from "./menu.js";
+import { TYPE } from "./lib/type.js";
 
 export class Dialog {
   init(cx) {
@@ -115,26 +116,26 @@ export class Dialog {
 
   render() {
     const t = theme(), s = this.spec, danger = this.danger();
-    const label = (text) => div().pt(14).pb(7).text_size(11.5).text_color(t.dim).child(text);
+    const label = (text) => div().pt(14).pb(7).text_size(TYPE.label).text_color(t.dim).child(text);
     const button = (id, text, primary, action) => h_flex().id(id).h(32).px(14).items_center().rounded(8).border_1()
       .border_color(primary ? (danger ? t.ansi1 : t.solid) : t.input).bg(primary ? (danger ? t.ansi1 : t.solid) : t.raised)
-      .text_color(primary ? (danger ? t.background : t.solid_foreground) : t.foreground).text_size(12.5).font_medium().cursor_pointer()
+      .text_color(primary ? (danger ? t.background : t.solid_foreground) : t.foreground).text_size(TYPE.body).font_medium().cursor_pointer()
       .hover((st) => st.opacity(0.88)).on_click(action).child(text);
-    return v_flex().id("git-graph-dialog").track_focus(this.handle).size_full().min_h(0).p(18).bg(t.popover).text_color(t.foreground).text_size(12.8)
+    return v_flex().id("git-graph-dialog").track_focus(this.handle).size_full().min_h(0).p(18).bg(t.popover).text_color(t.foreground).text_size(TYPE.body)
       .on_key_down((e, cx) => {
         if (e.key === "escape") closeOverlay(props().overlay);
         else if (e.key === "enter" && this.focusedInput < 0) this.confirm(cx);
         else if (!this.navKey(e.keystroke ?? e.key, cx)) return;
         cx.stop_propagation();
       })
-      .child(h_flex().flex_none().items_center().child(div().flex_1().text_size(15).font_semibold().child(s.title)).child(div().text_size(11).text_color(t.dim).child("Esc")))
+      .child(h_flex().flex_none().items_center().child(div().flex_1().text_size(TYPE.dialog).font_semibold().child(s.title)).child(div().text_size(TYPE.label).text_color(t.dim).child("Esc")))
       // Local change: the overlay keeps the height it opened with, so what doesn't fit scrolls,
       // and the error and the buttons below stay in view.
       .child(v_flex().id("gd-body").flex_1().min_h(0).overflow_y_scrollbar()
       .when(Boolean(s.detail), (el) => el.child(div().pt(8).text_color(t.muted).child(s.detail)))
       .children(this.inputs.map(({ field, state }, i) => v_flex()
         .child(label(field.label))
-        .child(Input.new(state).h(36).px(10).rounded(9).border_1().border_color(this.focusedInput === i ? t.accent : t.input).bg(t.background).text_size(12.8).text_color(t.foreground))))
+        .child(Input.new(state).h(36).px(10).rounded(9).border_1().border_color(this.focusedInput === i ? t.accent : t.input).bg(t.background).text_size(TYPE.body).text_color(t.foreground))))
       .when(Boolean(s.choice), (el) => el.child(label(s.choice.label)).children(s.choice.options.map((o) => {
         const on = this.values[s.choice.id] === o.value, cursor = this.focusedInput < 0 && this.rows()[this.at]?.value === o.value;
         return h_flex().id(`gd-choice-${o.value}`).h(38).mb(4).px(10).gap(10).items_center().rounded(8).border_1().cursor_pointer()
@@ -143,7 +144,7 @@ export class Dialog {
           .child(div().size(14).flex_none().rounded(7).border_1().border_color(on ? (o.danger ? t.ansi1 : t.accent) : t.input).flex().items_center().justify_center()
             .when(on, (e) => e.child(div().size(6).rounded(3).bg(o.danger ? t.ansi1 : t.accent))))
           .child(div().flex_none().font_medium().child(o.label))
-          .when(Boolean(o.detail), (e) => e.child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(o.danger ? t.ansi1 : t.dim).child(o.detail)));
+          .when(Boolean(o.detail), (e) => e.child(div().flex_1().min_w(0).truncate().text_size(TYPE.label).text_color(o.danger ? t.ansi1 : t.dim).child(o.detail)));
       })))
       .children((s.checks ?? []).map((c) => {
         const on = Boolean(this.values[c.id]), cursor = this.focusedInput < 0 && this.rows()[this.at]?.id === c.id;
@@ -154,7 +155,7 @@ export class Dialog {
           .child(div().flex_1().min_w(0).text_color(t.foreground).child(c.label));
       })))
       // The plain sentence when there is one (git's own words only without it), kept short.
-      .when(Boolean(this.error), (el) => el.child(div().flex_none().pt(10).max_h(64).overflow_hidden().text_size(12).text_color(t.ansi1)
+      .when(Boolean(this.error), (el) => el.child(div().flex_none().pt(10).max_h(64).overflow_hidden().text_size(TYPE.meta).text_color(t.ansi1)
         .child(this.error.split("\n\n")[0])))
       .child(h_flex().flex_none().pt(14).gap(8).justify_end()
         .child(button("gd-cancel", "Cancel", false, () => closeOverlay(props().overlay)))

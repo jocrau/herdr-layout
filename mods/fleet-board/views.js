@@ -9,6 +9,8 @@ import { followupCounts } from "./snapshot.js";
 import { shown } from "./env.js";
 import { boardHeader, boardTop } from "./lib/boardheader.js";
 import { tailPanel } from "./lib/tailpanel.js";
+import { moveHelp, HELP_ROW } from "./lib/keymap.js";
+import { TYPE } from "./lib/type.js";
 
 export const ViewsMethods = {
   // The panel: which bead, whether it still runs, a real terminal (follow), close; then its last lines,
@@ -48,21 +50,21 @@ export const ViewsMethods = {
         .tooltip(`${r.repoName} · ${r.epic}\n${r.running ? "a wave is running" : "no wave running"}; ${r.parked} waiting for you, ${r.busy} running, ${r.open} open\n${r.cwd}`)
         .on_click((_e, cx) => { this.picking = false; this.choose(cx, r); })
         .child(finished
-          ? div().w(8).flex_none().text_size(11).text_color(t.dim).child("✓")
+          ? div().w(8).flex_none().text_size(TYPE.label).text_color(t.dim).child("✓")
           : div().size(7).rounded(4).flex_none().bg(r.running ? t.ansi2 : r.parked ? t.ansi1 : t.dim)
             .when(r.running, (el) => el.loop("opacity", { from: 0.35, to: 1, period: 1400 })))
-        .child(div().flex_none().max_w(200).truncate().text_size(12.5).when(on, (el) => el.font_semibold())
+        .child(div().flex_none().max_w(200).truncate().text_size(TYPE.body).when(on, (el) => el.font_semibold())
           .text_color(on ? t.foreground : finished ? t.muted : t.foreground).child(epic))
-        .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(r.repoName))
-        .when(r.parked > 0, (el) => el.child(div().flex_none().px(5).rounded(7).bg(t.ansi1).text_size(10.5).text_color(t.background).child(String(r.parked))))
-        .child(div().flex_none().w(34).text_size(11).text_color(t.dim).text_right().child(r.running ? "now" : r.last ? dur(now - r.last) : ""));
+        .child(div().flex_1().min_w(0).truncate().text_size(TYPE.label).text_color(t.dim).child(r.repoName))
+        .when(r.parked > 0, (el) => el.child(div().flex_none().px(5).rounded(7).bg(t.ansi1).text_size(TYPE.hint).text_color(t.background).child(String(r.parked))))
+        .child(div().flex_none().w(34).text_size(TYPE.label).text_color(t.dim).text_right().child(r.running ? "now" : r.last ? dur(now - r.last) : ""));
     };
-    const head = (label, n) => div().px(10).pt(6).pb(3).text_size(11).text_color(t.dim).child(`${label.toUpperCase()} ${n}`);
+    const head = (label, n) => div().px(10).pt(6).pb(3).text_size(TYPE.label).text_color(t.dim).child(`${label.toUpperCase()} ${n}`);
     const out = [];
     if (active.length) out.push(head("Active", active.length), ...active.map(row));
     if (done.length) out.push(head("Finished this week", done.length), ...done.map(row));
-    if (!flat.length) out.push(div().p(14).text_size(12).text_color(t.dim).child(this.scanAt ? "No fleet runs." : "Listing the fleet's runs…"));
-    out.push(div().px(10).pt(8).pb(4).mt(4).border_t_1().border_color(t.border).text_size(11).text_color(t.dim).child("j k · ⏎ show · e esc close · ⌘← ⌘→ step"));
+    if (!flat.length) out.push(div().p(14).text_size(TYPE.meta).text_color(t.dim).child(this.scanAt ? "No fleet runs." : "Listing the fleet's runs…"));
+    out.push(div().px(10).pt(8).pb(4).mt(4).border_t_1().border_color(t.border).text_size(TYPE.label).text_color(t.dim).child("j k · ⏎ show · e esc close · ⌘← ⌘→ step"));
     return out;
   },
 
@@ -70,14 +72,14 @@ export const ViewsMethods = {
   // `under`: drawn under its bead (indented like the details), else at the top under the tabs.
   confirmBar(t, mono, under = false) {
     const c = this.confirm;
-    const btn = (id, label, primary, go) => div().id(id).px(10).h(22).rounded(5).flex().items_center().text_size(11.5)
+    const btn = (id, label, primary, go) => div().id(id).px(10).h(22).rounded(5).flex().items_center().text_size(TYPE.label)
       .when(primary, (x) => x.bg(t.accent).text_color(t.background).font_semibold())
       .when(!primary, (x) => x.border_1().border_color(t.border).text_color(t.foreground).hover((y) => y.bg(t.border)))
       .on_click((_e, cx) => { go(cx); cx.notify(); }).child(label);
     return v_flex().px(10).py(6).gap(4).bg(t.hover).when(under, (x) => x.pl(28).border_l_2()).when(!under, (x) => x.border_b_1()).border_color(t.accent)
-      .child(div().text_size(12).font_semibold().text_color(t.foreground).child(c.title))
-      .when(Boolean(c.detail), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(c.detail)))
-      .when(Boolean(c.copy), (el) => el.child(div().font_family(mono).text_size(11).text_color(t.dim).child(c.copy)))
+      .child(div().text_size(TYPE.meta).font_semibold().text_color(t.foreground).child(c.title))
+      .when(Boolean(c.detail), (el) => el.child(div().text_size(TYPE.label).text_color(t.muted).child(c.detail)))
+      .when(Boolean(c.copy), (el) => el.child(div().font_family(mono).text_size(TYPE.label).text_color(t.dim).child(c.copy)))
       .child(h_flex().pt(2).gap(6).items_center()
         .when(Boolean(c.run), (el) => el.child(btn("confirm-run", `${c.label} ⏎`, true, (cx) => { this.confirm = null; c.run(cx); })))
         .when(Boolean(c.copy), (el) => el.child(btn("confirm-copy", "Copy", false, () => { this.confirm = null; this.copy(c.copy, c.label); })))
@@ -156,21 +158,21 @@ export const ViewsMethods = {
       ["longest", top(s.beads, (b) => b.history.filter((h) => AGENT_STEPS.has(h.step) && h.end).reduce((n, h) => n + (h.end - h.start), 0), (v) => dur(v))],
       ["most fixes", top(s.beads, fixRounds, (v) => `↻${v}`)],
     ].filter(([, l]) => l.length);
-    const line = (parts) => div().text_size(11.5).text_color(t.muted).child(parts.filter(Boolean).join(" · "));
+    const line = (parts) => div().text_size(TYPE.label).text_color(t.muted).child(parts.filter(Boolean).join(" · "));
     return v_flex().mx(10).mt(8).mb(2).p(8).gap(3).rounded(6).bg(t.hover)
       .child(h_flex().gap(6).items_center()
-        .child(div().text_size(11).font_semibold().text_color(t.ansi2).child("FINISHED"))
-        .child(div().text_size(11).text_color(t.dim).child(`${dur(now - last)} ago`)))
+        .child(div().text_size(TYPE.label).font_semibold().text_color(t.ansi2).child("FINISHED"))
+        .child(div().text_size(TYPE.label).text_color(t.dim).child(`${dur(now - last)} ago`)))
       .child(line([`${c.done} merged`, c.dropped ? `${c.dropped} dropped` : "", `$${(e.cost ?? 0).toFixed(0)}${e.unpriced ? "+?" : ""}`, `${dur(last - first)} start to end`]))
       .child(line([`agents ${dur(agentMs)}`, fp?.of ? `1st-pass ${Math.round((fp.passed / fp.of) * 100)}%` : "",
         pw?.count ? `waited for you ${pw.count}×${pw.median_seconds ? `, ~${dur(pw.median_seconds * 1000)} each` : ""}` : ""]))
       .children(lists.map(([label, l]) => h_flex().pt(2).gap(6).items_center().flex_wrap()
-        .child(div().w(70).flex_none().text_size(11).text_color(t.dim).child(label))
+        .child(div().w(70).flex_none().text_size(TYPE.label).text_color(t.dim).child(label))
         .children(l.map(([b, v], i) => h_flex().id(`recap-${label}-${i}`).gap(4).px(5).h(18).items_center().rounded(4).bg(t.background)
           .hover((x) => x.bg(t.border)).tooltip(b.title ?? b.id)
           .on_click((_e, cx) => { this.focusBead(b); cx.notify(); })
-          .child(div().font_family(mono).text_size(11.5).text_color(t.foreground).child(short(b.id)))
-          .child(div().text_size(11).text_color(t.muted).child(v))))));
+          .child(div().font_family(mono).text_size(TYPE.label).text_color(t.foreground).child(short(b.id)))
+          .child(div().text_size(TYPE.label).text_color(t.muted).child(v))))));
   },
 
   // The epic past this run's beads (its epic.* events): the epic check on the epic branch, the epic's beads
@@ -180,11 +182,11 @@ export const ViewsMethods = {
     if (!chk && !st) return null;
     const sha = (h) => String(h ?? "").slice(0, 7);
     const btn = (id, label, tip, go) => div().id(id).flex_none().px(6).h(18).flex().items_center().rounded(4).border_1().border_color(t.border)
-      .text_size(11).text_color(t.foreground).hover((x) => x.bg(t.border)).tooltip(tipText(tip))
+      .text_size(TYPE.label).text_color(t.foreground).hover((x) => x.bg(t.border)).tooltip(tipText(tip))
       .on_click((_e, cx) => { go(cx); cx.notify(); }).child(label);
     const row = (mark, markColor, text, color, ...extra) => h_flex().gap(6).items_center().min_h(20)
-      .child(div().w(12).flex_none().text_size(11.5).text_color(markColor).child(mark))
-      .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(color).child(text))
+      .child(div().w(12).flex_none().text_size(TYPE.label).text_color(markColor).child(mark))
+      .child(div().flex_1().min_w(0).truncate().text_size(TYPE.label).text_color(color).child(text))
       .children(extra.filter(Boolean));
     const rows = [];
     if (chk?.state === "running") rows.push(row("●", t.ansi4, `Checking the epic branch at ${sha(chk.head)} · ${dur(now - (chk.since ?? now))}`, t.foreground));
@@ -213,7 +215,7 @@ export const ViewsMethods = {
         () => this.ask(`Open the PR to main for ${e.id}?`, "fleet propose opens the epic branch's PR to main as a draft, as you. It never merges.", "Propose",
           (cx, cwd) => cx.spawn((cx) => this.runFleet(cx, ["fleet", "propose", e.id], `propose ${e.id}`, cwd)), `fleet propose ${e.id}`))));
     return v_flex().mx(10).mt(8).mb(2).p(8).gap(2).rounded(6).border_1().border_color(t.border)
-      .child(div().pb(2).text_size(11).font_semibold().text_color(t.muted).child("EPIC"))
+      .child(div().pb(2).text_size(TYPE.label).font_semibold().text_color(t.muted).child("EPIC"))
       .children(rows);
   },
 
@@ -241,14 +243,14 @@ export const ViewsMethods = {
         .when(asking, (x) => x.border_1().border_color(t.accent)).hover((x) => x.bg(t.border)).on_click((_e, cx) => { this.waveAction(); cx.notify(); })
         .tooltip(`Wave ${wave.number} running (pid ${wave.pid}) since ${wave.started ? new Date(wave.started).toLocaleTimeString() : "?"}${checking ? `\nChecking the epic branch at ${String(chk.head ?? "").slice(0, 7)} since ${chk.since ? new Date(chk.since).toLocaleTimeString() : "?"}` : ""}\n${asking ? "Click again or esc: don't stop it" : "Click to stop it (asks first)"}`)
         .child(div().size(6).rounded(3).bg(t.ansi2).loop("opacity", { from: 0.35, to: 1, period: 1400 }))
-        .child(div().text_size(11.5).text_color(t.foreground).child(checking ? `epic check · ${dur(now - (chk.since ?? now))}`
+        .child(div().text_size(TYPE.label).text_color(t.foreground).child(checking ? `epic check · ${dur(now - (chk.since ?? now))}`
           : wave.started ? `wave ${wave.number} · ${dur(now - wave.started)}` : `wave ${wave.number ?? ""}`.trim()))
       : h_flex().id("wave").flex_none().gap(4).items_center().px(6).h(18).rounded(9).border_1().border_color(asking ? t.accent : t.border)
         .when(asking, (x) => x.bg(t.hover))
         .hover((x) => x.bg(t.hover)).on_click((_e, cx) => { this.waveAction(); cx.notify(); })
         .tooltip(tipText(`${wave.last_ended ? `Wave ${wave.number} ended${wave.last_ended.reason ? `: ${wave.last_ended.reason}` : ""}, ${new Date(wave.last_ended.at).toLocaleString()}` : "No wave running"}\n${asking ? "Click again or esc: don't start it" : "Click to start the next one (asks first)"}`))
         .child(div().size(6).rounded(3).bg(t.dim))
-        .child(div().max_w(150).truncate().text_size(11.5).text_color(t.muted).child(wave.last_ended?.at ? `${wave.last_ended.reason ?? "ended"} · ${dur(now - wave.last_ended.at)} ago` : "no wave"));
+        .child(div().max_w(150).truncate().text_size(TYPE.label).text_color(t.muted).child(wave.last_ended?.at ? `${wave.last_ended.reason ?? "ended"} · ${dur(now - wave.last_ended.at)} ago` : "no wave"));
     const head = boardHeader(t, {
       mod: "fleet-board", title: e.id, open: this.picking, onTitle: (cx) => { this.togglePicker(); cx.notify(); }, onClose: (cx) => { this.closePicker(); cx.notify(); },
       menu: this.picking ? this.runPicker(t, now) : null,
@@ -269,47 +271,47 @@ export const ViewsMethods = {
           .when(Boolean(counts.total && counts.dropped), (el) => el.child(div().absolute().left(0).top(0).h(6).rounded(3).bg(t.muted)
             .w(`${Math.round(((counts.done + counts.dropped) / counts.total) * 100)}%`)))
           .child(div().absolute().left(0).top(0).h(6).rounded(3).bg(t.ansi2).w(`${counts.total ? Math.round((counts.done / counts.total) * 100) : 0}%`)))
-        .child(div().text_size(12).text_color(t.foreground).child(`${counts.done}/${counts.total - (counts.dropped ?? 0)}`))
-        .when(Boolean(counts.dropped), (el) => el.child(div().id("dropped").text_size(12).text_color(t.dim)
+        .child(div().text_size(TYPE.meta).text_color(t.foreground).child(`${counts.done}/${counts.total - (counts.dropped ?? 0)}`))
+        .when(Boolean(counts.dropped), (el) => el.child(div().id("dropped").text_size(TYPE.meta).text_color(t.dim)
           .tooltip(`${counts.dropped} dropped: taken out of the epic, not counted`).child(`−${counts.dropped}`)))
-        .child(div().text_size(12).text_color(t.dim).child(`$${(e.cost ?? 0).toFixed(0)}${e.unpriced ? "+?" : ""}`)),
+        .child(div().text_size(TYPE.meta).text_color(t.dim).child(`$${(e.cost ?? 0).toFixed(0)}${e.unpriced ? "+?" : ""}`)),
       // Every gauge on one line (it wraps when the pane is narrow): agents at work while a wave runs, pace, you.
       // (Usage windows are left to the status bar, which reads Claude Code's own, current numbers.)
       h_flex().gap(10).items_center().flex_wrap()
         .when(Boolean(wave.running || e.workers.used), (el) => el.child(h_flex().id("workers").gap(3).items_center().tooltip(`Agents at work (implement, fix, review): ${e.workers.used} of ${e.workers.max ?? "?"}. Checks and merges don't take one.`)
-          .child(div().text_size(11.5).text_color(t.dim).child("agents"))
+          .child(div().text_size(TYPE.label).text_color(t.dim).child("agents"))
           .children(Array.from({ length: e.workers.max ?? 0 }, (_, i) => div().size(7).rounded(2).bg(i < e.workers.used ? t.ansi4 : t.border)))))
         .when(mph.some((v) => v > 0), (el) => el.child(this.spark(t, mph))
-          .child(div().id("rate").text_size(11.5).text_color(t.muted).tooltip("Merged per hour over the last 3 hours").child(`${perHour.toFixed(1)}/h`)))
-        .when(eta !== null, (el) => el.child(div().id("eta").text_size(11.5).text_color(t.muted)
+          .child(div().id("rate").text_size(TYPE.label).text_color(t.muted).tooltip("Merged per hour over the last 3 hours").child(`${perHour.toFixed(1)}/h`)))
+        .when(eta !== null, (el) => el.child(div().id("eta").text_size(TYPE.label).text_color(t.muted)
           .tooltip(`${open} open bead${open === 1 ? "" : "s"} ÷ ${perHour.toFixed(1)} merged per hour`).child(`ETA ~${dur(eta)}`)))
-        .when(Boolean(fp && fp.of), (el) => el.child(div().id("fpr").text_size(11.5).text_color(t.muted)
+        .when(Boolean(fp && fp.of), (el) => el.child(div().id("fpr").text_size(TYPE.label).text_color(t.muted)
           .tooltip(`Reviews that approved at the first round: ${fp.passed} of ${fp.of}`).child(`1st-pass ${Math.round((fp.passed / fp.of) * 100)}%`)))
-        .when(Boolean(pw && pw.count), (el) => el.child(div().id("waits").text_size(11.5).text_color(pw.open ? t.ansi1 : t.muted)
+        .when(Boolean(pw && pw.count), (el) => el.child(div().id("waits").text_size(TYPE.label).text_color(pw.open ? t.ansi1 : t.muted)
           .tooltip(`The fleet waited for you ${pw.count} time${pw.count === 1 ? "" : "s"}: ${dur(pw.total_seconds * 1000)} summed over the beads${pw.wall_seconds ? `, ${dur(pw.wall_seconds * 1000)} of clock time` : ""}${pw.median_seconds !== null && pw.median_seconds !== undefined ? `; half your answers took under ${dur(pw.median_seconds * 1000)}` : ""}${pw.open ? `; ${pw.open} waiting now${wait?.since ? `, the longest ${dur(now - wait.since)}` : ""}` : ""}\n${Object.entries(pw.by_kind ?? {}).sort((a, b) => b[1].total_seconds - a[1].total_seconds).map(([k, v]) => `${k}: ${v.count}, ${dur(v.total_seconds * 1000)}`).join("\n")}`)
           .child(`you: ${pw.count} wait${pw.count === 1 ? "" : "s"}${pw.median_seconds !== null && pw.median_seconds !== undefined ? ` · ~${dur(pw.median_seconds * 1000)}` : ""}${pw.open ? ` · ${pw.open} now` : ""}`)))
-        .when(!pw && Boolean(wait && wait.since), (el) => el.child(div().id("wait").text_size(11.5).text_color(t.ansi1)
+        .when(!pw && Boolean(wait && wait.since), (el) => el.child(div().id("wait").text_size(TYPE.label).text_color(t.ansi1)
           .tooltip(`The longest a parked bead has waited for you (${wait.bead})`).child(`you: ${dur(now - wait.since)}`)))
-        .when(Boolean(br && (br.behind || br.propose || br.conflicts?.length)), (el) => el.child(div().id("branch").text_size(11.5).text_color(br.conflicts?.length ? t.ansi1 : t.dim)
+        .when(Boolean(br && (br.behind || br.propose || br.conflicts?.length)), (el) => el.child(div().id("branch").text_size(TYPE.label).text_color(br.conflicts?.length ? t.ansi1 : t.dim)
           .tooltip(`Epic branch: ${br.behind ?? "?"} behind main${br.conflicts?.length ? `, would conflict in ${br.conflicts.join(", ")}` : ""}; ${br.unproposed ?? 0} parts not on main${br.propose ? `\nfleet propose ${e.id} opens the PR to main` : ""}`)
           .child([br.behind ? `↓${br.behind} main` : "", br.propose ? `${br.unproposed} to propose` : ""].filter(Boolean).join(" · ")))));
   },
 
   tabs(t) {
     return h_flex().px(8).pt(6).gap(2).items_center().border_b_1().border_color(t.border)
-      .children(VIEWS.map((v) => div().id(`tab-${v.id}`).px(8).pb(5).text_size(12.5)
+      .children(VIEWS.map((v) => div().id(`tab-${v.id}`).px(8).pb(5).text_size(TYPE.body)
         .text_color(this.view === v.id ? t.foreground : t.dim)
         .when(this.view === v.id, (el) => el.border_b_2().border_color(t.accent))
         .hover((el) => el.text_color(t.foreground))
         .on_click((_e, cx) => { this.view = v.id; this.reveal = true; cx.notify(); })
         .child(v.label)))
       .child(div().flex_1())
-      .when(Boolean(this.busy) && !this.drawn?.has(this.busy.bead), (el) => el.child(div().pb(5).px(4).text_size(11).text_color(t.accent).loop("opacity", { from: 0.4, to: 1, period: 900 }).child(`${this.busy.text}${this.busy.bead ? ` ${this.busy.bead}` : ""}…`)))
-      .when(this.loading, (el) => el.child(div().pb(5).px(4).text_size(11).text_color(t.dim).loop("opacity", { from: 0.3, to: 1, period: 900 }).child("●")))
+      .when(Boolean(this.busy) && !this.drawn?.has(this.busy.bead), (el) => el.child(div().pb(5).px(4).text_size(TYPE.label).text_color(t.accent).loop("opacity", { from: 0.4, to: 1, period: 900 }).child(`${this.busy.text}${this.busy.bead ? ` ${this.busy.bead}` : ""}…`)))
+      .when(this.loading, (el) => el.child(div().pb(5).px(4).text_size(TYPE.label).text_color(t.dim).loop("opacity", { from: 0.3, to: 1, period: 900 }).child("●")))
       .when(this.view === "lanes", (el) => {
         // Pinned in the past: the window's times and × (back to now); else the span up to now ([ ] or a click).
         const pinned = this.win?.key === this.runKey() && this.lanesAt;
-        return el.child(div().id("span").pb(5).px(4).text_size(11.5).text_color(pinned ? t.accent : t.muted)
+        return el.child(div().id("span").pb(5).px(4).text_size(TYPE.label).text_color(pinned ? t.accent : t.muted)
           .hover((x) => x.text_color(t.foreground)).tooltip(pinned ? "Back to now: click or esc" : "Time shown: [ ] or click")
           .on_click((_e, cx) => { if (pinned) this.unpin(); else this.zoom(SPANS[(SPANS.indexOf(this.span) + 1) % SPANS.length]); cx.notify(); })
           .child(pinned ? `${this.win.wave !== null && this.win.wave !== undefined ? `w${this.win.wave} · ` : ""}${hm(this.lanesAt.from)}–${hm(this.lanesAt.to)} ×` : spanLabel(this.span)));
@@ -381,7 +383,7 @@ export const ViewsMethods = {
     return h_flex().flex_none().gap(6).items_center()
       // What waits on it: worth knowing for a running or queued bead (more than one, or it's just noise).
       .when(Boolean(c.reach), (el) => el.child(col(c.reach, reach > 1 ? div().id(`reach-${b.id}`).px(4).rounded(3).bg(t.border)
-        .text_size(10.5).text_color(t.foreground).tooltip(`Unblocks ${reach} open beads`).child(`⇣${reach}`) : null)))
+        .text_size(TYPE.hint).text_color(t.foreground).tooltip(`Unblocks ${reach} open beads`).child(`⇣${reach}`) : null)))
       .when(c.loops > 0, (el) => el.child(col(c.loops, loops > 0 ? div().id(`loops-${b.id}`).text_size(ROW.small).text_color(t.ansi9 ?? t.ansi3)
         .tooltip(`${loops} fix round${loops === 1 ? "" : "s"}${fixSessions(b) > loops ? ` (${fixSessions(b)} sessions)` : ""}: a check, the review or CI sent it back`).child(`↻${loops}`) : null)))
       .when(c.bar > 0, (el) => el.child(this.mini(t, b, now)))
@@ -397,13 +399,13 @@ export const ViewsMethods = {
     return h_flex().id(`ctx-${b.id}`).gap(3).items_center().tooltip(`Context ${p}% used`)
       .child(div().relative().w(14).h(4).rounded(2).bg(t.border)
         .child(div().absolute().left(0).top(0).h(4).rounded(2).bg(color).w(Math.max(1, Math.round((p / 100) * 14)))))
-      .child(div().text_size(11).text_color(color).child(`${p}%`));
+      .child(div().text_size(TYPE.label).text_color(color).child(`${p}%`));
   },
 
   // Under an open row (the row shows the whole title): the bead's facts, its gate, its steps, its waits, actions.
   details(t, b, g, now) {
     const tl = timeline(b, now), acts = this.actions(b);
-    const small = (text, color = t.dim) => div().text_size(11.5).text_color(color).child(text);
+    const small = (text, color = t.dim) => div().text_size(TYPE.label).text_color(color).child(text);
     // 1. Where the time went: wall time = agents + checks + queued (overlaps aside); then what it changed.
     const fixes = tl ? tl.rounds.filter((r) => r.round > 0).length : 0;
     const summary = h_flex().gap(6).flex_wrap().items_center()
@@ -429,18 +431,18 @@ export const ViewsMethods = {
       .when(Boolean(tl), (el) => el.child(this.lifeline(t, b, tl)).child(this.stepTable(t, b, tl)))
       // The times it waited for you, and how each ended.
       .when(b.gates.length > (b.gate ? 1 : 0), (el) => el.child(v_flex().pt(4).gap(2)
-        .child(div().text_size(11).text_color(t.dim).child("WAITED FOR YOU"))
+        .child(div().text_size(TYPE.label).text_color(t.dim).child("WAITED FOR YOU"))
         .children(b.gates.map((w, i) => h_flex().id(`gw-${b.id}-${i}`).gap(6).items_center().tooltip(tipText(w.reason ?? ""))
           .child(div().w(14).h(2).rounded(1).flex_none().bg(t.ansi1))
-          .child(div().w(80).truncate().text_size(11.5).text_color(t.muted).child(w.shown ?? w.kind))
-          .child(div().w(44).text_size(11.5).text_color(t.foreground).child(dur((w.resolved ?? now) - w.opened)))
-          .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(w.resolved ? t.dim : t.ansi1).child(w.resolved ? (w.how ?? "answered") : "waiting"))))))
+          .child(div().w(80).truncate().text_size(TYPE.label).text_color(t.muted).child(w.shown ?? w.kind))
+          .child(div().w(44).text_size(TYPE.label).text_color(t.foreground).child(dur((w.resolved ?? now) - w.opened)))
+          .child(div().flex_1().min_w(0).truncate().text_size(TYPE.label).text_color(w.resolved ? t.dim : t.ansi1).child(w.resolved ? (w.how ?? "answered") : "waiting"))))))
       .when(acts.length > 0, (el) => el.child(h_flex().pt(2).gap(4).flex_wrap().children(acts.map((a, i) => div().id(`act-${b.id}-${i}`).px(7).h(20).rounded(5)
-        .border_1().border_color(t.border).text_size(11.5).text_color(t.foreground).flex().items_center().gap(4)
+        .border_1().border_color(t.border).text_size(TYPE.label).text_color(t.foreground).flex().items_center().gap(4)
         .when(i === 0 && b.state === "parked" && !asks(b) && a.label === "resume", (x) => x.bg(t.accent).border_color(t.accent).text_color(t.background).font_semibold())
         .hover((x) => x.bg(t.border)).tooltip(a.tip)
         .on_click((_e, cx) => { a.go(); cx.notify(); })
-        .when(Boolean(a.key), (x) => x.child(div().text_size(10.5).text_color(t.dim).child(a.key)))
+        .when(Boolean(a.key), (x) => x.child(div().text_size(TYPE.hint).text_color(t.dim).child(a.key)))
         .child(a.label)))));
   },
 
@@ -459,8 +461,8 @@ export const ViewsMethods = {
         .tooltip(`${h.step}${h.round ? `, fix ${h.round}` : ""}, wave ${h.wave}: ${dur(p.ms)}, ${h.live ? "running" : h.outcome ?? "stopped"}${h.model ? `\n${h.runtime ?? ""}/${h.model}` : ""}${h.cost ? `  $${h.cost.toFixed(2)}` : ""}\n${hm(h.start)} to ${h.live ? "now" : hm(h.to)}`);
     }));
     return v_flex().gap(1).child(bar)
-      .child(h_flex().justify_between().child(div().text_size(10.5).text_color(t.dim).child(hm(tl.from)))
-        .child(div().text_size(10.5).text_color(t.dim).child(tl.live ? "now" : hm(tl.to))));
+      .child(h_flex().justify_between().child(div().text_size(TYPE.hint).text_color(t.dim).child(hm(tl.from)))
+        .child(div().text_size(TYPE.hint).text_color(t.dim).child(tl.live ? "now" : hm(tl.to))));
   },
 
   // 3. Step by step, under a heading per round (the build, then each fix round): when each step started, how
@@ -481,23 +483,23 @@ export const ViewsMethods = {
       const words = { "no-handoff": "gave no handoff file", fail: "failed", error: "failed" };
       return [words[o] ?? (o.replace(/[-_]/g, " ") || "?"), OK.has(o) ? t.muted : t.ansi1];
     };
-    const cell = (w, text, color, right = false) => div().w(w).flex_none().text_size(11.5).text_color(color).when(right, (x) => x.text_right()).child(text);
+    const cell = (w, text, color, right = false) => div().w(w).flex_none().text_size(TYPE.label).text_color(color).when(right, (x) => x.text_right()).child(text);
     const rows = [];
-    if (earlier > 0) rows.push(div().text_size(11).text_color(t.dim).child(`${earlier} earlier round${earlier > 1 ? "s" : ""}`));
+    if (earlier > 0) rows.push(div().text_size(TYPE.label).text_color(t.dim).child(`${earlier} earlier round${earlier > 1 ? "s" : ""}`));
     let prevEnd = null, prevWave = null;
     for (const r of keep) {
       const waves = [...new Set(r.steps.map((x) => x.wave))];
       rows.push(h_flex().pt(rows.length ? 4 : 0).gap(8).items_center()
-        .child(div().text_size(10.5).text_color(t.dim).child(r.round ? `FIX ROUND ${r.round}` : "BUILD"))
+        .child(div().text_size(TYPE.hint).text_color(t.dim).child(r.round ? `FIX ROUND ${r.round}` : "BUILD"))
         .child(div().flex_1().h(1).bg(t.border))
-        .child(div().text_size(10.5).text_color(t.dim).child(`wave ${waves.length > 1 ? `${waves[0]}–${waves.at(-1)}` : waves[0]}${r.cost > 0 ? ` · $${r.cost.toFixed(2)}` : ""}`)));
+        .child(div().text_size(TYPE.hint).text_color(t.dim).child(`wave ${waves.length > 1 ? `${waves[0]}–${waves.at(-1)}` : waves[0]}${r.cost > 0 ? ` · $${r.cost.toFixed(2)}` : ""}`)));
       let seenReview = false;
       for (const x of r.steps) {
         const i = all.indexOf(x);
         if (prevEnd !== null && x.start - prevEnd >= 60000) {
           rows.push(h_flex().gap(8).items_center()
             .child(cell(40, "", t.dim)).child(cell(84, "waited", t.dim)).child(cell(40, dur(x.start - prevEnd), t.dim, true))
-            .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(prevWave !== x.wave ? `until wave ${x.wave}` : "for a worker")));
+            .child(div().flex_1().min_w(0).truncate().text_size(TYPE.label).text_color(t.dim).child(prevWave !== x.wave ? `until wave ${x.wave}` : "for a worker")));
         }
         const recheck = x.step === "check" && seenReview;
         if (x.step === "review") seenReview = true;
@@ -506,9 +508,9 @@ export const ViewsMethods = {
           .tooltip(`${x.step}${recheck ? ": checked again after a rebase onto the newer epic branch" : ""}${x.model ? `\n${x.runtime ?? ""}/${x.model}` : ""}${x.cost ? `  $${x.cost.toFixed(2)}` : ""}`)
           .child(cell(40, hm(x.start), t.dim))
           .child(h_flex().w(84).flex_none().gap(5).items_center().child(swatch(t, phaseOf(x.step)).w(6))
-            .child(div().text_size(11.5).text_color(t.foreground).child(recheck ? "re-check" : x.step)))
+            .child(div().text_size(TYPE.label).text_color(t.foreground).child(recheck ? "re-check" : x.step)))
           .child(cell(40, x.step === "merge" ? "" : dur(x.to - x.start), t.muted, true))
-          .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(color).child(text)));
+          .child(div().flex_1().min_w(0).truncate().text_size(TYPE.label).text_color(color).child(text)));
         prevEnd = x.to; prevWave = x.wave;
       }
     }
@@ -520,36 +522,36 @@ export const ViewsMethods = {
   gateBlock(t, b) {
     const qs = b.gate.questions ?? [], a = this.draft(b);
     const box = v_flex().gap(4); // the gate's kind is the row's tag already (limit, questions)
-    if (!qs.length) box.child(div().id(`why-${b.id}`).text_size(12).text_color(t.foreground).tooltip(tipText(b.gate.reason ?? "")).child(gateText(b.gate)));
+    if (!qs.length) box.child(div().id(`why-${b.id}`).text_size(TYPE.meta).text_color(t.foreground).tooltip(tipText(b.gate.reason ?? "")).child(gateText(b.gate)));
     qs.forEach((q, i) => {
       const text = typeof q === "string" ? q : q.text ?? q.question ?? JSON.stringify(q);
-      box.child(div().pt(2).text_size(12).text_color(t.foreground).child(`${qs.length > 1 ? `${i + 1}. ` : ""}${text}`));
+      box.child(div().pt(2).text_size(TYPE.meta).text_color(t.foreground).child(`${qs.length > 1 ? `${i + 1}. ` : ""}${text}`));
       (q.options ?? []).forEach((o, j) => {
         const on = a?.picks[i] === j;
         box.child(h_flex().id(`opt-${b.id}-${i}-${j}`).gap(6).items_start().px(6).py(3).rounded(5)
           .when(on, (el) => el.bg(t.border)).hover((el) => el.bg(t.border))
           .on_click((_e, cx) => { const ans = this.answerOf(b); if (ans) ans.picks[i] = ans.picks[i] === j ? null : j; cx.notify(); })
-          .child(div().flex_none().w(14).text_size(12).text_color(on ? t.accent : t.dim).child(on ? "●" : "○"))
-          .child(div().flex_1().min_w(0).text_size(11.5).text_color(on ? t.foreground : t.muted).child(o))
-          .when(o === q.default, (el) => el.child(div().flex_none().text_size(10.5).text_color(t.dim).child("proposed"))));
+          .child(div().flex_none().w(14).text_size(TYPE.meta).text_color(on ? t.accent : t.dim).child(on ? "●" : "○"))
+          .child(div().flex_1().min_w(0).text_size(TYPE.label).text_color(on ? t.foreground : t.muted).child(o))
+          .when(o === q.default, (el) => el.child(div().flex_none().text_size(TYPE.hint).text_color(t.dim).child("proposed"))));
       });
     });
     if (!this.answerable(b)) return box;
     // Nothing was asked (a step failed): resume is the way on (the first action); a note for the agent is optional.
-    if (!qs.length && !a?.noting) return box.child(div().id(`note-${b.id}`).text_size(11.5).text_color(t.dim).hover((x) => x.text_color(t.foreground))
+    if (!qs.length && !a?.noting) return box.child(div().id(`note-${b.id}`).text_size(TYPE.label).text_color(t.dim).hover((x) => x.text_color(t.foreground))
       .tooltip("fleet answer: the agent reads your note when it resumes").on_click((_e, cx) => { const n = this.answerOf(b); if (n) { n.noting = true; this.focusSoon(n.area, cx); } cx.notify(); })
       .child("+ resume with a note for the agent"));
-    if (!a) return box.child(div().id(`ans-${b.id}`).px(10).h(24).rounded(5).border_1().border_color(t.border).text_size(11.5).text_color(t.foreground).flex().items_center()
+    if (!a) return box.child(div().id(`ans-${b.id}`).px(10).h(24).rounded(5).border_1().border_color(t.border).text_size(TYPE.label).text_color(t.foreground).flex().items_center()
       .gap(4).hover((x) => x.bg(t.border)).on_click((_e, cx) => { this.focusSoon(this.answerOf(b)?.area, cx); cx.notify(); })
-      .child(div().text_size(10.5).text_color(t.dim).child("p")).child("Answer here"));
+      .child(div().text_size(TYPE.hint).text_color(t.dim).child("p")).child("Answer here"));
     return box
-      .child(Textarea.new(a.area).w_full().px(6).py(4).rounded(5).border_1().border_color(this.typing ? t.accent : t.border).bg(t.background).text_size(12).text_color(t.foreground))
+      .child(Textarea.new(a.area).w_full().px(6).py(4).rounded(5).border_1().border_color(this.typing ? t.accent : t.border).bg(t.background).text_size(TYPE.meta).text_color(t.foreground))
       .child(h_flex().gap(8).items_center()
-        .child(div().id(`send-${b.id}`).px(12).h(24).rounded(5).bg(a.sending ? t.border : t.accent).text_size(11.5).font_semibold().text_color(t.background).flex().items_center()
+        .child(div().id(`send-${b.id}`).px(12).h(24).rounded(5).bg(a.sending ? t.border : t.accent).text_size(TYPE.label).font_semibold().text_color(t.background).flex().items_center()
           .tooltip(`fleet answer ${b.id} with:\n${this.answerText(b, a) || "(nothing chosen yet)"}`)
           .when(!a.sending, (el) => el.on_click((_e, cx) => { cx.spawn((cx) => this.sendAnswer(cx, b)); }))
           .child(a.sending ? "Sending…" : qs.length ? "Send answer" : "Resume with this note"))
-        .child(div().text_size(10.5).text_color(t.dim).child("the next wave goes on with it")));
+        .child(div().text_size(TYPE.hint).text_color(t.dim).child("the next wave goes on with it")));
   },
 
   // One line per bead: state, id, title, what the row adds to its section, time and cost. A parked bead adds
@@ -599,14 +601,14 @@ export const ViewsMethods = {
       if (!pathShown && ["queued", "blocked", "done"].includes(sec.state)) { pathShown = true; out.push(this.criticalPath(t, mono, g, short)); }
       out.push(h_flex().id(`sec-${sec.state}`).px(10).pt(8).pb(2).gap(6).items_center()
         .when(Boolean(sec.fold), (el) => el.hover((x) => x.bg(t.hover)).on_click((_e, cx) => { this.showDone = !this.showDone; cx.notify(); }))
-        .child(div().text_size(11).font_semibold().text_color(sec.state === "parked" ? t.ansi1 : t.dim).child(sec.label.toUpperCase()))
-        .child(div().text_size(11).text_color(t.dim).child(dropped ? `${list.length - dropped} · ${dropped} dropped` : String(list.length)))
-        .when(Boolean(sec.fold), (el) => el.child(div().text_size(11).text_color(t.dim).child(this.showDone ? "▾ 0" : "▸ 0"))));
+        .child(div().text_size(TYPE.label).font_semibold().text_color(sec.state === "parked" ? t.ansi1 : t.dim).child(sec.label.toUpperCase()))
+        .child(div().text_size(TYPE.label).text_color(t.dim).child(dropped ? `${list.length - dropped} · ${dropped} dropped` : String(list.length)))
+        .when(Boolean(sec.fold), (el) => el.child(div().text_size(TYPE.label).text_color(t.dim).child(this.showDone ? "▾ 0" : "▸ 0"))));
       if (sec.fold && !this.showDone && !this.filter) continue;
       for (const b of list) out.push(this.row(t, b, mono, g, short, now));
     }
     if (!pathShown) out.push(this.criticalPath(t, mono, g, short));
-    if (!out.length) out.push(div().p(10).text_size(12).text_color(t.dim).child(this.filter ? `No bead matches “${this.filter}”.` : "The run holds no beads yet."));
+    if (!out.length) out.push(div().p(10).text_size(TYPE.meta).text_color(t.dim).child(this.filter ? `No bead matches “${this.filter}”.` : "The run holds no beads yet."));
     return out;
   },
 
@@ -618,9 +620,9 @@ export const ViewsMethods = {
     const n = g.chain.length;
     return h_flex().id("critical-path").px(10).pt(8).pb(2).gap(6).items_center()
       .tooltip(`The longest chain of open beads, each waiting for the one before: ${n} merges in a row${perHour > 0 ? `, at least ~${dur((n / perHour) * 3600000)} at the current pace` : ""}`)
-      .child(div().flex_none().text_size(11).font_semibold().text_color(t.accent).child("CRITICAL PATH"))
-      .child(div().flex_1().min_w(0).truncate().font_family(mono).text_size(11).text_color(t.dim).child(g.chain.map(short).join(" → ")))
-      .when(perHour > 0, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(`~${dur((n / perHour) * 3600000)}`)));
+      .child(div().flex_none().text_size(TYPE.label).font_semibold().text_color(t.accent).child("CRITICAL PATH"))
+      .child(div().flex_1().min_w(0).truncate().font_family(mono).text_size(TYPE.label).text_color(t.dim).child(g.chain.map(short).join(" → ")))
+      .when(perHour > 0, (el) => el.child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child(`~${dur((n / perHour) * 3600000)}`)));
   },
 
   lanes(t, mono, g, short, now) {
@@ -662,7 +664,7 @@ export const ViewsMethods = {
     const zoomed = this.win?.wave ?? null, zr = zoomed !== null ? ranges.get(zoomed) : null;
     const sel = this.sel ? [Math.min(this.sel.a, this.sel.b), Math.max(this.sel.a, this.sel.b)] : null;
     const axis = h_flex().px(10).pt(8).pb(2).gap(6)
-      .child(div().w(this.idW + 18).flex_none().text_size(10.5).text_color(t.dim)
+      .child(div().w(this.idW + 18).flex_none().text_size(TYPE.hint).text_color(t.dim)
         .child(win ? day(from) : live ? "" : new Date(to).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })))
       // Drag across it to look at that time; a wave's number shows that wave; a double-click goes back to now.
       .child(div().id("axis").flex_1().relative().h(31).cursor_crosshair()
@@ -680,9 +682,9 @@ export const ViewsMethods = {
         .when(Boolean(sel), (el) => el.child(div().absolute().top(0).h(31).rounded(2).bg(t.accent).opacity(0.25)
           .left(`${sel[0] * 100}%`).w(`${Math.max(0.3, (sel[1] - sel[0]) * 100)}%`)))
         .children([4, 3, 2, 1, 0].map((k, i) => (k ? div().absolute().left(`${i * 25}%`) : div().absolute().right(0))
-          .top(0).text_size(10.5).text_color(t.dim).child(win ? clock(to - k * quarter) : k ? `-${dur(k * quarter)}` : live ? "now" : "end")))
+          .top(0).text_size(TYPE.hint).text_color(t.dim).child(win ? clock(to - k * quarter) : k ? `-${dur(k * quarter)}` : live ? "now" : "end")))
         .children(ticks)
-        .children(labelled.map(([w, at]) => div().id(`wave-${w}`).absolute().top(12).px(2).rounded(2).text_size(10).cursor_pointer()
+        .children(labelled.map(([w, at]) => div().id(`wave-${w}`).absolute().top(12).px(2).rounded(2).text_size(TYPE.hint).cursor_pointer()
           .text_color(w === zoomed ? t.foreground : t.dim).hover((x) => x.text_color(t.foreground).bg(t.hover)).left(pos(at))
           .tooltip(`Wave ${w}: ${hm(ranges.get(w).from)}–${hm(ranges.get(w).to)}, ${dur(ranges.get(w).to - ranges.get(w).from)} · click to zoom in`)
           .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.keepKeys(); this.zoomWave(w); cx.notify(); })
@@ -694,7 +696,7 @@ export const ViewsMethods = {
       return shown.reduce((n, b) => n + (b.history.some((h) => AGENT_STEPS.has(h.step) && h.start <= at && endOf(h) > at) ? 1 : 0), 0);
     });
     const concRow = h_flex().id("conc").px(10).pb(4).gap(6).items_end().tooltip(`Agents at work, of ${max}. Checks and merges don't take one.`)
-      .child(div().w(this.idW + 18).flex_none().text_size(10.5).text_color(t.dim).child("busy"))
+      .child(div().w(this.idW + 18).flex_none().text_size(TYPE.hint).text_color(t.dim).child("busy"))
       .child(h_flex().flex_1().h(16).gap(1).items_end()
         .children(conc.map((n) => div().flex_1().h(Math.max(1, Math.min(16, Math.round((n / max) * 16)))).rounded(1).bg(n >= max ? t.ansi4 : n ? t.muted : t.border))));
     const rows = shown.map((b) => this.item(t, b, g, now, `lane-${b.id}`, h_flex().px(10).h(ROW.h).gap(6).items_center()
@@ -724,10 +726,10 @@ export const ViewsMethods = {
       .children(PHASES.map((ph) => h_flex().id(`ph-${ph.id}`).gap(4).items_center().h(12)
         .tooltip(`${ph.steps.filter((x) => STEPS.includes(x)).join(", ")}: ${ph.agent ? "an agent at work (a full bar)" : "no agent (a thin line)"}`)
         .child(swatch(t, ph))
-        .child(div().text_size(11).text_color(t.dim).child(ph.label))))
-      .child(h_flex().gap(4).items_center().h(12).child(div().w(2).h(12).rounded(1).bg(t.ansi1)).child(div().text_size(11).text_color(t.dim).child("sent back")))
-      .child(h_flex().gap(4).items_center().h(12).child(div().w(14).h(2).bg(t.ansi1)).child(div().text_size(11).text_color(t.dim).child("waiting for you")));
-    if (!rows.length) rows.push(div().px(10).py(6).text_size(12).text_color(t.dim).child(win ? `Nothing ran from ${clock(from)} to ${clock(to)}: [ zooms out, { } move, esc goes back to now.` : `Nothing ran in this ${dur(span)}: ] shows more.`));
+        .child(div().text_size(TYPE.label).text_color(t.dim).child(ph.label))))
+      .child(h_flex().gap(4).items_center().h(12).child(div().w(2).h(12).rounded(1).bg(t.ansi1)).child(div().text_size(TYPE.label).text_color(t.dim).child("sent back")))
+      .child(h_flex().gap(4).items_center().h(12).child(div().w(14).h(2).bg(t.ansi1)).child(div().text_size(TYPE.label).text_color(t.dim).child("waiting for you")));
+    if (!rows.length) rows.push(div().px(10).py(6).text_size(TYPE.meta).text_color(t.dim).child(win ? `Nothing ran from ${clock(from)} to ${clock(to)}: [ zooms out, { } move, esc goes back to now.` : `Nothing ran in this ${dur(span)}: ] shows more.`));
     // The time axis and the busy row stay put above the scrolling lanes (render() draws them).
     this.pinned = v_flex().border_b_1().border_color(t.border).child(axis).child(concRow);
     return [...rows, legend];
@@ -736,7 +738,7 @@ export const ViewsMethods = {
   // ? : every key, in the git graph's and the beads view's words.
   keyList(t) {
     const rows = [
-      ["j k  ↑ ↓", "move (ctrl-d ctrl-u a page, g G top and bottom)"],
+      ...moveHelp("bead by bead"),
       ["⏎ ⇥", "open or close the bead's details"],
       ["l →  h ← x", "open / close the details"],
       ["space", "its first action (answer a question, resume, tail, diff); one that changes the run asks first"],
@@ -756,10 +758,10 @@ export const ViewsMethods = {
       ["< >", "Lanes: the wave before / after (click a wave's number); after the last, back to now"],
       ["{ }", "Lanes: move back / on in time (or swipe sideways); esc goes back to now"],
       ["r", "read the run again"],
-      ["?", "this list (any key closes it)"],
+      HELP_ROW,
     ];
     return [v_flex().px(10).py(10).gap(3)
-      .child(div().pb(4).text_size(11).font_semibold().text_color(t.dim).child("KEYS"))
+      .child(div().pb(4).text_size(TYPE.label).font_semibold().text_color(t.dim).child("KEYS"))
       .children(rows.map(([keys, what]) => h_flex().gap(10)
         .child(div().w(90).flex_none().text_size(ROW.small).text_color(t.foreground).child(keys))
         .child(div().flex_1().min_w(0).text_size(ROW.small).text_color(t.muted).child(what))))];
@@ -772,10 +774,10 @@ export const ViewsMethods = {
       : p.kind === "old" ? "Update the agent-fleet plugin in Claude Code (/plugin), then /reload-plugins."
         : p.kind === "missing" ? "Install agent-fleet and run `fleet install-cli`, or name a fleet in ~/.config/herdr-app/data/workbench.json." : "";
     return v_flex().p(14).gap(6)
-      .child(div().text_size(14).font_semibold().text_color(t.foreground).child(title))
-      .when(Boolean(p?.message), (el) => el.child(div().text_size(12).text_color(t.muted).child(p.message)))
-      .when(Boolean(hint), (el) => el.child(div().text_size(12).text_color(t.dim).child(hint)))
-      .when(Boolean(p?.cwd), (el) => el.child(div().text_size(11).text_color(t.dim).child(p.cwd)));
+      .child(div().text_size(TYPE.heading).font_semibold().text_color(t.foreground).child(title))
+      .when(Boolean(p?.message), (el) => el.child(div().text_size(TYPE.meta).text_color(t.muted).child(p.message)))
+      .when(Boolean(hint), (el) => el.child(div().text_size(TYPE.meta).text_color(t.dim).child(hint)))
+      .when(Boolean(p?.cwd), (el) => el.child(div().text_size(TYPE.label).text_color(t.dim).child(p.cwd)));
   },
 
 };

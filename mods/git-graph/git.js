@@ -4,6 +4,7 @@
 // the menus. Commands are argv arrays, never a shell line.
 
 import { removeWorktreeArgs, deleteBranchArgs } from "./lib/worktree.js";
+import { word } from "./lib/menu.js";
 
 // Reads write nothing under .git (no index refresh or lock, no fsmonitor
 // cookie), so the folder watch never wakes for the panel's own reads.
@@ -282,6 +283,11 @@ export function createdWorktree(a, v = {}, ctx = {}) {
 }
 const section = (...items) => items.filter(Boolean);
 const item = (label, icon, action) => ({ label, icon, action });
+// An item with the words every menu uses (lib/menu.js): wi(key, action), or wi(key, icon, { asks }, action).
+const wi = (key, ...rest) => {
+  const action = rest.pop(), [icon = null, opts = {}] = rest, w = word(key, opts);
+  return item(w.label, icon ?? w.icon, action);
+};
 
 // The right-click menu for a commit, a label part or the uncommitted row:
 // Git Graph's menus, minus what needs VS Code. Sections are separated.
@@ -291,10 +297,10 @@ export function menuFor(target, ctx) {
   let sections;
   if (target.kind === "uncommitted") {
     sections = [
-      section(item("Commit…", "commit", { type: "commit", staged: Boolean(target.staged) })),
-      section(item("Stash uncommitted changes…", "stash", { type: "stash" })),
-      section(item("Reset uncommitted changes…", "reset", { type: "resetUncommitted" })),
-      section(item("Show changes", "mods/changes/changes.svg", { type: "showChanges" })),
+      section(wi("commit", { type: "commit", staged: Boolean(target.staged) })),
+      section(wi("stash", { type: "stash" })),
+      section(wi("resetUncommitted", { type: "resetUncommitted" })),
+      section(wi("showChanges", "mods/changes/changes.svg", { type: "showChanges" })),
     ];
   } else if (target.kind === "branch") {
     const name = target.name, current = name === ctx.current, wt = worktreeOf(ctx, name);
@@ -318,13 +324,13 @@ export function menuFor(target, ctx) {
       section((() => {
         const up = ctx.tracking?.[name];
         const { remote, branch } = up && !up.gone && up.short ? splitRemote(up.short, ctx.remotes) : {};
-        return ctx.web && remote === "origin" && item("Open branch on GitHub", "external", { type: "openUrl", url: branchUrl(ctx.web, branch) });
+        return ctx.web && remote === "origin" && wi("branchOnGitHub", { type: "openUrl", url: branchUrl(ctx.web, branch) });
       })(),
-        item("Copy branch name", "copy", { type: "copy", text: name }),
+        wi("copyBranch", { type: "copy", text: name }),
         wt && item("Copy worktree path", "copy", { type: "copy", text: wt })),
       // Never the main checkout (seen from a linked worktree, its branch has a worktree path too).
-      section(!current && !wt && item("Delete branch…", "trash", { type: "deleteBranch", name }),
-        wt && wt !== ctx.mainRoot && item("Remove worktree…", "trash", { type: "removeWorktree", name, path: wt })),
+      section(!current && !wt && wi("deleteBranch", { type: "deleteBranch", name }),
+        wt && wt !== ctx.mainRoot && wi("removeWorktree", { type: "removeWorktree", name, path: wt })),
     ];
   } else if (target.kind === "remote") {
     const name = target.name, { remote, branch } = splitRemote(name, ctx.remotes);
@@ -338,8 +344,8 @@ export function menuFor(target, ctx) {
           item(`Checkout as ${branch} in a new worktree`, "folder", { type: "checkoutRemote", name, remote, branch, where: "worktree" }),
           item("Checkout as…", "rename", { type: "checkoutRemote", name, remote, branch })])),
       section(item(`Merge into ${cur}…`, "merge", { type: "merge", ref: name, what: `remote branch ${name}` })),
-      section(ctx.web && remote === "origin" && item("Open branch on GitHub", "external", { type: "openUrl", url: branchUrl(ctx.web, branch) }),
-        item("Copy branch name", "copy", { type: "copy", text: name })),
+      section(ctx.web && remote === "origin" && wi("branchOnGitHub", { type: "openUrl", url: branchUrl(ctx.web, branch) }),
+        wi("copyBranch", { type: "copy", text: name })),
       section(item("Delete remote branch…", "trash", { type: "deleteRemoteBranch", name, remote, branch })),
     ];
   } else if (target.kind === "tag") {
@@ -362,7 +368,7 @@ export function menuFor(target, ctx) {
         item(`Reset ${cur} to this commit…`, "reset", { type: "reset", hash, short }),
         // As Fork does: move another local branch here (only its pointer; no working tree is touched).
         movable(ctx).length > 0 && item("Reset a branch to this commit…", "reset", { type: "resetBranch", hash, short })),
-      section(ctx.web && item("Open commit on GitHub", "external", { type: "openUrl", url: commitUrl(ctx.web, hash) }),
+      section(ctx.web && wi("commitOnGitHub", { type: "openUrl", url: commitUrl(ctx.web, hash) }),
         item("Copy commit hash", "copy", { type: "copy", text: hash }),
         item("Copy commit subject", "copy", { type: "copy", text: c.subject })),
     ];
@@ -388,23 +394,23 @@ const mergeNote = (a) => (a.merge ? " It's a merge commit: its changes against i
 function repoMenu(r, ctx) {
   const st = r.status ?? {}, branch = st.branch, remote = ctx.remotes.length > 0;
   // Always Fetch, Pull, Push (as Fork's toolbar and every menu here), so each is where it was last time.
-  const pull = remote && st.upstream && !st.gone && item("Pull…", "pull", { type: "pull", upstream: st.upstream });
-  const push = remote && branch && item(st.upstream ? "Push…" : "Push and set upstream…", "push", { type: "push", name: branch });
-  const fetch = remote && item("Fetch", "sync", { type: "fetch" });
+  const pull = remote && st.upstream && !st.gone && wi("pull", null, { asks: true }, { type: "pull", upstream: st.upstream });
+  const push = remote && branch && item(st.upstream ? word("push", { asks: true }).label : "Push and set upstream…", word("push").icon, { type: "push", name: branch });
+  const fetch = remote && wi("fetch", { type: "fetch" });
   const sync = [fetch, pull, push];
   return [
     // From outside the git view (the status bar's branch): the repository in it.
-    [...(r.gitView ? [item("Open in git view", "graph", { type: "openGitView", folder: r.path })] : []),
+    [...(r.gitView ? [wi("gitView", { type: "openGitView", folder: r.path })] : []),
       ...r.agents.slice(0, 3).map((a) => ({ ...item(`New ${a.name} tab`, a.icon ?? "plus", { type: "newTab", folder: r.path, name: a.name, argv: a.run }), image: Boolean(a.icon) && !a.tint })),
       item("New terminal tab", "plus", { type: "newTab", folder: r.path })],
     section(...sync),
-    st.dirty > 0 ? section(item("Commit…", "commit", { type: "commit", staged: st.staged > 0 }),
-      item("Stash uncommitted changes…", "stash", { type: "stash" }),
-      item("Reset uncommitted changes…", "reset", { type: "resetUncommitted" })) : [],
-    section(r.web && item(r.web.split("/")[2] === "github.com" ? "Open on GitHub" : `Open on ${r.web.split("/")[2]}`, "external", { type: "openUrl", url: r.web }),
-      !ctx.on && item("Reveal in Finder", "folder", { type: "reveal", path: r.path }),
-      item("Copy path", "copy", { type: "copy", text: r.path }),
-      branch && item("Copy branch name", "copy", { type: "copy", text: branch })),
+    st.dirty > 0 ? section(wi("commit", { type: "commit", staged: st.staged > 0 }),
+      wi("stash", { type: "stash" }),
+      wi("resetUncommitted", { type: "resetUncommitted" })) : [],
+    section(r.web && item(r.web.split("/")[2] === "github.com" ? word("github").label : `Open on ${r.web.split("/")[2]}`, word("github").icon, { type: "openUrl", url: r.web }),
+      !ctx.on && wi("reveal", { type: "reveal", path: r.path }),
+      wi("copyPath", { type: "copy", text: r.path }),
+      branch && wi("copyBranch", { type: "copy", text: branch })),
   ].filter((s) => s.length).flatMap((s, i) => (i ? [{ separator: true }, ...s] : s));
 }
 

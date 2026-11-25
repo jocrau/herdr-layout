@@ -13,6 +13,7 @@ import { location, PAGE, withDefaults, isRefChange, inGitDir, tilde, sameFiles, 
 import { folderState, readFolder, readLog } from "./reads.js";
 import { platform } from "./tools.js";
 import { passBehind } from "./lib/behind.js";
+import { runTestKey } from "./lib/testkeys.js";
 
 export class Graph {
   init(cx) {
@@ -81,6 +82,10 @@ export class Graph {
     cx.spawn(async (cx) => {
       for (;;) {
         const c = String(await nextCommand()).replace(/^git-graph\./, ""), inDialog = Boolean(props()?.overlay);
+        // The demo's scripts press keys here (lib/testkeys.js); off outside the demo. Esc goes the way the key does
+        // (its action); keys that change a repository or reach GitHub aren't pressed.
+        if (await runTestKey("git-graph", c, cx, (e, kcx) => (e.keystroke === "escape" ? this.escapeKey(kcx) : this.onKey?.(e, kcx)),
+          () => this.testState(), (k) => this.testRefuses(k))) { cx.notify(); continue; }
         // The window's keys (tabs, spaces, agents, panes): kept while it's a dialog (keys.json's mod:git-graph).
         if (passBehind(c, inDialog, run)) { cx.notify(); continue; }
         if (c === "prev-pr" || c === "next-pr") {
@@ -256,6 +261,26 @@ export class Graph {
 
   // ---- drawing
 
+  // What a test key script checks (lib/testkeys.js): what has the keyboard and what's open, in Esc's order.
+  testState() {
+    return {
+      shown: Boolean(props()?.overlay), state: this.state ?? null, pr: Boolean(this.prMode?.()), fromGraph: Boolean(this.pr?.fromGraph),
+      help: Boolean(this.help), repos: Boolean(this.rp), branches: Boolean(this.bp), search: Boolean(this.search?.open),
+      searchTyping: Boolean(this.search?.typing), query: this.search?.query ?? "", mark: Boolean(this.mark), picking: Boolean(this.picking),
+      review: Boolean(this.selected), opened: Boolean(this.opened), cursor: this.cursorIndex?.() ?? null, rows: this.commits?.length ?? 0,
+      index: this.cursorIndex?.() ?? -1, atEnd: (this.commits?.length ?? 0) > 0 && this.cursorIndex?.() === this.commits.length - 1,
+    };
+  }
+
+  // Keys a test script may not press (lib/testkeys.js): ones that fetch, pull, push, commit or branch, open an
+  // editor or a tab, use the clipboard, and in the PR view ones that post, resolve or type into an agent's session.
+  testRefuses(k) {
+    if (["f", "shift-f", "shift-p", "shift-c", "shift-b", "space", "o", "d", "t", "y", "cmd-enter"].includes(k)) return "it changes the repository, reaches GitHub or leaves the view";
+    const pr = this.pr && !this.pr.lite;
+    if (pr && (k === "shift-r" || ["w", "a", "u", "s"].includes(k) || (k === "enter" && this.pr.confirm))) return "in the PR view it posts, resolves or answers";
+    return null;
+  }
+
   // Esc, from its action (see bindEscape): the key handler's own steps; with nothing of ours left to close, the
   // dialog closes (an action passed on unhandled reaches Herdr as an unknown command, not as its Esc).
   escapeKey(cx) {
@@ -288,7 +313,7 @@ export class Graph {
     this.prSlug(cx); // for the PR stage on branches
     this.prFollow(cx); // the PR view: another PR asked for
     const graph = v_flex().id("git-graph").size_full().min_h(0).when(!this.prMode(), (e) => e.rounded(10).border_1().border_color(t.border)).overflow_hidden().bg(t.background)
-      .text_color(t.foreground).text_size(12.5).track_focus(this.handle)
+      .text_color(t.foreground).text_size(TYPE.body).track_focus(this.handle)
       .key_context("GitGraph").on_action("git_graph_escape", (_a, cx) => this.escapeKey(cx))
       .on_mouse_move((e, cx) => this.moveDrag(e, cx))
       .on_mouse_up("left", (_e, cx) => this.endDrag(cx))
@@ -398,4 +423,5 @@ import { PickersMethods } from "./pickers.js";
 import { ReviewMethods } from "./review.js";
 import { TableMethods } from "./table.js";
 import { PrMethods } from "./pr.js";
+import { TYPE } from "./lib/type.js";
 Object.assign(Graph.prototype, ManygitMethods, PickersMethods, ReviewMethods, TableMethods, PrMethods);

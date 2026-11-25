@@ -1,4 +1,5 @@
 // Fleet board: what the views compute from a snapshot, with no Herdr or UI imports (tests import it).
+import { TYPE } from "./lib/type.js";
 
 export const STEPS = ["implement", "fix", "review", "check", "merge"];
 export const VIEWS = [{ id: "board", label: "Board" }, { id: "lanes", label: "Lanes" }];
@@ -38,7 +39,7 @@ export const SECTIONS = [
 
 // One row size for every view (Board, Lanes), so a bead's row keeps its height and its id its place
 // when you switch: the row's height, the id's size, the title's, and the small print's.
-export const ROW = { h: 24, id: 12.5, text: 12, small: 11.5 };
+export const ROW = { h: 24, id: TYPE.body, text: TYPE.meta, small: TYPE.label }; // text sizes from lib/type.js
 
 export const OK = new Set(["pass", "done", "merged"]);
 export const BAD = new Set(["fail", "changes"]);

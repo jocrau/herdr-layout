@@ -3,6 +3,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState, VirtualListScrollHandle } from "gpui-base";
 import { props, shared, spaces, panes, focused, run, readTextFile, writeTextFile, watchFolder, settings, nextCommand, exec, window } from "herdr";
 import { passBehind } from "./lib/behind.js";
+import { runTestKey } from "./lib/testkeys.js";
 import { target, dirname, basename, extension, kind, richText, codeKind, treeKind, resolveLink, imageSize, normalize } from "./paths.js";
 import { appearance, sourceStyle } from "./appearance.js";
 import { toTerminal } from "./lib/sidecolumn.js";
@@ -12,6 +13,7 @@ import { markdownView } from "./markdown-view.js";
 import { structuredPreview } from "./structured.js";
 import { structuredView } from "./structured-view.js";
 import { Tree } from "./tree.js";
+import { TYPE } from "./lib/type.js";
 
 const TEXT_LIMIT = 400000;
 const LANGUAGE = { md: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", yml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
@@ -44,7 +46,7 @@ const ICONS = {
 function button(id, label, colors, action, enabled = true, selected = false, icon = ICONS[id]) {
   const title = { "←": "Back", "−": "Zoom out", "+": "Zoom in", "100%": "Actual size" }[label] || label;
   return div().id(id).h(icon ? 26 : 28).when(Boolean(icon), el => el.w(26)).when(!icon, el => el.px(8))
-    .flex_none().flex().items_center().justify_center().rounded(6).text_size(12)
+    .flex_none().flex().items_center().justify_center().rounded(6).text_size(TYPE.meta)
     .role("button").accessibility_label(title).disabled(!enabled).cursor_default()
     .text_color(enabled ? selected ? colors.foreground : colors.muted : colors.dim)
     .tooltip(title)
@@ -87,6 +89,8 @@ export default class Viewer extends View {
     cx.spawn(async cx => {
       for (;;) {
         const command = String(await nextCommand()).replace(/^file-browser\./, "");
+        // The demo's scripts press keys here (lib/testkeys.js, the file browser's testPress); off outside the demo.
+        if (this.testPress && await runTestKey("file-browser", command, cx, (e, kcx) => this.testPress(e, kcx), () => this.testState(), (k) => this.testRefuses(k))) { cx.notify(); continue; }
         // The window's keys (tabs, spaces, agents, panes): kept while it's a dialog, run when it's the side panel.
         if (passBehind(command, Boolean(props()?.overlay), run)) continue;
         if (command === "leave") toTerminal();
@@ -659,12 +663,12 @@ export default class Viewer extends View {
     }
     const panelFrame = this.owner.mode === "files" || this.owner.mode === "paired";
     return v_flex().id("preview-plus").size_full().min_w(0).min_h(0).overflow_hidden().bg(colors.background)
-      .when(panelFrame, el => el.rounded(10).border_1().border_color(colors.border)).text_color(colors.foreground).font_family(font).text_size(13)
+      .when(panelFrame, el => el.rounded(10).border_1().border_color(colors.border)).text_color(colors.foreground).font_family(font).text_size(TYPE.title)
       .on_key_down((event, cx) => this.keyDown(event, cx))
       .child(h_flex().id("preview-toolbar").h(42).flex_none().px(8).gap(2).items_center().border_b(0.5).border_color(colors.border)
         .when(Boolean(file) && this.owner.mode !== "pane", el => el.child(button("preview-back", "←", colors, cx => this.back(cx))))
         .child(div().flex_1().min_w(0).px(4).font_semibold().truncate().when(Boolean(file), el => el.tooltip(file)).child(file ? basename(file) : "Files"))
-        .when(Boolean(file && this.selected?.rev), el => el.child(div().flex_none().px(6).py(1).rounded(4).bg(colors.selected).text_size(11.5).text_color(colors.muted)
+        .when(Boolean(file && this.selected?.rev), el => el.child(div().flex_none().px(6).py(1).rounded(4).bg(colors.selected).text_size(TYPE.label).text_color(colors.muted)
           .tooltip(`As it was at commit ${this.selected.rev}`).child(`@ ${this.selected.rev.slice(0, 8)}`)))
         .when(this.dirty() || Boolean(this.document?.saving), el => el.child(div().id("preview-dirty").size(6).mr(4).flex_none().rounded_full().bg(colors.muted)
           .tooltip(this.document?.saving ? "Saving…" : "Unsaved changes").accessibility_label(this.document?.saving ? "Saving" : "Unsaved changes")))
@@ -686,9 +690,9 @@ export default class Viewer extends View {
           .child(button("preview-save", this.document.saving ? "Saving…" : `Save (${window()?.platform === "macos" ? "⌘S" : "Ctrl+S"})`, colors, cx => this.save(cx), this.dirty() && !this.document.saving)))
         .when(Boolean(file), el => el.child(button("preview-open", "Open", colors, cx => this.open(cx), !this.selected.on)))
         .when(!file, el => el.child(button("preview-refresh", "Refresh", colors, cx => this.reload(cx), Boolean(this.tree) && !this.tree.loading))))
-      .when(Boolean(file || this.owner.cwd), el => el.child(div().h(28).flex_none().px(16).flex().items_center().text_size(12).text_color(colors.muted).truncate().child(file ? dirname(file) : this.owner.cwd)))
-      .when(Boolean(this.document?.external), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child("File changed on disk. Your draft is retained; saving checks for conflicts.")))
-      .when(Boolean(this.document?.saveError || this.draftError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.document?.saveError || this.draftError)))
+      .when(Boolean(file || this.owner.cwd), el => el.child(div().h(28).flex_none().px(16).flex().items_center().text_size(TYPE.meta).text_color(colors.muted).truncate().child(file ? dirname(file) : this.owner.cwd)))
+      .when(Boolean(this.document?.external), el => el.child(div().px(16).py(8).text_size(TYPE.meta).text_color(colors.muted).child("File changed on disk. Your draft is retained; saving checks for conflicts.")))
+      .when(Boolean(this.document?.saveError || this.draftError), el => el.child(div().px(16).py(8).text_size(TYPE.meta).text_color(colors.ansi1).child(this.document?.saveError || this.draftError)))
       .when(media, el => el.child(h_flex().flex_none().min_h(36).px(8).gap(2).flex_wrap().items_center().border_b_1().border_color(colors.border)
         .child(button("preview-fit", "Fit", colors, cx => this.setZoom(null, cx), Boolean(this.media), this.zoom === null))
         .child(button("preview-zoom-out", "−", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) / 1.25, cx), Boolean(this.media) && (this.zoom ?? this.fitScale()) > 0.05))
@@ -696,22 +700,22 @@ export default class Viewer extends View {
           .border(0.5).border_color(colors.border).rounded(6).text_color(colors.foreground)
           .child(Input.new(this.zoomInput).id("preview-zoom-percent")
             .w(Math.min(70, Math.max(24, this.zoomInput.value().length * 7.2 + 2))).h(24).px(0)
-            .font_family("Geist Mono").text_size(12).disabled(!this.media).accessibility_label("Zoom percentage (5–800%)")))
+            .font_family("Geist Mono").text_size(TYPE.meta).disabled(!this.media).accessibility_label("Zoom percentage (5–800%)")))
         .child(button("preview-zoom-in", "+", colors, cx => this.setZoom((this.zoom ?? this.fitScale()) * 1.25, cx), Boolean(this.media) && (this.zoom ?? this.fitScale()) < 8))
         .child(div().flex_1())
         .when(type === "pdf", el => el
           .child(button("preview-previous", "Previous", colors, cx => this.turnPage(-1, cx), !this.loading && this.total > 0 && this.page > 1))
-          .child(div().px(6).text_size(12).text_color(colors.muted).child(`${this.page} / ${this.total || "…"}`))
+          .child(div().px(6).text_size(TYPE.meta).text_color(colors.muted).child(`${this.page} / ${this.total || "…"}`))
           .child(button("preview-next", "Next", colors, cx => this.turnPage(1, cx), !this.loading && this.page < this.total)))))
-      .when(Boolean(this.actionError), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.ansi1).child(this.actionError)))
-      .when(Boolean(this.imageWarning && !this.source), el => el.child(div().px(16).py(8).text_size(12).text_color(colors.muted).child(this.selected?.on ? "Inline images are only available for local files." : "Some inline images could not be loaded.")))
+      .when(Boolean(this.actionError), el => el.child(div().px(16).py(8).text_size(TYPE.meta).text_color(colors.ansi1).child(this.actionError)))
+      .when(Boolean(this.imageWarning && !this.source), el => el.child(div().px(16).py(8).text_size(TYPE.meta).text_color(colors.muted).child(this.selected?.on ? "Inline images are only available for local files." : "Some inline images could not be loaded.")))
       .when(!file && Boolean(this.tree), el => el.child(this.tree.render(colors, (value, cx) => this.show(value, cx))))
-      .when(!file && !this.tree, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.owner.mode === "pane" ? "Pass an absolute file path to Preview Plus." : "Select a file.")))
+      .when(!file && !this.tree, el => el.child(div().p(16).text_size(TYPE.meta).text_color(colors.muted).child(this.owner.mode === "pane" ? "Pass an absolute file path to Preview Plus." : "Select a file.")))
       .when(Boolean(file), el => el.child(this.body(type, colors)));
   }
 
   body(type, colors) {
-    if (this.error || this.loading) return div().flex_1().p(16).text_size(12).text_color(colors.muted).child(this.error || "Loading preview…");
+    if (this.error || this.loading) return div().flex_1().p(16).text_size(TYPE.meta).text_color(colors.muted).child(this.error || "Loading preview…");
     if (this.media) {
       const size = this.mediaSize();
       const x = (this.viewport.width - size.width) / 2 + this.pan.x;

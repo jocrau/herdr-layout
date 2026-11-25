@@ -7,7 +7,9 @@ import { LABEL, hitLabel, hitChip, menuFor, menuHeight, fastForwardable, worktre
 import { perform, openDialog, goToWorktree, checkoutNow } from "./act.js";
 import { icon } from "./menu.js";
 import { splitter, dragTo } from "./lib/splitter.js";
+import { navIndex } from "./lib/keymap.js";
 import { MORE_ROUNDS, PAGE, listsZoom, GRAPH_MIN, COLUMNS, laneColors, ago, tilde, brief, count, depthSetting, ROW, LANE, PAD } from "./common.js";
+import { TYPE } from "./lib/type.js";
 
 export const TableMethods = {
   // Local change: keyboard navigation of the graph. A cursor row moves with the
@@ -82,14 +84,9 @@ export const TableMethods = {
     const k = e.keystroke, i = this.cursorIndex(), n = this.commits.length;
     const is = (...names) => names.includes(k);
     const label = (test) => (l) => l.parts.some(test);
-    if (is("ctrl-n", "ctrl-j")) return this.moveTo(Math.min(n - 1, i + 1), cx), true;
-    if (is("ctrl-p", "ctrl-k")) return this.moveTo(Math.max(0, i - 1), cx), true;
-    if (is("down", "j")) return this.moveTo(Math.min(n - 1, i + 1), cx), true;
-    if (is("up", "k")) return this.moveTo(Math.max(0, i - 1), cx), true;
-    if (is("pagedown", "ctrl-d")) return this.moveTo(Math.min(n - 1, i + 20), cx), true;
-    if (is("pageup", "ctrl-u")) return this.moveTo(Math.max(0, i - 20), cx), true;
-    if (is("g", "home")) return this.moveTo(0, cx), true;
-    if (is("shift-g", "end")) return this.moveTo(n - 1, cx), true;
+    // lib/keymap.js: the same moves on every board; a page is the rows the graph shows.
+    const to = navIndex(k, i, n, Math.max(5, Math.floor((this.height ?? 600) / this.rowPx())));
+    if (to !== null) return this.moveTo(to, cx), true;
     // Any label (branch, remote, tag) / local branches only.
     if (is("]")) return this.moveTo(this.seek(i, 1, () => true), cx, "No more labelled commits below"), true;
     if (is("[")) return this.moveTo(this.seek(i, -1, () => true), cx, "No labelled commits above"), true;
@@ -446,11 +443,11 @@ export const TableMethods = {
       .child(div().w(this.cols.date).flex_none().text_right().truncate().text_color(t.dim).child(commit.uncommitted ? "*" : ago(commit.time)))
       .when(this.wide, (e) => e
         .child(div().w(this.cols.author).flex_none().truncate().text_color(t.muted).child(commit.uncommitted ? "*" : commit.author))
-        .child(div().w(this.cols.hash).flex_none().font_family(mono).text_size(11).text_color(t.dim).child(commit.uncommitted ? "*" : commit.hash.slice(0, 8))));
+        .child(div().w(this.cols.hash).flex_none().font_family(mono).text_size(TYPE.label).text_color(t.dim).child(commit.uncommitted ? "*" : commit.hash.slice(0, 8))));
   },
 
   iconButton(id, glyph, tip, active, action, t) {
-    return h_flex().id(id).h(24).px(6).gap(5).flex_none().items_center().rounded(6).text_size(11.5).cursor_pointer()
+    return h_flex().id(id).h(24).px(6).gap(5).flex_none().items_center().rounded(6).text_size(TYPE.label).cursor_pointer()
       .text_color(active ? t.foreground : t.muted).when(active, (e) => e.bg(t.selected)).hover((s) => s.bg(t.hover).text_color(t.foreground))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click(action)
       .child(svg(icon(glyph)).size(13).flex_none()).when(Boolean(tip), (e) => e.child(tip));
@@ -469,34 +466,34 @@ export const TableMethods = {
     const ffCount = this.ctx && !prh ? fastForwardable(this.ctx).length : 0;
     const canPush = !prh && Boolean(this.current) && this.remoteNames?.length > 0 && (!tr || tr.gone || tr.ahead > 0);
     return h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
-      .when(!repo, (e) => e.child(div().text_size(13).font_semibold().child(ws ? "Manygit" : "Git")))
+      .when(!repo, (e) => e.child(div().text_size(TYPE.title).font_semibold().child(ws ? "Manygit" : "Git")))
       // Local change: which repository, and a way to another one (as R).
       .when(!repo && ready && Boolean(this.root), (e) => e.child(h_flex().id("graph-switch").h(22).px(7).gap(5).min_w(0).items_center().rounded(6).cursor_pointer()
         .bg(this.rp ? t.selected : t.raised).text_color(t.foreground).hover((s) => s.bg(t.hover)).on_click((_e, cx) => (this.rp ? this.closeRepos(cx) : this.openRepos(cx)))
         .child(svg(icon("folder")).size(12).flex_none())
         // Local change: a linked worktree reads as its repository, then the worktree's folder.
-        .when(Boolean(this.mainRoot), (e) => e.child(div().flex_none().text_size(11.5).font_semibold().child(this.mainRoot.split("/").pop()))
-          .child(div().flex_none().text_size(11.5).text_color(t.dim).child("worktree")))
-        .child(div().min_w(0).truncate().text_size(11.5).font_semibold().child(this.root.split("/").pop()))))
+        .when(Boolean(this.mainRoot), (e) => e.child(div().flex_none().text_size(TYPE.label).font_semibold().child(this.mainRoot.split("/").pop()))
+          .child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child("worktree")))
+        .child(div().min_w(0).truncate().text_size(TYPE.label).font_semibold().child(this.root.split("/").pop()))))
       .when(Boolean(repo), (e) => e
         .child(h_flex().id("graph-back").h(24).pl(2).pr(6).gap(3).flex_none().items_center().rounded(6).cursor_pointer()
           .hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.back(cx))
-          .child(svg(icon("back")).size(14).flex_none().text_color(t.muted)).child(div().text_size(13).font_semibold().child("Manygit")))
+          .child(svg(icon("back")).size(14).flex_none().text_color(t.muted)).child(div().text_size(TYPE.title).font_semibold().child("Manygit")))
         .child(h_flex().id("graph-repository").h(22).px(7).gap(5).min_w(0).items_center().rounded(6).cursor_pointer()
           .bg(this.picking ? t.selected : t.raised).text_color(t.foreground).hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.togglePicker(cx))
-          .child(svg(icon("folder")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(11.5).font_semibold().child(repo.name))))
+          .child(svg(icon("folder")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(TYPE.label).font_semibold().child(repo.name))))
       // Local change: the branch is a way to another one, as the repository is (a click: Branches & tags, as b).
       .when(ready && Boolean(where), (e) => e.child(h_flex().id("graph-where").h(22).px(7).gap(5).min_w(0).items_center().rounded(6).cursor_pointer()
         .bg(t.accent + (this.bp ? "40" : "26")).text_color(t.accent).hover((s) => s.bg(t.accent + "40"))
         .tooltip("Click: find a branch or tag (b)\nRight-click: pull, push, fetch").on_click((_e, cx) => (this.bp ? this.closeBranches(cx) : this.openBranches(cx)))
         .when(!prh, (el) => el.on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.syncMenu(cx); }))
-        .child(svg(icon(this.current || prh ? "branch" : "commit")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(11.5).font_semibold().child(where))))
-      .when(Boolean(prh?.ahead !== undefined), (e) => e.child(h_flex().gap(4).flex_none().items_center().text_size(11.5)
+        .child(svg(icon(this.current || prh ? "branch" : "commit")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(TYPE.label).font_semibold().child(where))))
+      .when(Boolean(prh?.ahead !== undefined), (e) => e.child(h_flex().gap(4).flex_none().items_center().text_size(TYPE.label)
         .tooltip("The PR's head against its base: commits it adds, commits the base has that it doesn't")
         .when(prh.ahead > 0, (el) => el.child(div().text_color(t.ansi2).child(`\u2191${prh.ahead}`)))
         .when(prh.behind > 0, (el) => el.child(div().text_color(t.ansi1).child(`\u2193${prh.behind} behind`)))))
-      .when(this.state === "workspace", (e) => e.child(div().flex_none().text_size(11.5).text_color(t.dim).child(count(ws.repos.length, "repo"))))
-      .when(ready && Boolean(tr), (e) => e.child(h_flex().id("graph-upstream").h(22).px(5).gap(4).flex_none().items_center().rounded(6).text_size(11.5)
+      .when(this.state === "workspace", (e) => e.child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child(count(ws.repos.length, "repo"))))
+      .when(ready && Boolean(tr), (e) => e.child(h_flex().id("graph-upstream").h(22).px(5).gap(4).flex_none().items_center().rounded(6).text_size(TYPE.label)
         .hover((s) => s.bg(t.hover)).tooltip(`${tr.gone ? `${tr.short} no longer exists` : `${tr.ahead ? `${tr.ahead} to push` : ""}${tr.ahead && tr.behind ? ", " : ""}${tr.behind ? `${tr.behind} behind (as of the last fetch)` : ""}${!tr.ahead && !tr.behind ? `Level with ${tr.short}` : ""}`}\nRight-click: pull, push, fetch`)
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.syncMenu(cx); })
         .child(div().text_color(t.dim).child(tr.gone ? `${tr.short} (gone)` : tr.short))
@@ -523,7 +520,7 @@ export const TableMethods = {
   },
 
   toolbar(t) {
-    const segment = (id, text, on, action) => div().id(id).h(22).px(9).flex().items_center().rounded(5).text_size(11.5).cursor_pointer()
+    const segment = (id, text, on, action) => div().id(id).h(22).px(9).flex().items_center().rounded(5).text_size(TYPE.label).cursor_pointer()
       .bg(on ? t.raised : t.background).text_color(on ? t.foreground : t.muted).when(on, (e) => e.border_1().border_color(t.border))
       .hover((s) => s.text_color(t.foreground)).on_click(action).child(text);
     return h_flex().h(34).flex_none().px(10).gap(8).items_center().border_b(1).border_color(t.border)
@@ -532,7 +529,7 @@ export const TableMethods = {
         .when(this.prMode(), (e) => e.child(segment("graph-pr", "This PR", Boolean(this.prRevs), (_e, cx) => this.setPrScope(cx))))
         .child(segment("graph-all", "All branches", this.all && !this.prRevs, (_e, cx) => this.setScope(true, cx)))
         .child(segment("graph-current", "Current", !this.all && !this.prRevs, (_e, cx) => this.setScope(false, cx))))
-      .child(h_flex().id("graph-remotes").h(24).px(6).gap(6).items_center().rounded(6).cursor_pointer().text_size(11.5).text_color(t.muted)
+      .child(h_flex().id("graph-remotes").h(24).px(6).gap(6).items_center().rounded(6).cursor_pointer().text_size(TYPE.label).text_color(t.muted)
         .hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click((_e, cx) => this.setRemotes(cx))
         .child(div().size(13).rounded(3).border_1().border_color(this.remotes ? t.accent : t.input).when(this.remotes, (e) => e.bg(t.accent)).flex().items_center().justify_center()
           .when(this.remotes, (e) => e.child(svg(icon("check")).size(10).text_color(t.accent_foreground))))
@@ -541,12 +538,12 @@ export const TableMethods = {
         const m = this.search.matches, at = m.indexOf(this.cursorIndex());
         return e.child(h_flex().flex_1().min_w(0).h(24).ml(6).px(8).gap(6).items_center().rounded(6).border_1()
           .border_color(this.search.typing ? t.accent : t.border).bg(t.background)
-          .child(div().flex_none().text_size(11.5).text_color(t.dim).child("/"))
-          .child(Input.new(this.searchInput).flex_1().h_full().text_size(11.5).text_color(t.foreground))
-          .child(div().flex_none().text_size(11).text_color(t.dim).child(this.search.query ? `${at >= 0 ? at + 1 : "–"}/${m.length}${this.hasMore ? "+" : ""}` : ""))
-          .child(div().flex_none().text_size(11).text_color(t.dim).child("n N next/prev · esc graph · ⌫ clear")));
+          .child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child("/"))
+          .child(Input.new(this.searchInput).flex_1().h_full().text_size(TYPE.label).text_color(t.foreground))
+          .child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child(this.search.query ? `${at >= 0 ? at + 1 : "–"}/${m.length}${this.hasMore ? "+" : ""}` : ""))
+          .child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child("n N next/prev · esc graph · ⌫ clear")));
       })
-      .when(this.dialog && !this.search.open && !this.search.typing && !this.search.query, (e) => e.child(div().flex_1().min_w(0).pl(12).truncate().text_right().text_size(11).text_color(t.dim)
+      .when(this.dialog && !this.search.open && !this.search.typing && !this.search.query, (e) => e.child(div().flex_1().min_w(0).pl(12).truncate().text_right().text_size(TYPE.label).text_color(t.dim)
         .child(this.mark ? `marked ${this.mark.slice(0, 8)} · j k move · v compare with it · esc unmark` : this.selected ? "j k files · J K commits · c since base · \u2318-click compare · v view · o edit · d diff · r reset · \u2190 out · ? help"
           : "j k move · v mark · / search · b branches & tags · \u23ce review · \u21e7P push · \u21e7F ff · ? help")));
   },
@@ -557,7 +554,7 @@ export const TableMethods = {
     // Handles stand in for the rows' gaps, 1px wider each side.
     const handle = (key) => splitter(t, { id: `graph-col-${key}`, axis: "col", line: false, width: LABEL.GAP + 2, dragging: this.drag?.key === key,
       from: () => key === "graph" ? this.graphWidth() : this.cols[key], onStart: (d) => { this.drag = { ...d, key }; }, onReset: (cx) => this.resetColumn(key, cx) }).mx(-1);
-    return h_flex().h(24).flex_none().pr(10).items_center().border_b(1).border_color(t.border).text_size(11).text_color(t.dim)
+    return h_flex().h(24).flex_none().pr(10).items_center().border_b(1).border_color(t.border).text_size(TYPE.label).text_color(t.dim)
       .child(head("Graph", width).pl(PAD)).child(handle("graph")).child(div().flex_1().min_w(0).child("Description"))
       .children(this.trailing().flatMap((k) => [handle(k), head(titles[k], this.cols[k]).when(k === "date", (e) => e.text_right())]));
   },
@@ -601,8 +598,8 @@ export const TableMethods = {
     return v_flex().flex_1().min_h(0).items_center().justify_center().gap(10).px(28).pb(40)
       .child(div().size(46).rounded(12).bg(t.raised).border_1().border_color(t.border).flex().items_center().justify_center()
         .child(svg(icon(glyph)).size(22).text_color(s === "error" ? t.ansi1 : t.muted)))
-      .child(div().text_size(14).font_semibold().text_color(t.foreground).child(title))
-      .when(Boolean(body), (e) => e.child(div().max_w(280).text_center().text_size(12).text_color(t.muted).child(body)));
+      .child(div().text_size(TYPE.heading).font_semibold().text_color(t.foreground).child(title))
+      .when(Boolean(body), (e) => e.child(div().max_w(280).text_center().text_size(TYPE.meta).text_color(t.muted).child(body)));
   },
 
 };

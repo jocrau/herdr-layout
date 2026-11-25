@@ -1,0 +1,34 @@
+# Every board once, for screenshots before and after a look change: KEYS_SHOTS=<dir> keys.py --run this.
+close git-graph
+open git-graph
+until git-graph rows != 0
+press git-graph g
+shot git-graph
+press git-graph enter
+shot git-graph-review
+press git-graph escape ?
+shot git-graph-help
+close git-graph
+close fleet-board
+open fleet-board
+until fleet-board rows != 0
+press fleet-board 1 g enter
+shot fleet-board
+press fleet-board escape 2
+shot fleet-lanes
+press fleet-board ?
+shot fleet-help
+close fleet-board
+show prs
+until pr-board rows != 0
+press pr-board g j enter
+shot pr-board
+press pr-board ?
+shot pr-help
+press pr-board j
+hide prs
+close file-browser
+open file-browser
+until file-browser rows != 0
+shot file-browser
+close file-browser

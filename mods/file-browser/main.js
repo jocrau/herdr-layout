@@ -13,11 +13,13 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, Scrollbar, VirtualListScrollHandle, v_virtual_list } from "gpui-base";
 import { focused, panes, spaces, exec, home, props, closeOverlay, setShared, settings } from "herdr";
 import { footerBar } from "./lib/bars.js";
+import { navIndex, moveHelp, HELP_KEYS, HELP_ROW } from "./lib/keymap.js";
 import { closeSide, focusFrame } from "./lib/sidecolumn.js";
 import Viewer from "./viewer.js";
 import { Tree, directory } from "./tree.js";
 import { join, normalize, kind, richText, basename, dirname, typedPath, pathMatches, completion } from "./paths.js";
 import { appearance } from "./appearance.js";
+import { TYPE } from "./lib/type.js";
 
 const NO_FILES = [];
 const ROW = 26, MATCHES = 300, FILES = 20000, PREVIEW_DELAY = 120, TREE_W = 320, LIVE = 3000;
@@ -518,12 +520,9 @@ export default class FileBrowser extends Viewer {
     const k = e.keystroke, rows = this.rows(), row = rows[this.at];
     const typing = this.filtering;
     const done = () => cx.stop_propagation();
-    if (k === "down" || k === "ctrl-n" || k === "ctrl-j" || (!typing && k === "j")) { done(); return this.select(this.at + 1, rows, cx); }
-    if (k === "up" || k === "ctrl-p" || k === "ctrl-k" || (!typing && k === "k")) { done(); return this.select(this.at - 1, rows, cx); }
-    if (k === "pagedown") { done(); return this.select(this.at + 30, rows, cx); }
-    if (k === "pageup") { done(); return this.select(this.at - 30, rows, cx); }
-    if (k === "ctrl-d") { done(); return this.select(this.at + 15, rows, cx); }
-    if (k === "ctrl-u") { done(); return this.select(this.at - 15, rows, cx); }
+    // lib/keymap.js: the same moves on every board (in the filter field, letters and Home/End are the field's).
+    const to = typing && ["j", "k", "g", "shift-g", "home", "end"].includes(k) ? null : navIndex(k, this.at, rows.length, 30);
+    if (to !== null) { done(); return this.select(to, rows, cx); }
     // Esc leaves the filter field for the tree, the filter kept (⌫ clears it), then closes the side panel or the
     // window, as every board's Esc (⌘⇧O opens a window, which hears Esc; opened as a dialog, by the git graph, the
     // app closes it before any mod sees Esc).
@@ -537,13 +536,12 @@ export default class FileBrowser extends Viewer {
     if (k === "tab" && typing) { done(); this.treeFocus.focus(); return cx.notify(); }
     if (k === "tab") { done(); if (this.selected) { this.focusView(); this.showFile(true, cx); } return cx.notify(); }
     if (typing) return;
-    // Two-key commands (gg, yy, ⌃W l), as vim and NERDTree.
+    // Two-key commands (yy, ⌃W l), as vim and NERDTree; g alone is the first row (gg too), as on every board.
     const prev = this.pendingKey; this.pendingKey = null;
-    if (prev === "g" && k === "g") { done(); return this.select(0, rows, cx); }
     if (prev === "y" && k === "y") { done(); return row && this.copy(row.path, "path", cx); }
     if (prev === "ctrl-w" && (k === "l" || k === "w" || k === "right")) { done(); if (this.selected) { this.focusView(); this.showFile(true, cx); } return cx.notify(); }
     if (prev === "ctrl-w" && this.resizeKey(k, cx)) return done();
-    if (k === "g" || k === "y" || k === "ctrl-w") { done(); this.pendingKey = k; return cx.notify(); }
+    if (k === "y" || k === "ctrl-w") { done(); this.pendingKey = k; return cx.notify(); }
     if (prev) cx.notify();
     if (k === "shift-y") { done(); return row && this.copy(normalize(join(this.root, row.path)), "path", cx); }
     if (k === "u") { done(); return this.upRoot(cx); }
@@ -557,13 +555,11 @@ export default class FileBrowser extends Viewer {
     if (k === "backspace" && this.filter) { done(); return this.clearFilter(cx); } // Enter arrives as the input's submit; letters are the filter's.
     if (k === "enter") { done(); return this.enter(cx); }
     if (k === "/") { done(); this.input.focus(); return cx.notify(); }
-    if (k === "home") { done(); return this.select(0, rows, cx); }
-    if (k === "shift-g" || k === "end") { done(); return this.select(rows.length - 1, rows, cx); }
     if (k === "shift-r" || k === "r") { done(); this.files = null; this.nav?.refresh(cx); return; }
     if (k === "o") { done(); return this.open(cx); }
     if (k === "shift-j") { done(); return this.fileStep(1, cx); }
     if (k === "shift-k") { done(); return this.fileStep(-1, cx); }
-    if (k === "?" || k === "shift-/") { done(); this.help = true; return cx.notify(); }
+    if (HELP_KEYS.includes(k)) { done(); this.help = true; return cx.notify(); }
     if (!row || row.match) return;
     if (k === "right" || k === "l") {
       done();
@@ -578,6 +574,24 @@ export default class FileBrowser extends Viewer {
       const parent = dirname(row.path);
       if (parent !== ".") this.select(rows.findIndex((r) => r.path === parent), rows, cx, false);
     }
+  }
+
+  // Test keys (lib/testkeys.js, from viewer.js's command loop): to the pane that has the keyboard, as typed.
+  testPress(e, cx) { return this.viewFocus?.is_focused() ? this.keyDown(e, cx) : this.treeKey(e, cx); }
+  testState() {
+    return {
+      shown: this.docked ? true : Boolean(props()?.overlay), docked: this.docked, pane: this.viewFocus?.is_focused() ? "view" : "tree",
+      at: this.at ?? null, rows: this.rows?.().length ?? 0, file: this.selected?.file ? basename(this.selected.file) : null,
+      filtering: Boolean(this.filtering), help: Boolean(this.help), editing: Boolean(this.editing), finding: Boolean(this.finding),
+      visual: this.visual ?? null, history: this.history?.length ?? 0,
+      index: this.at ?? -1, atEnd: (this.rows?.().length ?? 0) > 0 && this.at === this.rows().length - 1,
+    };
+  }
+  // Keys a test script may not press: ones that write a file, use the clipboard or open another program.
+  testRefuses(k) {
+    if (["cmd-s", "ctrl-s", "o"].includes(k)) return "it saves a file or opens another program";
+    if (this.viewFocus?.is_focused() && ["y", "i", "a", "e", "x", "p", "shift-p"].includes(k)) return "in the file it edits or copies";
+    return null;
   }
 
   closeBrowser() { return this.docked ? closeSide("file-browser") : closeOverlay(this.opener.overlay); }
@@ -838,12 +852,12 @@ export default class FileBrowser extends Viewer {
     const marks = this.nav?.marks ?? {};
     const row = (r, i) => {
       const mark = marks[normalize(join(this.root, r.path))];
-      return h_flex().h(ROW).pl(8 + r.depth * 16).pr(8).gap(6).items_center().rounded(6).text_size(12.5)
+      return h_flex().h(ROW).pl(8 + r.depth * 16).pr(8).gap(6).items_center().rounded(6).text_size(TYPE.body)
         .when(i === this.at, (el) => el.bg(active ? colors.selected : colors.hover))
         .child(div().w(10).flex_none().text_color(colors.muted).child(r.dir ? (r.open ? "▾" : "▸") : ""))
         .child(this.rowName(r, colors))
         .child(div().flex_1())
-        .when(Boolean(mark), (el) => el.child(div().flex_none().text_size(11.5)
+        .when(Boolean(mark), (el) => el.child(div().flex_none().text_size(TYPE.label)
           .text_color(mark === "A" ? colors.ansi2 : mark === "D" || mark === "U" ? colors.ansi1 : colors.ansi3).child(mark)));
     };
     const hits = this.matchCache?.tree?.hits ?? 0;
@@ -866,9 +880,9 @@ export default class FileBrowser extends Viewer {
         // A press anywhere in the box (the input, its padding, the /) types into it: the pane's own press below would
         // put the keyboard back on the tree. The input's own press (the cursor's place) comes first.
         .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); if (!this.filtering) this.input.focus(); cx.notify(); })
-        .child(div().text_size(12).text_color(colors.dim).child("/"))
-        .child(Input.new(this.input).flex_1().h_full().text_size(12.5).text_color(colors.foreground)))
-      .when(Boolean(status), (el) => el.child(div().px(14).py(4).text_size(11.5).text_color(colors.dim).child(status)))
+        .child(div().text_size(TYPE.meta).text_color(colors.dim).child("/"))
+        .child(Input.new(this.input).flex_1().h_full().text_size(TYPE.body).text_color(colors.foreground)))
+      .when(Boolean(status), (el) => el.child(div().px(14).py(4).text_size(TYPE.label).text_color(colors.dim).child(status)))
       .child(div().relative().flex_1().min_h(0).px(6)
         .child(v_virtual_list("fb-tree", rows.length, ROW, (i) => rows[i].path, (range) => rows.slice(range.start, range.end).map((r, o) => row(r, range.start + o)))
           .track_scroll(this.list).size_full()
@@ -894,15 +908,15 @@ export default class FileBrowser extends Viewer {
 
   findBar(colors) {
     return h_flex().id("fb-find").h(34).flex_none().px(10).gap(6).items_center().border_t(0.5).border_color(colors.border)
-      .child(div().text_size(12.5).text_color(colors.dim).child("/"))
-      .child(Input.new(this.findInput).flex_1().h_full().text_size(12.5).text_color(colors.foreground))
-      .child(div().flex_none().text_size(11.5).text_color(colors.dim).child("⏎ keep · esc back · then n N"));
+      .child(div().text_size(TYPE.body).text_color(colors.dim).child("/"))
+      .child(Input.new(this.findInput).flex_1().h_full().text_size(TYPE.body).text_color(colors.foreground))
+      .child(div().flex_none().text_size(TYPE.label).text_color(colors.dim).child("⏎ keep · esc back · then n N"));
   }
 
   helpPanel(colors) {
     const panel = this.docked ? "panel" : "window";
     const groups = [
-      ["Tree", [["j k  ↑ ↓  ⌃N ⌃P", "move (the file under the cursor previews)"], ["⌃D ⌃U  PgDn PgUp", "half / whole page"], ["gg G  Home End", "first / last"],
+      ["Tree", [...moveHelp("move (the file under the cursor previews)"),
         ["l →  ⏎", "open a folder, or go into the file"], ["h ←", "close the folder, or go to its parent"], ["J K", "next / previous file"],
         ["u", "the folder above as the tree (even above the repository)"], ["C", "this folder as the tree"], ["P", "back to the repository"],
         ["/  ⌫", "filter the whole tree (names containing what you type), clear it"], ["/~/…  //…", "a path (~ is home): ⇥ completes, ⏎ opens a folder as the tree or a file"], ["yy  Y", "copy the path (in the tree / full)"], ["I", "show / hide hidden files"],
@@ -911,12 +925,12 @@ export default class FileBrowser extends Viewer {
         ["i", "insert mode: edit in place (esc: back to normal mode)"], ["V  then y", "select lines, copy them"], ["yy  3yy  Y", "copy the line / three lines / the whole file"],
         ["/  n N", "find in the file, next / previous"], ["h ←  ⇥  ⌃W h", "back to the tree"], ["J K", "next / previous file"],
         ["[ ]  s  c", "Markdown: headings, source, contents"], ["s", "JSON, YAML: the tree (click to fold), or the code again"], ["⌫", "back after following a link"], ["⌘S", "save"], ["o", "open in its app"]]],
-      ["Window", [["?", "this help (any key closes it)"], ["esc", `insert → normal → tree (a filter stays: ⌫ clears it) → close the ${panel}`], ["q", `close the ${panel} (from the tree)`],
+      ["Window", [HELP_ROW, ["esc", `insert → normal → tree (a filter stays: ⌫ clears it) → close the ${panel}`], ["q", `close the ${panel} (from the tree)`],
         ["⌃W <  ⌃W >  ⌃W =", "the tree narrower / wider / as it was (or drag its edge)"]]],
     ];
-    return v_flex().id("fb-help").size_full().overflow_y_scrollbar().px(20).py(14).gap(14).text_size(12.5)
+    return v_flex().id("fb-help").size_full().overflow_y_scrollbar().px(20).py(14).gap(14).text_size(TYPE.body)
       .children(groups.map(([title, rows]) => v_flex().gap(3)
-        .child(div().pb(2).text_size(12).font_semibold().text_color(colors.accent ?? colors.foreground).child(title))
+        .child(div().pb(2).text_size(TYPE.meta).font_semibold().text_color(colors.accent ?? colors.foreground).child(title))
         .children(rows.map(([keys, what]) => h_flex().gap(12).child(div().w(170).flex_none().child(keys)).child(div().flex_1().min_w(0).text_color(colors.muted).child(what))))));
   }
 
@@ -927,7 +941,7 @@ export default class FileBrowser extends Viewer {
     const view = () => div().id("fb-view").track_focus(this.viewFocus).on_key_down((e, cx) => this.keyDown(e, cx)).when(true, (el) => NORMAL_KEYS.reduce((el, k) => el.on_action(normalAction(k), (_a, cx) => this.keyDown({ keystroke: k }, cx)), el)).flex_1().min_w(0).h_full().flex().flex_col().child(this.help ? this.helpPanel(colors) : viewer).when(Boolean(this.finding) && !this.help, (el) => el.child(this.findBar(colors)));
     if (this.docked) return focusFrame(v_flex().id("file-browser").size_full().min_h(0).overflow_hidden().bg(colors.background), colors,
       this.treeFocus.is_focused() || this.inView() || this.filtering)
-      .text_color(colors.foreground).font_family(font).text_size(13)
+      .text_color(colors.foreground).font_family(font).text_size(TYPE.title)
       .child(this.showing || this.help ? view().w_full() : this.treePane(colors).flex_1().w_full());
     const zoom = settings().zoom || 1;
     return v_flex().id("file-browser").size_full().min_h(0).overflow_hidden().bg(colors.background)
@@ -938,7 +952,7 @@ export default class FileBrowser extends Viewer {
         if (this.resizing) this.setTreeWidth(this.resizing.w + (e.position.x - this.resizing.x) / zoom, cx, false);
       })
       .on_mouse_up("left", (_e, cx) => { if (this.resizing) { this.resizing = null; this.setTreeWidth(this.treeW, cx); } })
-      .text_color(colors.foreground).font_family(font).text_size(13)
+      .text_color(colors.foreground).font_family(font).text_size(TYPE.title)
       .child(h_flex().flex_1().min_h(0).min_w(0)
       .child(this.treePane(colors).w(this.treeW).flex_none().h_full())
       .child(div().id("fb-resize").w(5).h_full().flex_none().cursor_col_resize().border_l(0.5).border_color(colors.border)

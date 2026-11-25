@@ -3,6 +3,7 @@ import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { exec, watchFolder, window } from "herdr";
 import { join, normalize } from "./paths.js";
+import { TYPE } from "./lib/type.js";
 
 const PER_FOLDER = 500, TOTAL = 5000;
 
@@ -109,7 +110,7 @@ export class Tree {
         .on_click((_event, cx) => entry.dir ? this.toggle(path, cx) : openFile({ file: join(this.location.cwd, path), root: this.location.cwd, on: this.location.on }, cx))
         .child(div().w(12).flex_none().text_color(colors.muted).child(entry.dir ? open ? "⌄" : "›" : ""))
         .child(div().flex_1().min_w(0).truncate().text_color(colors.foreground).child(entry.name))
-        .when(Boolean(mark), el => el.child(div().text_size(12).text_color(mark === "A" ? colors.ansi2 : mark === "D" || mark === "U" ? colors.ansi1 : colors.ansi3).child(mark))));
+        .when(Boolean(mark), el => el.child(div().text_size(TYPE.meta).text_color(mark === "A" ? colors.ansi2 : mark === "D" || mark === "U" ? colors.ansi1 : colors.ansi3).child(mark))));
       if (entry.dir && open) this.rows(path, depth + 1, out, colors, openFile);
     }
     return out;
@@ -117,7 +118,7 @@ export class Tree {
 
   render(colors, openFile) {
     return v_flex().id("preview-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6).children(this.rows("", 0, [], colors, openFile))
-      .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child(this.error || (this.loading ? "Loading files…" : this.location.cwd ? "No files" : "No folder"))))
-      .when(this.limited, el => el.child(div().p(16).text_size(12).text_color(colors.muted).child("File list limited to 500 entries per folder and 5,000 total.")));
+      .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(16).text_size(TYPE.meta).text_color(colors.muted).child(this.error || (this.loading ? "Loading files…" : this.location.cwd ? "No files" : "No folder"))))
+      .when(this.limited, el => el.child(div().p(16).text_size(TYPE.meta).text_color(colors.muted).child("File list limited to 500 entries per folder and 5,000 total.")));
   }
 }

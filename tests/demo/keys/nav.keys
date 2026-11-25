@@ -1,0 +1,67 @@
+# The same moves on every board (lib/keymap.js): g first, j down, G last, k up, ? help (any key closes it).
+close git-graph
+open git-graph
+until git-graph rows != 0
+press git-graph g
+expect index == 0
+press git-graph j
+expect index == 1
+press git-graph shift-g
+expect atEnd == true
+press git-graph k
+expect atEnd == false
+press git-graph ?
+expect help == true
+press git-graph j
+expect help == false
+close git-graph
+
+close file-browser
+open file-browser
+until file-browser rows != 0
+press file-browser g
+expect index == 0
+press file-browser j
+expect index == 1
+press file-browser shift-g
+expect atEnd == true
+press file-browser k
+expect atEnd == false
+press file-browser ?
+expect help == true
+press file-browser j
+expect help == false
+close file-browser
+
+close fleet-board
+open fleet-board
+until fleet-board rows != 0
+press fleet-board 1 g
+expect index == 0
+press fleet-board j
+expect index == 1
+press fleet-board shift-g
+expect atEnd == true
+press fleet-board k
+expect atEnd == false
+press fleet-board ?
+expect help == true
+press fleet-board j
+expect help == false
+close fleet-board
+
+show prs
+until pr-board rows != 0
+press pr-board g
+expect index == 0
+press pr-board j
+expect index == 1
+press pr-board shift-g
+expect atEnd == true
+press pr-board ctrl-u
+expect atEnd == false
+press pr-board ?
+expect help == true
+press pr-board j
+expect help == false
+hide prs

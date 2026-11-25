@@ -12,6 +12,10 @@ import { v_flex, h_flex } from "gpui-base";
 import { run, props, closeOverlay, openOverlay, shared, setShared, exec, theme } from "herdr";
 import { branchTitle } from "./lib/names.js";
 import { customRemove } from "./lib/worktree.js";
+import { word } from "./lib/menu.js";
+import { TYPE } from "./lib/type.js";
+// A shared item's words and icon (lib/menu.js), as [label, icon] for this menu's rows.
+const w = (key, opts) => { const x = word(key, opts); return [x.label, `@git-graph/icons/${x.icon}`]; };
 // A confirm dialog ignores ⏎ this long after it opens: a force-push or clean-up question can appear seconds
 // after the click (after a push or a count), and an ⏎ meant for a terminal must not confirm it.
 const ARM_MS = 700;
@@ -36,19 +40,19 @@ function editorItems(p) {
 // Links and copies, as in the git view's menus: Reveal in Finder, Copy path, Copy branch name (set apart).
 function folderItems(p) {
   const list = [
-    ...(p.machine ? [] : [["Reveal in Finder", "@git-graph/icons/folder", () => exec("open", ["-R", p.path])]]),
-    ["Copy path", "@git-graph/icons/copy", (cx) => cx.write_to_clipboard(p.path)],
-    ...(p.branch ? [["Copy branch name", "@git-graph/icons/copy", (cx) => cx.write_to_clipboard(p.branch)]] : []),
+    ...(p.machine ? [] : [[...w("reveal"), () => exec("open", ["-R", p.path])]]),
+    [...w("copyPath"), (cx) => cx.write_to_clipboard(p.path)],
+    ...(p.branch ? [[...w("copyBranch"), (cx) => cx.write_to_clipboard(p.branch)]] : []),
   ];
   list[0].push(true);
   return list;
 }
 
 // The repository in the git view (on its machine too).
-const gitView = (p) => ["Open in git view", "@git-graph/icons/graph", () =>
+const gitView = (p) => [...w("gitView"), () =>
   openOverlay({ mod: "git-graph", kind: "dialog", width: 0.92, height: 0.9, props: { folder: p.path, ...(p.machine ? { on: p.machine } : {}) } })];
 
-function items(p) {
+export function items(p) {
   // A top-level space row: where its terminal is now.
   // Every menu's order: open, then Fetch / Pull / Push, then the branch's work, links and copies, and last
   // what closes or removes.
@@ -91,18 +95,18 @@ function items(p) {
   // worktree-support works out what it would take away and asks (this popup is gone by then).
   if (p.finished && p.branch) {
     // After the ways to open it, before Fetch (set apart either side).
-    const after = list.findIndex((it) => it[0] === "Fetch");
+    const after = list.findIndex((it) => it[0] === word("fetch").label);
     list.splice(after, 0, [`Clean up (${p.finished})…`, "@git-graph/icons/trash", () => sendRequest({
       id: `${Date.now()}-${Math.random()}`, at: Date.now(), action: "askCleanup",
       path: p.path, branch: p.branch, base: p.base ?? null, machine: p.machine ?? null, main: p.main, space: p.space ?? null,
       tab: p.tab ?? null, tabSpaceName: p.tabSpaceName ?? null, repoSpace: p.repoSpace, repoName: p.repoName, remove: p.remove ?? null, dirty: Boolean(p.dirty), finished: p.finished }), true]);
   }
-  if (p.pr) list.push(["Open pull request on GitHub", "@git-graph/icons/external", (cx) => cx.open_url(p.pr), true]);
+  if (p.pr) list.push([...w("prOnGitHub"), (cx) => cx.open_url(p.pr), true]);
   list.push(...folderItems(p).map((it, i) => (i === 0 && p.pr ? it.slice(0, 3) : it)));
   if (p.space) list.push(["Close space", "x", () => run("space.close", { id: p.space }), true]);
   if (p.remove) {
     const cmd = customRemove(p.remove, p.path, p.branch ?? "");
-    list.push(["Remove worktree…", "@git-graph/icons/trash", () => openOverlay({
+    list.push([...w("removeWorktree"), () => openOverlay({
       mod: "confirm", kind: "dialog", width: 420, height: 180,
       props: {
         title: `Remove ${p.branch ?? p.path}?`,
@@ -124,10 +128,10 @@ const gitOp = (p, op) => () => sendRequest({
 
 // In step with the remote, set apart as a group; pull and push need a branch.
 function syncItems(p) {
-  const list = [["Fetch", "@git-graph/icons/sync", gitOp(p, "fetch")]];
+  const list = [[...w("fetch"), gitOp(p, "fetch")]];
   if (p.branch) list.push(
-    ["Pull", "@git-graph/icons/pull", gitOp(p, "pull")],
-    ["Push", "@git-graph/icons/push", gitOp(p, "push")],
+    [...w("pull"), gitOp(p, "pull")],
+    [...w("push"), gitOp(p, "push")],
   );
   list[0].push(true);
   return list;
@@ -144,13 +148,13 @@ function gitItems(p) {
   if (!p.pr && p.branch && p.github) work.push(["Create pull request", "git-branch", git("pr")]);
   if (work.length) work[0].push(true);
   // Its changes (worktree-support opens them: it needs the new space's id), then the branch's work.
-  const changes = ["Show changes", "@changes/changes", () =>
+  const changes = [word("showChanges").label, "@changes/changes", () =>
     sendRequest({ id: `${Date.now()}-${Math.random()}`, at: Date.now(), action: "changes", path: p.path, machine: p.machine }), true];
   return [...list, changes, ...work];
 }
 
 // Herdr's own removal of a worktree space, as the shipped menu offers it.
-const herdrRemove = (space, apart) => ["Remove worktree…", "@git-graph/icons/trash",
+const herdrRemove = (space, apart) => [...w("removeWorktree"),
   () => openOverlay({ mod: "worktree", kind: "dialog", width: 440, height: 260, props: { space, action: "remove" } }), apart];
 
 export default class WorktreeActions extends View {
@@ -180,12 +184,12 @@ export default class WorktreeActions extends View {
         else return; // (Esc never arrives: Herdr closes a dialog itself)
         cx.stop_propagation();
       })
-      .size_full().min_h(0).p(18).gap(12).rounded(8).bg(t.popover).text_size(13)
+      .size_full().min_h(0).p(18).gap(12).rounded(8).bg(t.popover).text_size(TYPE.title)
       .child(h_flex().items_center()
-        .child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child(c.title))
-        .child(div().text_size(11).text_color(t.dim).child("⏎ confirms · Esc")))
+        .child(div().flex_1().text_size(TYPE.dialog).font_semibold().text_color(t.foreground).child(c.title))
+        .child(div().text_size(TYPE.label).text_color(t.dim).child("⏎ confirms · Esc")))
       .child(div().flex_1().min_h(0).overflow_y_scrollbar().text_color(t.muted).child(c.detail ?? ""))
-      .child(h_flex().justify_end().gap(8).text_size(12)
+      .child(h_flex().justify_end().gap(8).text_size(TYPE.meta)
         .child(button("no", "Cancel", t.raised, t.foreground, t.input, () => closeOverlay(props().overlay)))
         .child(c.danger ? button("yes", c.button ?? "Force push", t.ansi1, t.background, t.ansi1, () => this.confirm())
           : button("yes", c.button ?? "Force push", t.solid, t.solid_foreground, t.solid, () => this.confirm())));
@@ -209,7 +213,7 @@ export default class WorktreeActions extends View {
       .min_h(0)
       .p(5)
       .bg(t.popover)
-      .text_size(12.8)
+      .text_size(TYPE.body)
       .on_key_down((e, cx) => {
         if (e.key === "down") this.at = (this.at + 1) % list.length;
         else if (e.key === "up") this.at = (this.at + list.length - 1) % list.length;

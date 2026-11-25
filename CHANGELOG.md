@@ -7,6 +7,26 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- Seven text sizes instead of ten: sizes half a pixel apart are merged (10 → 10.5 for badges and hints, 11 → 11.5
+  for secondary facts and the git view's diff, 12.8 → 12.5 for dialog fields and sidebar rows); 12 / 12.5 / 13 stay.
+- Menus and text sizes in one place: the git view's, the status bar's and the sidebar's menus take their shared
+  words and icons from `lib/menu.js`, and a test fails when a menu leaves the one order (open · fetch, pull, push ·
+  changes · branch work · links and copies · delete/remove/close). Every board's text sizes come from `lib/type.js`
+  (nothing looks different; a size now changes in one place).
+- After a restart: when Herdr's terminals come back without the Claude sessions they ran, the status bar says so
+  once ("2 Claude sessions lost in a restart", naming them); a click opens `extras/claude-resume` in a new tab,
+  which lists them and asks before resuming. `claude-resume --json` lists them for scripts.
+- One way to move on every board (`lib/keymap.js`): the fleet board, the PR board, the git view and the file
+  browser's tree all take j k ↑ ↓ ⌃N ⌃P, ⌃D ⌃U (half a page), PgDn PgUp (a whole page), g G Home End, and list them
+  from the same rows in their help. New: the PR board pages; a single `g` is the top in the file browser too (`gg`
+  still works); ⌃D and PgDn no longer jump the same distance. A unit test fails when a board binds these itself.
+- Tests: `tests/demo/keys.py` presses keys on a board in the demo window and checks what it shows, and that no
+  row jumps (`still`). Boards answer `<mod>.test.key.<key>` only when the demo's settings say `test_keys`
+  (`lib/testkeys.js`): the fleet board, the git view, the PR board and the file browser, with scenarios for their
+  Esc order (the PR view opened from the PR board closes on Esc) and for `j`/`k` not moving rows. Keys that would
+  reach GitHub, change a repository, edit a file or use the clipboard are refused, not pressed.
+- PR board: the sync button (`s`, ↻) always asks GitHub (`pr-flow sync` without `--max-age`); before, a sync
+  within a minute of another one reused the stored queue and a review you'd just been told about didn't show.
 - Dialogs keep the window's keys: the `mod:` sections of `keys.json` bind the tab, space, agent and pane keys
   (⌘← ⌘→, ⌘↑ ⌘↓, ⌘1…9, ⌘T, ⌘W, ⌘D, …) to `<mod>.behind.<command>`. While the git view, PR view, file browser or a
   board is open as a dialog they do nothing (no tab switches behind it); docked, the mod runs them as before.

@@ -1,0 +1,13 @@
+# The PR view opened from the PR board (d): Esc closes it; it doesn't fall back to the plain git graph
+# (that's only for a PR view opened from the graph with p).
+close git-graph
+show prs
+until pr-board rows != 0
+press pr-board g j
+expect sel != null
+press pr-board d
+until git-graph pr == true
+expect fromGraph == false
+press git-graph escape
+expect shown == false
+hide prs

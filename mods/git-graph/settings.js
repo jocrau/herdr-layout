@@ -5,6 +5,7 @@ import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { props, closeOverlay, theme, shared, setShared } from "herdr";
 import { DEPTH, depthOf } from "./repos.js";
 import { icon } from "./menu.js";
+import { TYPE } from "./lib/type.js";
 
 export class Settings {
   init(cx) {
@@ -29,15 +30,15 @@ export class Settings {
 
   render() {
     const t = theme(), tags = shared("git-graph.tags") === true;
-    return v_flex().id("git-graph-settings").size_full().p(12).gap(8).bg(t.popover).text_size(12.8).text_color(t.foreground)
+    return v_flex().id("git-graph-settings").size_full().p(12).gap(8).bg(t.popover).text_size(TYPE.body).text_color(t.foreground)
       .child(h_flex().h(30).gap(10).items_center()
         .child(div().flex_1().font_medium().child("Scan depth"))
         .child(Input.new(this.state).w(56).h(30).px(8).rounded(7).border_1().border_color(this.valid ? t.input : t.ansi1)
-          .bg(t.background).text_size(12.8).text_color(t.foreground)))
+          .bg(t.background).text_size(TYPE.body).text_color(t.foreground)))
       .child(h_flex().h(30).gap(10).items_center()
         .child(div().flex_1().font_medium().child("Review base"))
         .child(Input.new(this.base).w(120).h(30).px(8).rounded(7).border_1().border_color(t.input)
-          .bg(t.background).text_size(12.8).text_color(t.foreground)))
+          .bg(t.background).text_size(TYPE.body).text_color(t.foreground)))
       .child(h_flex().id("gs-tags").h(30).gap(10).items_center().cursor_pointer()
         .on_click((_e, cx) => { setShared("git-graph.tags", !tags); cx.notify(); })
         .child(div().flex_1().font_medium().child("Show tags"))

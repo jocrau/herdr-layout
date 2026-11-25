@@ -425,6 +425,10 @@ changes". The [CHANGELOG](CHANGELOG.md) says what changed.
 the unit tests: the fleet board's and the git graph's logic, beads-view with a fake `bd`, every mod's
 modules loading and linking (Herdr's own modules stubbed), and, with a global ESLint, no name used without
 being declared or imported. `tests/worktrees/RUNBOOK.md` is a manual pass over the git and worktree actions.
+`python3 -I tests/demo/keys.py --run tests/demo/keys/*.keys` presses keys on a board in the demo window
+(below) and checks what it shows, and that rows don't jump: a board answers `<mod>.test.key.<key>` there
+(`lib/testkeys.js`, on only with the demo's `test_keys` setting). Focus moving into a text field still needs a
+person: the demo window stays behind yours.
 A mod's folder is linked into Herdr, so try changes in the demo window (below) or a worktree first.
 
 ## Screenshots

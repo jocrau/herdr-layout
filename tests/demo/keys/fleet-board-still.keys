@@ -1,0 +1,9 @@
+# The fleet dialog: moving the selection with j k redraws the selection only; no row moves up or down.
+close fleet-board
+open fleet-board
+until fleet-board rows != 0
+press fleet-board 1 g
+still fleet-board j
+still fleet-board j
+still fleet-board k
+close fleet-board

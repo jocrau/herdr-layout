@@ -224,7 +224,7 @@ home() { # the demo's Herdr home: this repository's layout, mods and keys
   cp "$LAYOUT/layouts/workbench.json" "$HERDR_APP_HOME/layouts/workbench.json"
   cp "$LAYOUT/keys.json" "$HERDR_APP_HOME/keys.json"
   # The demo's settings; keys set since (prs: pr_flow_state, pr_space) stay.
-  python3 -I -c 'import json,os,sys; p=sys.argv[1]; s=json.load(open(p)) if os.path.exists(p) else {}; s.update(code_dir=sys.argv[2], fleet=sys.argv[3]); json.dump(s,open(p,"w"))' "$HERDR_APP_HOME/data/workbench.json" "$D/code" "$D/bin/fleet"
+  python3 -I -c 'import json,os,sys; p=sys.argv[1]; s=json.load(open(p)) if os.path.exists(p) else {}; s.update(code_dir=sys.argv[2], fleet=sys.argv[3], test_keys=True); json.dump(s,open(p,"w"))' "$HERDR_APP_HOME/data/workbench.json" "$D/code" "$D/bin/fleet"
   # Your look (theme, fonts), read from your own Herdr home: settings.json and themes/ only.
   own=${HERDR_LOOK_FROM:-$HOME/.config/herdr-app}
   [ -f "$own/settings.json" ] && python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); s["telemetry"]=False; s.pop("machines",None); json.dump(s,open(sys.argv[2],"w"),indent=2)' "$own/settings.json" "$HERDR_APP_HOME/settings.json"

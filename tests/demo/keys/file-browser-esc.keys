@@ -1,0 +1,12 @@
+# The file browser as a window: j k move in the tree without moving any row; Esc closes it.
+close file-browser
+open file-browser
+until file-browser rows != 0
+press file-browser g g
+expect at == 0
+still file-browser j
+expect at == 1
+still file-browser k
+expect at == 0
+press file-browser escape
+expect shown == false

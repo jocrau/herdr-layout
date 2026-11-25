@@ -19,6 +19,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, run, openOverlay, exec, hc, home, theme, shared, setShared, watchFolder, window, layout, notify } from "herdr";
 import { branchTitle } from "./lib/names.js";
 import { quote, customRemove, removeWorktreeArgs, deleteBranchArgs } from "./lib/worktree.js";
+import { TYPE } from "./lib/type.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -709,7 +710,7 @@ export default class Spaces extends View {
       return layout === "loading" || (!layout && this.machines.some(k => k.name === m && k.state === "connected"))
         || spaces().some(s => (s.machine ?? null) === m && !this.shown.has(s.id));
     };
-    const loadingRow = m => div().id(`machine-loading-${m ?? "local"}`).h(28).flex_none().px(8).text_size(12).text_color(t.dim).child(collapsed ? "…" : "Loading…");
+    const loadingRow = m => div().id(`machine-loading-${m ?? "local"}`).h(28).flex_none().px(8).text_size(TYPE.meta).text_color(t.dim).child(collapsed ? "…" : "Loading…");
     if (!remote.length) return loading(null) && !rows.length ? [loadingRow(null)] : rows.map(draw);
     const machineNames = [null, ...remote];
     return machineNames.flatMap((m) => {
@@ -717,7 +718,7 @@ export default class Spaces extends View {
       const machine = this.machines.find(k => k.name === m);
       const connected = !m || machine?.state === "connected";
       const folded = this.folded.has(m);
-      const head = h_flex().id(`machine-${m ?? "local"}`).h(26).flex_none().px(collapsed ? 2 : 8).gap(7).items_center().text_size(11).text_color(t.dim)
+      const head = h_flex().id(`machine-${m ?? "local"}`).h(26).flex_none().px(collapsed ? 2 : 8).gap(7).items_center().text_size(TYPE.label).text_color(t.dim)
         .cursor_pointer().hover(s => s.bg(t.hover))
         .on_click((_e, cx) => {
           folded ? this.folded.delete(m) : this.folded.add(m);
@@ -732,7 +733,7 @@ export default class Spaces extends View {
           .child(div().size(6).rounded(3).flex_none().bg(connected ? t.ansi2 : t.dim))
           .child(svg(`mods/workspace-chrome/chevron-${folded ? "right" : "down"}.svg`).size(11).flex_none()));
       const empty = h_flex().id(`machine-new-${m ?? "local"}`).h(28).flex_none().px(8).gap(7).items_center().rounded(7)
-        .text_size(12).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
+        .text_size(TYPE.meta).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
         .on_click(() => newSpace(m ? { machine: m } : {}))
         .child(svg("mods/workspace-chrome/plus.svg").size(12)).when(!collapsed, el => el.child("New space there"));
       return [head, ...(folded ? [] : mine.length ? mine.map(draw) : [loading(m) ? loadingRow(m) : empty])];
@@ -773,7 +774,7 @@ export default class Spaces extends View {
       .gap(5)
       .justify_end()
       .items_center()
-      .text_size(11.5)
+      .text_size(TYPE.label)
       .text_color(t.dim)
       .when(Boolean(where), (el) => el.child(div().min_w(0).when(Boolean(tree), (el) => el.max_w(80)).truncate().child(where)))
       .when(g.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
@@ -875,18 +876,18 @@ export default class Spaces extends View {
           // stay apart); the branch icon is for worktrees no space is in.
           .when(Boolean(tree), el => el.pl(22))
           .child(div().relative().flex_none()
-            .child(h_flex().size(18).rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?"))
+            .child(h_flex().size(18).rounded(5).bg(fill).items_center().justify_center().text_size(TYPE.hint).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?"))
             // Local addition (from my-spaces): an agent in it needs you (red) or finished while you looked elsewhere.
             .when(w.status === "blocked" || w.status === "done", el => el.child(
               div().absolute().right(-3).bottom(-3).size(8).rounded(4).border(1.5).border_color(on ? t.selected : t.chrome).bg(tone(t, w.status)))))
           .child(div().when(Boolean(tree), (el) => el.flex_1().min_w(0)).when(!tree, (el) => el.flex_shrink(0).max_w(150)).truncate().text_color(t.foreground).child(w.name))
           .child(g ? this.gitTail(g, tree, w.name, t, tree ? this.treeTail(r, t) : [])
-            : r.mixed ? h_flex().id(`repos-${w.id}`).flex_1().min_w(0).justify_end().text_size(11.5).text_color(t.dim).tooltip("Its terminals are in different repos: see each tab").child(`${r.mixed} repos`)
+            : r.mixed ? h_flex().id(`repos-${w.id}`).flex_1().min_w(0).justify_end().text_size(TYPE.label).text_color(t.dim).tooltip("Its terminals are in different repos: see each tab").child(`${r.mixed} repos`)
             : div().flex_1())
           // Local change: a fixed slot for the chevron on every space row, so repos and chevrons line up.
           .when(!tree && !r.fold, (el) => el.child(div().w(18).flex_none()))
           .when(Boolean(r.fold), (el) => el.child(h_flex().id(`fold-${w.id}`).flex_none().w(18).h(18).justify_center().rounded(4).items_center()
-            .text_size(11).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
+            .text_size(TYPE.label).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
             .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
             .on_click((_e, cx) => { cx.stop_propagation(); this.toggleFold(r.fold.space, cx); })
             .child(svg(`mods/workspace-chrome/chevron-${r.fold.folded ? "right" : "down"}.svg`).size(11)))),
@@ -911,7 +912,7 @@ export default class Spaces extends View {
       .hover((s) => s.bg(t.hover))
       .tooltip(`${w.name}${i < 9 ? `  ⌃${i + 1}` : ""}`)
       .on_click(() => run("space.select", { id: w.id }))
-      .child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?"))
+      .child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(TYPE.hint).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?"))
       .child(div().w(8).text_color(tone(t, w.status)).child(glyph(w.status)));
   }
 
@@ -932,11 +933,11 @@ export default class Spaces extends View {
     if (changed) setShared("space.colors", kept);
     // Collapsed, the scrollbar shows only while scrolling (always shown, it ran through the narrow column).
     const list = v_flex().flex_1().min_h(0).px(collapsed ? 0 : 8).pb(14).overflow_y_scrollbar();
-    return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
-      .child(h_flex().h(31).pl(collapsed ? 6 : 16).pr(collapsed ? 6 : 10).items_center().justify_between().text_size(11.5).text_color(t.dim)
+    return v_flex().size_full().min_h(0).bg(t.chrome).text_size(TYPE.title)
+      .child(h_flex().h(31).pl(collapsed ? 6 : 16).pr(collapsed ? 6 : 10).items_center().justify_between().text_size(TYPE.label).text_color(t.dim)
         .when(!collapsed, el => el.child("Spaces"))
         .when(collapsed, el => el.child(div().id("sidebar-expand").size(24).flex_none().flex().items_center().justify_center().rounded(6)
-          .text_size(13).hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip("Expand the sidebar").on_click(toggleSidebar).child("»")))
+          .text_size(TYPE.title).hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip("Expand the sidebar").on_click(toggleSidebar).child("»")))
         .child(div().id("space-new").size(collapsed ? 24 : 26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click(() => newSpace()).child(svg("mods/workspace-chrome/plus.svg").size(14))))
       // Collapsed, no side padding: the avatars line up with the agents list's below.

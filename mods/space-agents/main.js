@@ -7,6 +7,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, setBadge } from "herdr";
+import { TYPE } from "./lib/type.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -82,7 +83,7 @@ function avatar(t, a) {
   const color = (shared("space.colors") ?? {})[a.space] ?? "ansi6";
   const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color]);
   return h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center()
-    .text_size(10.5).font_bold().text_color("#ffffff").child([...(a.space_name || "?")][0].toUpperCase());
+    .text_size(TYPE.hint).font_bold().text_color("#ffffff").child([...(a.space_name || "?")][0].toUpperCase());
 }
 
 // Context used, from the claude.context label the Claude Code status line sets
@@ -100,7 +101,7 @@ function contextMeter(t, raw) {
   return h_flex().id("ctx").flex_none().gap(4).items_center().tooltip(`Context ${pct}% used`)
     .child(div().relative().w(W).h(4).rounded(2).bg(t.border)
       .child(div().absolute().left(0).top(0).h(4).rounded(2).bg(color).w(Math.max(1, Math.round(pct / 100 * W)))))
-    .child(div().w(26).text_right().text_size(10.5).text_color(color).child(`${pct}%`));
+    .child(div().w(26).text_right().text_size(TYPE.hint).text_color(color).child(`${pct}%`));
 }
 
 // The agent's icon from the app's program table: a one-color glyph or a picture.
@@ -182,8 +183,8 @@ export default class Agents extends View {
       .w_full()
       .p(5)
       .bg(t.popover)
-      .text_size(12.8)
-      .child(div().px(8).pt(4).pb(6).text_size(11).text_color(t.dim).child("Sort agents"))
+      .text_size(TYPE.body)
+      .child(div().px(8).pt(4).pb(6).text_size(TYPE.label).text_color(t.dim).child("Sort agents"))
       .children(SORTS.map((s) => h_flex()
         .id(`sort-${s.id}`)
         .h(31)
@@ -225,7 +226,7 @@ export default class Agents extends View {
     else if (m.status === "idle") items.push(item("m-unread", "Mark as unread", "clock", () => markUnread(m.address, m.focused)));
     items.push(item("m-pin", m.pinned ? "Unpin" : "Pin to the top", m.pinned ? "pin-off" : "pin",
       () => run("terminal.pin", { terminal: m.address, pinned: !m.pinned })));
-    return v_flex().w_full().p(5).bg(t.popover).text_size(12.8).children(items);
+    return v_flex().w_full().p(5).bg(t.popover).text_size(TYPE.body).children(items);
   }
 
   // Applies unread marks: a marked idle agent reads as done. Clears a mark once its
@@ -287,7 +288,7 @@ export default class Agents extends View {
       .flex_none()
       .gap(0)
       .items_center()
-      .text_size(12.5)
+      .text_size(TYPE.body)
       .when(on, (el) => el.bg(t.raised))
       .hover((s) => s.bg(t.hover))
       .on_click(() => (this.listed.has(k.address) ? run("pane.focus", { terminal: k.address }) : this.peek(k.address)))
@@ -303,8 +304,8 @@ export default class Agents extends View {
   status(t, a, compact = false) {
     const color = t[a.status] ?? t.dim;
     if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(t.working).spin(900);
-    if (a.status === "blocked" && compact) return div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!");
-    if (a.status === "blocked") return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
+    if (a.status === "blocked" && compact) return div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(TYPE.hint).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!");
+    if (a.status === "blocked") return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(TYPE.hint).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
     // Idle: a ring; done: a dot.
     if (a.status === "idle") return div().size(7).mx(3).flex_none().rounded(4).border(1.5).border_color(t.idle ?? t.dim);
     return div().size(7).mx(3).flex_none().rounded(4).bg(a.status === "done" ? color : t.dim + "00");
@@ -370,7 +371,7 @@ export default class Agents extends View {
         .flex()
         .items_center()
         .rounded(4)
-        .text_size(11)
+        .text_size(TYPE.label)
         .text_color(open ? t.dim : (t[top] ?? t.dim))
         .cursor_pointer()
         .hover((s) => s.bg(t.hover).text_color(t.foreground))
@@ -485,14 +486,14 @@ export default class Agents extends View {
         .child(h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(space ? 150 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
           .when(Boolean(space), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${space}`))))
-        .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
+        .when(Boolean(machine), el => el.child(div().text_size(TYPE.hint).text_color(t.dim).child(machine)))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(ctx != null, el => el.child(contextMeter(t, ctx).id(`ctx-${a.address}`)))
         // Pin (on hover) and time share one fixed-width slot, so swapping them
         // doesn't shift the context meter and name to their left.
         .child(h_flex().w(26).flex_none().justify_end().items_center()
           .when(this.hovered === a.address, el => el.child(pin))
-          .when(this.hovered !== a.address && Boolean(when), el => el.child(div().text_size(11).text_color(t.dim).child(duration(now - when)))))
+          .when(this.hovered !== a.address && Boolean(when), el => el.child(div().text_size(TYPE.label).text_color(t.dim).child(duration(now - when)))))
         .child(this.status(t, a, byPriority && !isPinned));
     };
 
@@ -518,7 +519,7 @@ export default class Agents extends View {
         .flex_none()
         .gap(6)
         .items_center()
-        .text_size(11)
+        .text_size(TYPE.label)
         .font_medium()
         .cursor_pointer()
         .hover((s) => s.text_color(t.foreground))
@@ -544,7 +545,7 @@ export default class Agents extends View {
       .bg(t.chrome)
       .border_t(1)
       .border_color(t.border)
-      .text_size(13)
+      .text_size(TYPE.title)
       .when(!collapsed, (el) =>
         el.child(
           h_flex()
@@ -555,11 +556,11 @@ export default class Agents extends View {
             .flex_none()
             .items_center()
             .justify_between()
-            .child(div().text_size(11.5).font_medium().text_color(t.dim).child("Agents"))
+            .child(div().text_size(TYPE.label).font_medium().text_color(t.dim).child("Agents"))
             .child(
               div()
                 .id("ag-sort")
-                .text_size(11)
+                .text_size(TYPE.label)
                 .text_color(t.dim)
                 .hover((s) => s.text_color(t.foreground))
                 .on_click(() => openOverlay({ mod: "space-agents", kind: "popup", width: 200, height: 140, props: { sortMenu: true } }))
@@ -569,7 +570,7 @@ export default class Agents extends View {
         ),
       )
       .when(list.length === 0 && !collapsed, (el) =>
-        el.child(div().px(12).text_size(12).text_color(t.dim).child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
+        el.child(div().px(12).text_size(TYPE.meta).text_color(t.dim).child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
       )
       // Collapsed, the bar shows only while scrolling: always shown, it ran through the narrow column.
       .child((collapsed ? agList : agList.mode("always")).children(rows));

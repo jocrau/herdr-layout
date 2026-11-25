@@ -93,6 +93,7 @@ const FACTS = {
 test("with facts and --no-save, the board reads the queue quietly and takes each PR's facts from it", () => {
   assert.deepEqual(queueArgs(new Set(["nosave", "facts"])).args, ["queue", "--format", "json", "--no-save"]);
   assert.deepEqual(queueArgs(new Set(["nosave", "facts"]), { sync: true, maxAge: "5m" }).args, ["sync", "--max-age", "5m", "--format", "json", "--no-save"]);
+  assert.deepEqual(queueArgs(new Set(["nosave", "facts"]), { sync: true, maxAge: null }).args, ["sync", "--format", "json", "--no-save"]);
   const got = fromListing({ login: "me", warnings: ["a", "b", "c", "d"], sections: [{ items: [{ key: "o/r#1", facts: FACTS }, { key: "o/r#2", facts: null }] }] });
   assert.equal(got.me, "me");
   assert.deepEqual(got.warnings, ["b", "c", "d"]);

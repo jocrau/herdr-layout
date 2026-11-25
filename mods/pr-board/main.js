@@ -17,6 +17,8 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle, Popup } from "gpui-base";
 import { theme, settings, nextCommand, props, layout, notify, watchFolder, checking, closeOverlay, run } from "herdr";
 import { passBehind } from "./lib/behind.js";
+import { runTestKey } from "./lib/testkeys.js";
+import { navMove, navIndex, moveHelp, HELP_KEYS, HELP_ROW } from "./lib/keymap.js";
 import { readQueue, lastQueue, queueRows, stateDir, doVerb, verbPlan, jobFor, jobText, jobLabel, jobModel, detailJob, jobActive, jobDetail, findingsText, oldFindingsText, jobShow, jobStop, jobTerminal, jobLog, openPrView, talkTab, prTab, tabName, parseKey, draftReady, storedDraft, capabilities, prflowMachine } from "./lib/prflow.js";
 import { tabDot, alpha, numWidth } from "./lib/prrows.js";
 import { GROUPS, arrange, moveOf, nextStep, people, waitingOn, splitTitle, ago, actionsFor, agentWaits, agentAtWork, planWaits, placeText, saidAlready, readableTimes } from "./model.js";
@@ -25,12 +27,12 @@ import { closeSide, focusFrame, toTerminal } from "./lib/sidecolumn.js";
 import { boardHeader, boardTop } from "./lib/boardheader.js";
 import { footerBar } from "./lib/bars.js";
 import { tailPanel, TailSize } from "./lib/tailpanel.js";
+import { TYPE } from "./lib/type.js";
 
 const LINE = 20, GAP = 6; // a row's first line, and the gap between its columns
 // The board's type scale: one size per kind of text, so text of the same kind reads the same in every group and card.
 // title: a card's title; body: what to do next, a waiting PR's title, Your move's action headings, the details' text;
 // meta: PR numbers, context lines, who and since, facts, section headings, buttons and links. Nothing below meta.
-const TYPE = { title: 13, body: 12.5, meta: 12 };
 // Where a row's text column starts: the row's padding and border, the dot, the number column.
 const textAt = (numW) => 8 + 2 + 8 + GAP + numW + GAP;
 const SYNC_EVERY = 600000; // with GitHub (only what changed), while shown
@@ -114,6 +116,10 @@ export default class PrBoard extends View {
     cx.spawn(async (cx) => {
       for (;;) {
         const c = String(await nextCommand()).replace(/^pr-board\./, "");
+        // The demo's scripts press keys here (lib/testkeys.js); off outside the demo. The demo's queue is a copy of
+        // a real one: no key that runs a verb (it would reach GitHub) or starts an agent is pressed.
+        if (await runTestKey("pr-board", c, cx, (e, kcx) => (e.keystroke === "escape" ? this.escapeKey(kcx) : this.key(e, kcx)),
+          () => this.testState(), (k) => this.testRefuses(k))) { cx.notify(); continue; }
         // The window's keys (tabs, spaces, agents, panes): kept while it's a dialog, run when it's docked.
         if (passBehind(c, Boolean(props()?.overlay), run)) { cx.notify(); continue; }
         if (c === "focus") { this.h.focus(); if (!this.order.includes(this.sel)) this.sel = this.order.find((x) => !isGrp(x)) ?? this.order[0] ?? null; this.reveal = true; }
@@ -129,8 +135,8 @@ export default class PrBoard extends View {
 
   // ---------- reading
 
-  // The queue: pr-flow's stored one, or (`sync`) after asking GitHub what changed ("force": even if it synced
-  // in the last 10 minutes).
+  // The queue: pr-flow's stored one, or (`sync`) after asking GitHub what changed ("force", the sync button:
+  // always, even right after another sync — a review you were just told about must show).
   // One read at a time. A read that never comes back (cut off by a layout reload, say) mustn't stop the pane
   // reading for good: after STUCK_AFTER the next read goes ahead, and the stale one's answer is dropped.
   async read(cx, sync = null) {
@@ -138,7 +144,7 @@ export default class PrBoard extends View {
     const mine = (this.reads = (this.reads ?? 0) + 1);
     this.loading = sync ? "sync" : "read"; this.loadingAt = Date.now(); cx.notify();
     let q;
-    try { q = await readQueue({ sync: Boolean(sync), maxAge: sync === "force" ? "1m" : "10m" }); }
+    try { q = await readQueue({ sync: Boolean(sync), maxAge: sync === "force" ? null : "10m" }); }
     catch (e) { q = { error: `reading pr-flow's queue failed: ${e?.message ?? e}` }; }
     if (mine !== this.reads) return;
     this.loading = null; this.readAt = Date.now();
@@ -329,6 +335,24 @@ export default class PrBoard extends View {
 
   // ---------- keyboard
 
+  // What a test key script checks (lib/testkeys.js): what has the keyboard and what's open, in Esc's order.
+  testState() {
+    return {
+      shown: shown(), sel: this.sel ?? null, open: this.openKey ?? null, act: this.act ? this.act.at : null, confirm: Boolean(this.confirm),
+      filtering: Boolean(this.filtering), help: Boolean(this.help), tail: Boolean(this.tailOn), more: Boolean(this.moreOpen),
+      rows: this.order?.length ?? 0,
+      index: this.order?.indexOf(this.sel) ?? -1, atEnd: (this.order?.length ?? 0) > 0 && this.order.indexOf(this.sel) === this.order.length - 1,
+    };
+  }
+
+  // Keys a test script may not press: a verb's key, space and ⏎ in an action row (they run one), o, t, d, w.
+  testRefuses(k) {
+    if (Object.values(VERB_KEYS).includes(k)) return "a pr-flow verb (it reaches GitHub)";
+    if (["space", "o", "t", "w"].includes(k)) return "it runs an action, opens a tab or a job's log";
+    if (k === "enter" && this.act) return "it runs the action";
+    return null;
+  }
+
   // Esc, from its action (see bindEscape): the key handler's steps (it closes the column last).
   escapeKey(cx) {
     this.key({ key: "escape", keystroke: "escape", modifiers: {} }, cx, true);
@@ -356,7 +380,7 @@ export default class PrBoard extends View {
     const row = this.sel && !isGrp(this.sel) ? this.row(this.sel) : null, grp = isGrp(this.sel) ? this.sel.slice(4) : null;
     // Details follow the selection from PR to PR; a heading closes them.
     const moveTo = (i) => { this.act = null; this.sel = order[Math.max(0, Math.min(order.length - 1, i))] ?? this.sel; if (this.openKey) this.openKey = isGrp(this.sel) ? null : this.sel; this.reveal = true; };
-    if (this.help && !is("?", "shift-/")) { this.help = false; cx.stop_propagation(); cx.notify(); return; }
+    if (this.help && !is(...HELP_KEYS)) { this.help = false; cx.stop_propagation(); cx.notify(); return; }
     // An action's own key (VERB_KEYS) on the selected PR, open or not; one it doesn't offer now says so.
     const keyed = row && Object.keys(VERB_KEYS).filter((v) => VERB_KEYS[v] === k);
     if (keyed?.length && !this.act) {
@@ -376,10 +400,7 @@ export default class PrBoard extends View {
       cx.stop_propagation(); cx.notify(); return;
     }
     const firstOf = (g) => order.find((x) => !isGrp(x) && this.groupOf?.get(x) === g);
-    if (is("j", "down", "ctrl-n", "ctrl-j")) moveTo(at + 1);
-    else if (is("k", "up", "ctrl-p", "ctrl-k")) moveTo(at < 0 ? 0 : at - 1);
-    else if (is("g", "home")) moveTo(0);
-    else if (is("shift-g", "end")) moveTo(order.length - 1);
+    if (navMove(k)) moveTo(navIndex(k, at, order.length)); // lib/keymap.js: the same on every board
     // A heading: ⏎ ⇥ fold or unfold; → unfolds, then goes to its first PR; ← folds.
     else if (grp && is("enter", "tab")) this.fold.set(grp, !this.openGroups?.has(grp));
     else if (grp && is("l", "right")) { if (!this.openGroups?.has(grp)) this.fold.set(grp, true); else if (firstOf(grp)) { this.sel = firstOf(grp); this.reveal = true; } }
@@ -406,7 +427,7 @@ export default class PrBoard extends View {
     else if (is("backspace") && this.filter) { this.filterState.set_value(""); this.filter = ""; }
     // Esc undoes one thing at a time (the filter, then the open PR, above); with nothing left, it closes the column.
     else if (is("escape")) closeSide("pr-board");
-    else if (is("?", "shift-/")) this.help = !this.help;
+    else if (is(...HELP_KEYS)) this.help = !this.help;
     else return;
     cx.stop_propagation(); cx.notify();
   }
@@ -611,7 +632,7 @@ export default class PrBoard extends View {
   keyList(t) {
     const groups = [
       ["MOVE", [
-        ["j k ↑ ↓", "move over PRs and section headings"], ["g G", "top, bottom"],
+        ...moveHelp("PRs and section headings"),
         ["l →", "in: open a section, its first PR, a PR's details, then its actions (← → between them, ⏎ runs one)"],
         ["h ←", "out, the same steps back"], ["⏎ ⇥", "a PR's details open or closed; a section folded or not"],
         ["esc", "back one step (actions, tail, details); then closes the column"], ["/", "filter (esc back to the list, the filter kept; ⌫ clears it)"],
@@ -626,7 +647,7 @@ export default class PrBoard extends View {
         ["d", "the PR view: files, diff, findings"], ["t", "its agent tab (a new one to talk about the PR)"], ["o", "on GitHub"],
         ["w", "its pr-flow job's log, in the tail at the bottom"], ["- =", "the tail shorter, taller"], ["c", "stop its pr-flow job"],
       ]],
-      ["QUEUE", [["s", "sync with GitHub now"], ["r", "read the queue again"], ["?", "this list"]]],
+      ["QUEUE", [["s", "sync with GitHub now"], ["r", "read the queue again"], HELP_ROW]],
     ];
     return v_flex().px(10).py(10).gap(3)
       .children(groups.flatMap(([title, rows], i) => [
@@ -788,7 +809,7 @@ export default class PrBoard extends View {
         .on_click((_e, cx) => { this.touched(); this.sel = gid; this.h.focus(); this.fold.set(g, !open); cx.notify(); })
         .child(div().text_size(TYPE.meta).font_semibold().text_color(t.foreground).child(label.toUpperCase()))
         .child(div().text_size(TYPE.meta).font_semibold().text_color(t.accent).child(String(rows.length)))
-        .child(div().flex_1()).child(div().text_size(11).text_color(t.dim).child(open ? "▾" : "▸")));
+        .child(div().flex_1()).child(div().text_size(TYPE.label).text_color(t.dim).child(open ? "▾" : "▸")));
       // Folded: the PRs' numbers; a click on one opens the section, that PR selected and its details open.
       if (!open) {
         out.push(h_flex().pl(8 + 2 + 8 + GAP - 4).pr(10).pb(2).flex_wrap().font_family(mono).text_size(TYPE.meta).text_color(t.dim)

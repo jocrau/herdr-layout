@@ -19,6 +19,7 @@ import { tipText } from "./lib/tiptext.js";
 import { PAGE, VIEWER_CLOSED, count, DIFF_ROW } from "./common.js";
 import { splitter } from "./lib/splitter.js";
 import { fuzzy } from "./lib/fuzzy.js";
+import { TYPE } from "./lib/type.js";
 
 const RAIL = 210;
 // The drafts' texts seen ({ "owner/repo#n@v": { v, body, comments, …, kept } }): pr-flow's view gives only the current
@@ -279,7 +280,7 @@ export const PrMethods = {
 
   prNotes(t, mono) {
     const notes = this.pr.notes ?? {}, th = notes.threads, e = notes.explainer;
-    const head = (text) => div().pt(8).pb(1).text_size(10.5).font_semibold().text_color(t.muted).child(text);
+    const head = (text) => div().pt(8).pb(1).text_size(TYPE.hint).font_semibold().text_color(t.muted).child(text);
     const facts = [
       // As on pr-board's card: not a one-word reason that only names the stage ("draft", shown in the bar), nor
       // pr-flow's "job-… working since" line (the bar's job chip says it).
@@ -294,12 +295,12 @@ export const PrMethods = {
     return v_flex().id("pr-notes").gap(1)
       // Its height as laid out (the panel's width fixes it), for notesHeight; drawn again when it changed.
       .on_size_change((size, cx) => { const h = size.height / this.unit(); if (Math.abs(h - (this.notesContent ?? 0)) > 1) { this.notesContent = h; cx.notify(); } })
-      .when(facts.length > 0, (el) => el.child(div().w_full().text_size(11.5).text_color(t.foreground).child(facts.join(" · "))))
+      .when(facts.length > 0, (el) => el.child(div().w_full().text_size(TYPE.label).text_color(t.foreground).child(facts.join(" · "))))
       .when(Boolean(this.pr.plan), (el) => el.child(this.prPlanPanel(t, mono)))
       .when(Boolean(this.pr.draft), (el) => el.child(this.prDraftPanel(t, mono)))
       .child(this.prFindingsList(t, mono))
       .when(Boolean(this.pr.threads?.length), (el) => el.child(this.prThreadsList(t, mono)))
-      .when(Boolean(this.pr.threadsError), (el) => el.child(div().pt(4).text_size(11).text_color(t.dim).child(this.pr.threadsError)))
+      .when(Boolean(this.pr.threadsError), (el) => el.child(div().pt(4).text_size(TYPE.label).text_color(t.dim).child(this.pr.threadsError)))
       .when(this.prLooks().length > 0, (el) => el.child(head("WHERE TO SPEND YOUR TIME"))
         .children(this.prLooks().map((l, i) => this.prLookCard(t, mono, l, i))))
       .when(Boolean(e?.points?.length || e?.text), (el) => el.child(head(`WHAT IT CHANGES${stale}`)).child(this.prChanges(t, e)));
@@ -309,7 +310,7 @@ export const PrMethods = {
   // in a quieter colour, room between the lines), or its text as paragraphs.
   prChanges(t, e) {
     // Markdown's code marks (`x`) read as noise in plain text: left out.
-    const para = (text, color) => div().w_full().text_size(12).line_height(1.5).text_color(color).child(text.replace(/`([^`]*)`/g, "$1"));
+    const para = (text, color) => div().w_full().text_size(TYPE.meta).line_height(1.5).text_color(color).child(text.replace(/`([^`]*)`/g, "$1"));
     if (!e.points?.length) {
       return v_flex().gap(8).pr(4).children(String(e.text).split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean).map((x) => para(x.replace(/\s*\n\s*/g, " "), t.foreground)));
     }
@@ -318,7 +319,7 @@ export const PrMethods = {
       return h_flex().gap(8).items_start()
         .child(div().flex_none().mt(7).size(5).rounded(3).bg(t.accent))
         .child(v_flex().flex_1().min_w(0).gap(2)
-          .when(Boolean(lead), (c) => c.child(div().w_full().text_size(12).line_height(1.5).font_semibold().text_color(t.foreground).child(lead)))
+          .when(Boolean(lead), (c) => c.child(div().w_full().text_size(TYPE.meta).line_height(1.5).font_semibold().text_color(t.foreground).child(lead)))
           .when(Boolean(text), (c) => c.child(para(text, lead ? t.muted : t.foreground))));
     }));
   },
@@ -404,24 +405,24 @@ export const PrMethods = {
       const open = this.prFold.has(g) ? this.prFold.get(g) : g === "you" || g === "waiting" || rows.some((r) => r.key === this.pr.key);
       out.push(h_flex().id(`rail-grp-${g}`).px(8).pt(10).pb(2).gap(5).items_center().cursor_pointer().hover((e) => e.text_color(t.foreground))
         .on_click((_e, cx) => { this.prFold.set(g, !open); cx.notify(); })
-        .child(div().flex_1().min_w(0).truncate().text_size(10.5).font_semibold().text_color(g === "you" ? t.foreground : t.muted).child(label.toUpperCase()))
-        .child(div().flex_none().text_size(10).text_color(t.dim).child(`${rows.length} ${open ? "▾" : "▸"}`)));
+        .child(div().flex_1().min_w(0).truncate().text_size(TYPE.hint).font_semibold().text_color(g === "you" ? t.foreground : t.muted).child(label.toUpperCase()))
+        .child(div().flex_none().text_size(TYPE.hint).text_color(t.dim).child(`${rows.length} ${open ? "▾" : "▸"}`)));
       if (!open) {
-        out.push(div().px(8).pb(1).truncate().font_family(mono).text_size(10.5).text_color(t.dim).child(rows.map((r) => `#${r.key.split("#")[1]}`).join(" ")));
+        out.push(div().px(8).pb(1).truncate().font_family(mono).text_size(TYPE.hint).text_color(t.dim).child(rows.map((r) => `#${r.key.split("#")[1]}`).join(" ")));
         continue;
       }
       for (const blk of mine) {
-        if (g === "you") out.push(div().px(8).pt(4).text_size(10).text_color(t.muted).child(`${blk.label} · ${blk.rows.length}`));
+        if (g === "you") out.push(div().px(8).pt(4).text_size(TYPE.hint).text_color(t.muted).child(`${blk.label} · ${blk.rows.length}`));
         for (const r of blk.rows) out.push(prRow(t, mono, r, { id: `rail-${r.key}`, compact: true, numW, selected: r.key === this.pr.key, focused: true,
           onClick: (_e, cx) => { this.loadPr(r.key, cx); this.handle.focus(); } }));
       }
     }
     return v_flex().w(this.railWidth()).flex_none().h_full().min_h(0).bg(t.chrome ?? t.background)
       .child(h_flex().h(42).flex_none().px(10).items_center().border_b(1).border_color(t.border)
-        .child(div().text_size(13).font_semibold().child("PRs"))
+        .child(div().text_size(TYPE.title).font_semibold().child("PRs"))
         .child(div().flex_1())
-        .child(div().text_size(10.5).text_color(t.dim).child("⌘↑ ⌘↓")))
-      .child(v_flex().id("pr-rail").flex_1().min_h(0).px(4).pb(8).overflow_y_scrollbar().children(out.length ? out : [div().p(10).text_size(11.5).text_color(t.dim).child("Reading the queue…")]));
+        .child(div().text_size(TYPE.hint).text_color(t.dim).child("⌘↑ ⌘↓")))
+      .child(v_flex().id("pr-rail").flex_1().min_h(0).px(4).pb(8).overflow_y_scrollbar().children(out.length ? out : [div().p(10).text_size(TYPE.label).text_color(t.dim).child("Reading the queue…")]));
   },
 
   // ⌘↑ ⌘↓: the previous or next PR in the list's order (the pane's).
@@ -514,9 +515,9 @@ export const PrMethods = {
     return h_flex().h(26).px(10).gap(6).items_center().rounded(5).cursor_pointer()
       .when(i === this.prPick.at, (e) => e.bg(t.selected)).hover((e) => e.bg(t.hover))
       .child(tabDot(t, r.key))
-      .child(div().w(numW).flex_none().text_right().font_family(mono).text_size(12).text_color(needs ? (nextStep(r).problem ? t.ansi1 : t.accent) : t.muted).when(needs, (e) => e.font_semibold()).child(`#${r.key.split("#")[1]}`))
-      .child(div().w(repoW).flex_none().truncate().text_size(11.5).text_color(t.dim).child(parseKey(r.key)?.repo ?? ""))
-      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(needs || here ? t.foreground : t.muted).when(here, (e) => e.font_semibold()).child(r.title ?? ""))
+      .child(div().w(numW).flex_none().text_right().font_family(mono).text_size(TYPE.meta).text_color(needs ? (nextStep(r).problem ? t.ansi1 : t.accent) : t.muted).when(needs, (e) => e.font_semibold()).child(`#${r.key.split("#")[1]}`))
+      .child(div().w(repoW).flex_none().truncate().text_size(TYPE.label).text_color(t.dim).child(parseKey(r.key)?.repo ?? ""))
+      .child(div().flex_1().min_w(0).truncate().text_size(TYPE.meta).text_color(needs || here ? t.foreground : t.muted).when(here, (e) => e.font_semibold()).child(r.title ?? ""))
       .child(findingsBadge(t, r.rec));
   },
 
@@ -526,21 +527,21 @@ export const PrMethods = {
     p.at = Math.max(0, Math.min(p.at, rows.length - 1));
     const H = 26, h = Math.min(Math.max(1, rows.length) * H, 460);
     const line = (x, i) => x.kind === "head"
-      ? h_flex().h(H).px(10).items_end().pb(3).gap(5).text_size(10.5).font_semibold().text_color(t.muted).child(div().flex_1().child(x.text)).child(div().text_color(t.dim).child(String(x.n)))
-      : x.kind === "sub" ? h_flex().h(H).px(10).items_end().pb(3).text_size(10).text_color(t.muted).child(x.text)
+      ? h_flex().h(H).px(10).items_end().pb(3).gap(5).text_size(TYPE.hint).font_semibold().text_color(t.muted).child(div().flex_1().child(x.text)).child(div().text_color(t.dim).child(String(x.n)))
+      : x.kind === "sub" ? h_flex().h(H).px(10).items_end().pb(3).text_size(TYPE.hint).text_color(t.muted).child(x.text)
       : this.prPickRow(t, mono, x.r, i, { numW, repoW });
     return v_flex().id("pr-pick").mt(4).w(560).py(4).rounded(8).bg(t.raised ?? t.background).border_1().border_color(t.border).shadow_lg()
       .on_mouse_down_out((_e, cx) => this.closePrPick(cx))
-      .child(h_flex().h(26).px(10).gap(6).items_center().text_size(12)
+      .child(h_flex().h(26).px(10).gap(6).items_center().text_size(TYPE.meta)
         .child(div().flex_1().min_w(0).truncate().text_color(p.query ? t.foreground : t.dim).child(p.query ? p.query : "Type to filter: number, repository, title, author"))
-        .when(Boolean(p.query), (e) => e.child(div().text_size(11).text_color(t.dim).child(`${rows.length} found`))))
+        .when(Boolean(p.query), (e) => e.child(div().text_size(TYPE.label).text_color(t.dim).child(`${rows.length} found`))))
       .child(div().relative().h(h).flex_none()
         .child(rows.length ? v_virtual_list(id, rows.length, H, (i) => (rows[i].kind === "pr" ? rows[i].r.key : `${rows[i].kind}-${i}`), (range) => rows.slice(range.start, range.end).map((x, o) => line(x, range.start + o)))
           .track_scroll(this.prPickScroll)
           .on_item_click((key, cx) => { const at = rows.findIndex((x) => x.kind === "pr" && x.r.key === key); if (at >= 0) { p.at = at; this.prPickChoose(cx); } })
-          .size_full() : div().p(10).text_size(11.5).text_color(t.dim).child(lastQueue() ? "No PR matches." : "Reading the queue…"))
+          .size_full() : div().p(10).text_size(TYPE.label).text_color(t.dim).child(lastQueue() ? "No PR matches." : "Reading the queue…"))
         .child(Scrollbar.vertical(id).viewport_from_layout().absolute().inset_0()))
-      .child(div().px(10).pt(6).pb(2).mt(4).border_t_1().border_color(t.border).text_size(11).text_color(t.dim).child("↑ ↓ · ⏎ show · esc close · ⌘↑ ⌘↓ step without it · ⇧L the list on the left"));
+      .child(div().px(10).pt(6).pb(2).mt(4).border_t_1().border_color(t.border).text_size(TYPE.label).text_color(t.dim).child("↑ ↓ · ⏎ show · esc close · ⌘↑ ⌘↓ step without it · ⇧L the list on the left"));
   },
 
   // ---------- the bar: the PR and what you can do
@@ -584,7 +585,7 @@ export const PrMethods = {
     const verbs = lastQueue()?.data?.verbs ?? {}, jobs = this.prJobs();
     if (pr.confirm) {
       return h_flex().h(40).flex_none().px(14).gap(10).items_center().bg(t.raised).border_b(1).border_color(t.border)
-        .child(div().flex_1().min_w(0).truncate().text_size(12).child(pr.confirm.text))
+        .child(div().flex_1().min_w(0).truncate().text_size(TYPE.meta).child(pr.confirm.text))
         .child(this.prButton("pr-yes", `${pr.confirm.label ?? pr.confirm.verb} ⏎`, true, (_e, cx) => this.prConfirmed(cx), t))
         .child(this.prButton("pr-no", "cancel esc", false, (_e, cx) => { pr.confirm = null; cx.notify(); }, t));
     }
@@ -597,16 +598,16 @@ export const PrMethods = {
       .when(open, (e) => e.bg(t.hover)).hover((e) => e.bg(t.hover))
       .tooltip(tipText(`Every PR in the queue (p)${pos.next ? `\nNext (⌘↓): ${tabName(pos.next)}` : ""}`))
       .on_click((_e, cx) => (this.prPick ? this.closePrPick(cx) : this.openPrPick(cx)))
-      .child(div().font_family(mono).text_size(12.5).font_semibold().text_color(t.accent).child(k?.short ?? pr.key))
-      .when(pos.at >= 0, (e) => e.child(div().text_size(11).text_color(t.dim).child(`${pos.at + 1}/${pos.n}`)))
-      .child(div().text_size(11).text_color(open ? t.foreground : t.dim).child("▾"));
+      .child(div().font_family(mono).text_size(TYPE.body).font_semibold().text_color(t.accent).child(k?.short ?? pr.key))
+      .when(pos.at >= 0, (e) => e.child(div().text_size(TYPE.label).text_color(t.dim).child(`${pos.at + 1}/${pos.n}`)))
+      .child(div().text_size(TYPE.label).text_color(open ? t.foreground : t.dim).child("▾"));
     return h_flex().h(40).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
       .child(Popup.new("pr-pick-popup", name).anchor("top_left").when(open, (e) => e.content(this.prPickList(t, mono))))
-      .child(div().flex_1().min_w(0).truncate().text_size(12.5).child(r?.title ?? ""))
-      .when(Boolean(r?.author), (e) => e.child(div().flex_none().text_size(11.5).text_color(t.dim).child(r.author)))
-      .when(Boolean(stage), (e) => e.child(div().flex_none().px(6).rounded(4).text_size(11).bg(alpha(problem ? t.ansi1 : needs ? t.accent : t.muted, "22")).text_color(problem ? t.ansi1 : needs ? t.accent : t.muted).tooltip(tipText(r ? nextStep(r).text || r.detail || "" : "")).child(stage)))
+      .child(div().flex_1().min_w(0).truncate().text_size(TYPE.body).child(r?.title ?? ""))
+      .when(Boolean(r?.author), (e) => e.child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child(r.author)))
+      .when(Boolean(stage), (e) => e.child(div().flex_none().px(6).rounded(4).text_size(TYPE.label).bg(alpha(problem ? t.ansi1 : needs ? t.accent : t.muted, "22")).text_color(problem ? t.ansi1 : needs ? t.accent : t.muted).tooltip(tipText(r ? nextStep(r).text || r.detail || "" : "")).child(stage)))
       // A pr-flow job at work on it (or one that failed lately): what it's doing.
-      .when(Boolean(job), (e) => e.child(div().flex_none().max_w(220).truncate().text_size(11).text_color(job.state === "failed" ? t.ansi1 : t.muted).tooltip(tipText(jobText(job, r))).child(`◷ ${jobText(job, r)}`)))
+      .when(Boolean(job), (e) => e.child(div().flex_none().max_w(220).truncate().text_size(TYPE.label).text_color(job.state === "failed" ? t.ansi1 : t.muted).tooltip(tipText(jobText(job, r))).child(`◷ ${jobText(job, r)}`)))
       .when(Boolean(rec.ci), (e) => e.child(ciGlyph(t, rec.ci)))
       .child(findingsBadge(t, rec))
       // Only what's possible now, as the pane's card offers it: the next step first (dimmed when it can't run now, its
@@ -622,7 +623,7 @@ export const PrMethods = {
   },
 
   prButton(id, label, primary, go, t, tip) {
-    return div().id(id).flex_none().px(8).h(24).flex().items_center().rounded(6).text_size(11.5).cursor_pointer()
+    return div().id(id).flex_none().px(8).h(24).flex().items_center().rounded(6).text_size(TYPE.label).cursor_pointer()
       .border_1().border_color(primary ? t.accent : t.border).text_color(primary ? t.accent : t.foreground)
       .hover((e) => e.bg(t.hover)).when(Boolean(tip), (e) => e.tooltip(tipText(tip))).on_click(go).child(label);
   },
@@ -839,7 +840,7 @@ export const PrMethods = {
     const pr = this.pr, s = this.prDraftShown(), c = draftColor(t), vs = pr.dVersions ?? [], busy = pr.dBusy, rw = pr.rewording;
     const approve = pr.dActions?.find((x) => x.verb === "approve" && !x.disabled_reason);
     const chip = (x) => { const on = x.v === s.v;
-      return div().id(`pr-dv-${x.v}`).flex_none().px(5).h(18).flex().items_center().rounded(4).text_size(10.5).cursor_pointer()
+      return div().id(`pr-dv-${x.v}`).flex_none().px(5).h(18).flex().items_center().rounded(4).text_size(TYPE.hint).cursor_pointer()
         .text_color(on ? c : t.dim).when(on, (e) => e.bg(alpha(c, "22")).font_semibold()).hover((e) => e.bg(t.hover))
         .tooltip(tipText(`${versionLabel(x)}${x.v === pr.draft.v ? " · the current one" : ""} (⇧V the next)`))
         .on_click((_e, cx) => { cx.stop_propagation(); this.prDraftStep(cx, x.v); }).child(versionLabel(x)); };
@@ -849,13 +850,13 @@ export const PrMethods = {
     const comments = this.prDraftComments();
     return v_flex().id("pr-draft").mt(6).px(8).py(6).gap(5).rounded(6).border_l(2).border_color(c).bg(alpha(c, "0c"))
       .child(h_flex().gap(6).items_center().flex_wrap()
-        .child(div().flex_none().text_size(10.5).font_semibold().text_color(c).child("YOUR DRAFT REVIEW"))
-        .children(vs.length > 1 ? vs.map(chip) : [div().flex_none().text_size(10.5).text_color(t.dim).child(versionLabel(s))])
+        .child(div().flex_none().text_size(TYPE.hint).font_semibold().text_color(c).child("YOUR DRAFT REVIEW"))
+        .children(vs.length > 1 ? vs.map(chip) : [div().flex_none().text_size(TYPE.hint).text_color(t.dim).child(versionLabel(s))])
         .child(div().flex_1())
-        .when(Boolean(rw), (e) => e.child(div().flex_none().max_w(200).truncate().text_size(10.5).text_color(t.muted).child(`◷ ${rw.tone}${rw.job?.phase ? ` · ${rw.job.phase}` : "…"}`))))
-      .when(!s.text, (e) => e.child(div().w_full().text_size(11.5).text_color(t.dim).child(`${versionLabel(s)}'s text isn't shown: pr-flow gives only the current version's, and this view hadn't read this one.`)))
-      .when(Boolean(s.text?.body), (e) => e.child(div().w_full().text_size(12).line_height(1.45).text_color(t.foreground).child(s.text.body)))
-      .when(Boolean(s.text) && !s.current, (e) => e.child(div().text_size(10.5).text_color(t.muted).child(`An older version: post and copy send it as shown; shorter, softer and more reword v${pr.draft.v}, the current one.`)))
+        .when(Boolean(rw), (e) => e.child(div().flex_none().max_w(200).truncate().text_size(TYPE.hint).text_color(t.muted).child(`◷ ${rw.tone}${rw.job?.phase ? ` · ${rw.job.phase}` : "…"}`))))
+      .when(!s.text, (e) => e.child(div().w_full().text_size(TYPE.label).text_color(t.dim).child(`${versionLabel(s)}'s text isn't shown: pr-flow gives only the current version's, and this view hadn't read this one.`)))
+      .when(Boolean(s.text?.body), (e) => e.child(div().w_full().text_size(TYPE.meta).line_height(1.45).text_color(t.foreground).child(s.text.body)))
+      .when(Boolean(s.text) && !s.current, (e) => e.child(div().text_size(TYPE.hint).text_color(t.muted).child(`An older version: post and copy send it as shown; shorter, softer and more reword v${pr.draft.v}, the current one.`)))
       .children(comments.map((x, i) => this.prDraftCard(t, mono, x, i)))
       .child(h_flex().pt(2).gap(5).flex_wrap()
         .child(btn("post", "Post…", "Post this version to GitHub as your review (asks first; ⌘⏎)", (cx) => this.prDraftAsk("post", cx), true))
@@ -873,12 +874,12 @@ export const PrMethods = {
     return v_flex().id(`pr-dc-${i}`).px(8).py(5).gap(3).rounded(6).cursor_pointer().bg(here ? t.hover : alpha(t.foreground, "08")).hover((e) => e.bg(t.hover))
       .on_click((_e, cx) => this.gotoDraft(i, cx))
       .child(h_flex().gap(6).items_center()
-        .child(div().flex_none().px(5).rounded(4).bg(alpha(c, "22")).text_size(10.5).font_semibold().text_color(c).child("Draft"))
-        .when(Boolean(x.finding), (e) => e.child(div().flex_none().font_family(mono).text_size(11).text_color(t.muted).child(x.finding)))
+        .child(div().flex_none().px(5).rounded(4).bg(alpha(c, "22")).text_size(TYPE.hint).font_semibold().text_color(c).child("Draft"))
+        .when(Boolean(x.finding), (e) => e.child(div().flex_none().font_family(mono).text_size(TYPE.label).text_color(t.muted).child(x.finding)))
         .child(this.prPlace(t, mono, x.path, x.line, x.end, (cx) => this.gotoDraft(i, cx, true)))
-        .when(x.side === "LEFT", (e) => e.child(div().flex_none().text_size(10.5).text_color(t.dim).child("old side")))
+        .when(x.side === "LEFT", (e) => e.child(div().flex_none().text_size(TYPE.hint).text_color(t.dim).child("old side")))
         .child(div().flex_1()))
-      .child(div().w_full().text_size(12).text_color(t.foreground).when(!whole, (e) => e.max_h(36).overflow_hidden()).child(x.body));
+      .child(div().w_full().text_size(TYPE.meta).text_color(t.foreground).when(!whole, (e) => e.max_h(36).overflow_hidden()).child(x.body));
   },
 
   // ---------- the fix round's plan (pr-flow 0.45.0, its ENGINE.md "Fix plans"): in the notes and on its items' lines. Your
@@ -1037,21 +1038,21 @@ export const PrMethods = {
     const sent = pr.planSent, late = sent && Date.now() - sent.at > PLAN_QUIET;
     return v_flex().id("pr-plan").mt(6).px(8).py(6).gap(5).rounded(6).border_l(2).border_color(c).bg(alpha(c, "0c"))
       .child(h_flex().gap(6).items_center().flex_wrap()
-        .child(div().flex_none().text_size(10.5).font_semibold().text_color(c).child(open ? "FIX PLAN" : "FIX ROUND"))
-        .child(div().flex_none().font_family(mono).text_size(10.5).text_color(open && moved ? t.ansi1 : t.dim).child(where))
-        .when(Boolean(result), (e) => e.child(div().flex_none().text_size(10.5).font_semibold().text_color(c).child(result)))
-        .when(Boolean(size), (e) => e.child(div().flex_none().text_size(10.5).text_color(t.dim).child(size)))
+        .child(div().flex_none().text_size(TYPE.hint).font_semibold().text_color(c).child(open ? "FIX PLAN" : "FIX ROUND"))
+        .child(div().flex_none().font_family(mono).text_size(TYPE.hint).text_color(open && moved ? t.ansi1 : t.dim).child(where))
+        .when(Boolean(result), (e) => e.child(div().flex_none().text_size(TYPE.hint).font_semibold().text_color(c).child(result)))
+        .when(Boolean(size), (e) => e.child(div().flex_none().text_size(TYPE.hint).text_color(t.dim).child(size)))
         .child(div().flex_1())
-        .child(div().flex_none().text_size(10.5).text_color(open ? c : t.muted).child(next ? `${state} · next: ${next}` : state)))
+        .child(div().flex_none().text_size(TYPE.hint).text_color(open ? c : t.muted).child(next ? `${state} · next: ${next}` : state)))
       .children(p.items.map((x, i) => this.prPlanItem(t, mono, x, i, open, live)))
       // The go line while it's still to come or under way; once done, it's what happened (the items say it).
-      .when(Boolean(p.go) && live, (e) => e.child(div().w_full().pt(2).font_family(mono).text_size(11).text_color(open ? t.foreground : t.muted).child(p.go)))
+      .when(Boolean(p.go) && live, (e) => e.child(div().w_full().pt(2).font_family(mono).text_size(TYPE.label).text_color(open ? t.foreground : t.muted).child(p.go)))
       // One slot under the go line, the same height in every state: what was typed, else the keys.
-      .when(open, (e) => e.child(div().w_full().h(16).text_size(10.5).truncate().text_color(late ? t.ansi3 ?? t.muted : t.dim)
+      .when(open, (e) => e.child(div().w_full().h(16).text_size(TYPE.hint).truncate().text_color(late ? t.ansi3 ?? t.muted : t.dim)
         .child(sent ? (late ? `no answer from the session yet to “${sent.words}” · t its tab` : `sent: ${sent.words} · waiting for the session's new version`)
           : session ? `n N its items · ⏎ an item's verdicts (f w a u s)${pr.oneround ? " · space picks items for the go" : ""} · ⌘⏎ go: fixes, pushes and posts what the go line says` : "No session to type into: t opens the PR's agent tab")))
       .when(open, (e) => e.child(h_flex().gap(6).items_center()
-        .child(Input.new(this.planInput).flex_1().h(26).px(8).rounded(6).border_1().border_color(this.planTyping ? c : t.border).bg(t.background).text_size(12).text_color(t.foreground)
+        .child(Input.new(this.planInput).flex_1().h(26).px(8).rounded(6).border_1().border_color(this.planTyping ? c : t.border).bg(t.background).text_size(TYPE.meta).text_color(t.foreground)
           .when(!session, (x) => x.opacity(0.5)))
         .child(this.prCardButton(t, "pr-plan-go", `${this.prGoWords() === "go" ? "Go" : this.prGoWords().replace(/^go/, "Go")}${moved ? " anyway: head moved" : ""} ⌘⏎`, `Type ${this.prGoWords()} into the session: ${this.prGoWords() === "go" ? p.go ?? "" : "only the items picked; the rest stay open for the next round"}${moved ? `\nPlanned at ${String(p.sha).slice(0, 8)}; the PR's head has moved since.` : ""}`, (cx) => this.prPlanGo(cx))
           .when(moved, (x) => x.border_color(t.ansi1).text_color(t.ansi1)).when(!session || Boolean(sent), (x) => x.opacity(0.5)))));
@@ -1071,35 +1072,35 @@ export const PrMethods = {
     const proof = x.verdict !== "fix" ? null : o?.proven ? ["PROVED", o.proven, t.ansi2] : live && x.proof ? ["WILL PROVE", x.proof, t.muted] : null;
     const shown = live || here, faded = !live && o?.status === "fixed" && !here;
     const label = (word, color, text) => h_flex().gap(6).items_start()
-      .child(div().flex_none().w(64).pt(1).text_size(10).font_semibold().text_color(color).child(word))
-      .child(div().flex_1().min_w(0).text_size(11.5).text_color(t.muted).child(text));
+      .child(div().flex_none().w(64).pt(1).text_size(TYPE.hint).font_semibold().text_color(color).child(word))
+      .child(div().flex_1().min_w(0).text_size(TYPE.label).text_color(t.muted).child(text));
     return v_flex().id(`pr-plan-${x.id}`).px(8).py(live ? 5 : 3).gap(3).rounded(6).cursor_pointer().bg(here ? t.hover : alpha(t.foreground, live ? "08" : "05")).hover((e) => e.bg(t.hover))
       .on_click((_e, cx) => this.gotoPlan(i, cx))
       .child(h_flex().gap(6).items_start()
-        .when(open && pr.oneround, (e) => e.child(div().id(`pr-plan-pick-${x.id}`).flex_none().pt(1).text_size(12).cursor_pointer()
+        .when(open && pr.oneround, (e) => e.child(div().id(`pr-plan-pick-${x.id}`).flex_none().pt(1).text_size(TYPE.meta).cursor_pointer()
           .text_color(picked ? c : t.dim).tooltip(tipText("Pick it for the go (space): Go then runs only the items picked"))
           .on_click((_e, cx) => { cx.stop_propagation(); this.prPlanPick(x.id, cx); }).child(picked ? "☑" : "☐")))
-        .when(!live, (e) => e.child(div().flex_none().pt(1).px(5).rounded(4).text_size(10.5).font_semibold().text_color(vc).bg(alpha(vc, "18")).child(chip.text)))
-        .child(div().flex_1().min_w(0).text_size(12).text_color(x.verdict === "skip" || faded ? t.muted : t.foreground).child(x.text ?? "")))
+        .when(!live, (e) => e.child(div().flex_none().pt(1).px(5).rounded(4).text_size(TYPE.hint).font_semibold().text_color(vc).bg(alpha(vc, "18")).child(chip.text)))
+        .child(div().flex_1().min_w(0).text_size(TYPE.meta).text_color(x.verdict === "skip" || faded ? t.muted : t.foreground).child(x.text ?? "")))
       .when(shown, (e) => e.child(h_flex().gap(6).items_center().flex_wrap()
-        .when(live, (e) => e.child(div().id(`pr-plan-v-${x.id}`).flex_none().px(5).rounded(4).text_size(10.5).font_semibold().text_color(vc).bg(alpha(vc, row ? "33" : "18"))
+        .when(live, (e) => e.child(div().id(`pr-plan-v-${x.id}`).flex_none().px(5).rounded(4).text_size(TYPE.hint).font_semibold().text_color(vc).bg(alpha(vc, row ? "33" : "18"))
           .when(open, (e) => e.cursor_pointer().tooltip(tipText("Change its verdict (⏎ on the item)")).on_click((_e, cx) => { cx.stop_propagation(); this.prPlanRow(x.id, cx); }))
           .child(chip.text)))
-        .child(div().flex_none().font_family(mono).text_size(11).text_color(t.muted).child(x.id))
-        .when(Boolean(x.severity), (e) => e.child(div().flex_none().text_size(10.5).font_semibold().text_color(sevColor(t, x.severity)).child(x.severity)))
+        .child(div().flex_none().font_family(mono).text_size(TYPE.label).text_color(t.muted).child(x.id))
+        .when(Boolean(x.severity), (e) => e.child(div().flex_none().text_size(TYPE.hint).font_semibold().text_color(sevColor(t, x.severity)).child(x.severity)))
         .when(Boolean(x.path), (e) => e.child(this.prPlace(t, mono, x.path, x.line, x.end_line, (cx) => this.gotoPlan(i, cx, true))))
-        .when(Boolean(x.who), (e) => e.child(div().flex_none().max_w(140).truncate().text_size(11).text_color(t.dim).child(x.who)))
-        .when(Boolean(o?.sha), (e) => e.child(div().flex_none().font_family(mono).text_size(11).text_color(t.dim).child(`in ${String(o.sha).slice(0, 7)}`)))
+        .when(Boolean(x.who), (e) => e.child(div().flex_none().max_w(140).truncate().text_size(TYPE.label).text_color(t.dim).child(x.who)))
+        .when(Boolean(o?.sha), (e) => e.child(div().flex_none().font_family(mono).text_size(TYPE.label).text_color(t.dim).child(`in ${String(o.sha).slice(0, 7)}`)))
         .child(div().flex_1())))
       .when(Boolean(fix), (e) => e.child(label("SUGGESTED", t.ansi2, fix)))
       .when(whole && Boolean(x.path && x.line), (e) => e.child(this.prCode(t, mono, x.path, x.line, x.end_line)))
       .when(Boolean(proof) && shown, (e) => e.child(label(proof[0], proof[2], proof[1])))
       .when(Boolean(x.reply) && shown, (e) => e.child(label(live ? "WILL REPLY" : "REPLIED", t.muted, x.reply)))
-      .when(Boolean(sent), (e) => e.child(div().w_full().text_size(10.5).text_color(c).child(`sent: ${sent.words}`)))
+      .when(Boolean(sent), (e) => e.child(div().w_full().text_size(TYPE.hint).text_color(c).child(`sent: ${sent.words}`)))
       .when(row, (e) => e.child(h_flex().gap(4).flex_wrap().pt(2)
         .children(PLAN_VERDICTS.map(([key, v]) => this.prCardButton(t, `pr-plan-${x.id}-${key}`, `${key} ${v}`, `Type “${planWords(x.id, v)}” into the session`, (cx) => this.prPlanSend(planWords(x.id, v), cx, x.id))
           .when(v === x.verdict, (b) => b.border_color(vc).text_color(vc))))
-        .child(div().flex_none().text_size(10.5).text_color(t.dim).child("esc closes"))));
+        .child(div().flex_none().text_size(TYPE.hint).text_color(t.dim).child("esc closes"))));
   },
 
   // ---------- findings in the review
@@ -1172,9 +1173,9 @@ export const PrMethods = {
 
   prFindingsList(t, mono) {
     const fs = this.prFindings(), planned = this.pr.findings.length - fs.length;
-    if (!fs.length) return planned || this.prPlanFindingIds().size ? div() : div().pt(4).text_size(11.5).text_color(t.dim).child("No open findings from pr-flow.");
+    if (!fs.length) return planned || this.prPlanFindingIds().size ? div() : div().pt(4).text_size(TYPE.label).text_color(t.dim).child("No open findings from pr-flow.");
     return v_flex().pt(6).gap(6)
-      .child(div().pt(2).text_size(10.5).font_semibold().text_color(t.muted).child(`FINDINGS ${fs.length}${planned ? " not in the fix plan" : ""} · n N go through them and the places below`))
+      .child(div().pt(2).text_size(TYPE.hint).font_semibold().text_color(t.muted).child(`FINDINGS ${fs.length}${planned ? " not in the fix plan" : ""} · n N go through them and the places below`))
       .children(fs.map((f, i) => this.prFindingCard(t, mono, f, i)));
   },
 
@@ -1193,14 +1194,14 @@ export const PrMethods = {
         cx.notify();
       })
       .child(h_flex().gap(6).items_center()
-        .child(div().flex_none().px(5).rounded(4).bg(alpha(c, "22")).text_size(10.5).font_semibold().text_color(c).child(f.severity ?? "?"))
-        .child(div().flex_none().font_family(mono).text_size(11).text_color(t.muted).child(f.id))
+        .child(div().flex_none().px(5).rounded(4).bg(alpha(c, "22")).text_size(TYPE.hint).font_semibold().text_color(c).child(f.severity ?? "?"))
+        .child(div().flex_none().font_family(mono).text_size(TYPE.label).text_color(t.muted).child(f.id))
         .child(this.prPlace(t, mono, f.path, f.line, f.end_line, (cx) => this.gotoFinding(i, cx, true)))
         .child(div().flex_1()))
-      .child(div().w_full().text_size(12).text_color(t.foreground).child(f.title ?? ""))
+      .child(div().w_full().text_size(TYPE.meta).text_color(t.foreground).child(f.title ?? ""))
       .when(whole && Boolean(f.fix), (e) => e.child(h_flex().gap(6).items_start()
-        .child(div().flex_none().pt(1).text_size(10).font_semibold().text_color(t.ansi2).child("FIX"))
-        .child(div().flex_1().min_w(0).text_size(11.5).text_color(t.muted).child(f.fix))))
+        .child(div().flex_none().pt(1).text_size(TYPE.hint).font_semibold().text_color(t.ansi2).child("FIX"))
+        .child(div().flex_1().min_w(0).text_size(TYPE.label).text_color(t.muted).child(f.fix))))
       .when(whole && Boolean(f.path && f.line), (e) => e.child(this.prCode(t, mono, f.path, f.line, f.end_line)));
   },
 
@@ -1211,14 +1212,14 @@ export const PrMethods = {
       .bg(here ? t.hover : alpha(t.foreground, "08")).cursor_pointer().hover((e) => e.bg(t.hover))
       .on_click((_e, cx) => this.gotoLook(i, cx))
       .child(h_flex().gap(6).items_center().child(this.prPlace(t, mono, l.path, l.line, l.end_line, (cx) => this.gotoLook(i, cx, true))).child(div().flex_1()))
-      .when(Boolean(l.why), (e) => e.child(div().w_full().text_size(12).text_color(t.foreground).child(l.why)))
+      .when(Boolean(l.why), (e) => e.child(div().w_full().text_size(TYPE.meta).text_color(t.foreground).child(l.why)))
       .when(Boolean(l.line) && !this.prInDiff(l.path, l.line), (e) => e.child(this.prCode(t, mono, l.path, l.line, l.end_line)));
   },
 
   // A file and line as a link: the file's name (its folder in the tooltip), the line or lines.
   prPlace(t, mono, path, line, end, go) {
     const where = `${(path ?? "").split("/").pop()}${line ? `:${line}${end && end !== line ? `-${end}` : ""}` : ""}`;
-    return div().id(`place-${path}-${line}`).flex_none().max_w(260).truncate().font_family(mono).text_size(11).text_color(t.accent)
+    return div().id(`place-${path}-${line}`).flex_none().max_w(260).truncate().font_family(mono).text_size(TYPE.label).text_color(t.accent)
       .hover((e) => e.underline()).tooltip(tipText(`${path}\nGo there: the diff, or the file when the PR doesn't change it`))
       .on_click((_e, cx) => { cx.stop_propagation(); go(cx); }).child(where);
   },
@@ -1244,8 +1245,8 @@ export const PrMethods = {
 
   prCode(t, mono, path, line, end) {
     const file = this.pr.code?.get(path);
-    if (!file) return div().text_size(11).text_color(t.dim).child("Reading the code…");
-    if (file.error) return div().text_size(11).text_color(t.dim).child(file.error);
+    if (!file) return div().text_size(TYPE.label).text_color(t.dim).child("Reading the code…");
+    if (file.error) return div().text_size(TYPE.label).text_color(t.dim).child(file.error);
     const last = Math.min(end && end >= line ? end : line, line + CODE_MAX - 1), cut = (end ?? line) - last;
     const from = Math.max(1, line - CODE_AROUND), to = Math.min(file.lines.length, last + CODE_AROUND);
     const rows = [];
@@ -1255,8 +1256,8 @@ export const PrMethods = {
         .child(div().w(34).flex_none().h_full().pr(4).text_right().text_color(changed ? t.ansi2 : t.dim).when(changed, (e) => e.bg(alpha(t.ansi2, "40"))).child(String(n)))
         .child(div().flex_1().min_w(0).truncate().text_color(inside ? t.foreground : t.muted).child(file.lines[n - 1] || " ")));
     }
-    return v_flex().w_full().py(3).rounded(4).overflow_hidden().bg(t.background).border_1().border_color(t.border).font_family(mono).text_size(11)
-      .children(rows).when(cut > 0, (e) => e.child(div().px(8).text_size(10.5).text_color(t.dim).child(`… ${cut} more line${cut === 1 ? "" : "s"}`)));
+    return v_flex().w_full().py(3).rounded(4).overflow_hidden().bg(t.background).border_1().border_color(t.border).font_family(mono).text_size(TYPE.label)
+      .children(rows).when(cut > 0, (e) => e.child(div().px(8).text_size(TYPE.hint).text_color(t.dim).child(`… ${cut} more line${cut === 1 ? "" : "s"}`)));
   },
 
   // The files the notes point at, read once a PR is open: each at the PR's head, and which of its lines the PR
@@ -1348,25 +1349,25 @@ export const PrMethods = {
     const xs = this.pr.threads ?? [], done = this.pr.resolvedThreads ?? [], open = Boolean(this.pr.showResolved);
     if (!xs.length && !done.length) return null;
     return v_flex().pt(8).gap(6)
-      .when(xs.length > 0, (e) => e.child(div().text_size(10.5).font_semibold().text_color(t.muted).child(`OPEN THREADS ${xs.length} · ⇧R resolves the one reached`))
+      .when(xs.length > 0, (e) => e.child(div().text_size(TYPE.hint).font_semibold().text_color(t.muted).child(`OPEN THREADS ${xs.length} · ⇧R resolves the one reached`))
         .children(xs.map((x, i) => this.prThreadCard(t, mono, x, i))))
-      .when(done.length > 0, (e) => e.child(div().id("pr-resolved").pt(2).text_size(10.5).font_semibold().text_color(t.dim).cursor_pointer().hover((h) => h.text_color(t.foreground))
+      .when(done.length > 0, (e) => e.child(div().id("pr-resolved").pt(2).text_size(TYPE.hint).font_semibold().text_color(t.dim).cursor_pointer().hover((h) => h.text_color(t.foreground))
           .on_click((_e, cx) => { this.pr.showResolved = !open; cx.notify(); }).child(`RESOLVED ${done.length} ${open ? "▾" : "▸"}`))
         .when(open, (el) => el.children(done.map((x, i) => this.prResolvedRow(t, mono, x, i)))));
   },
 
   // A small button on a card (its click isn't the card's).
   prCardButton(t, id, label, tip, go) {
-    return div().id(id).flex_none().px(6).h(20).flex().items_center().rounded(4).border_1().border_color(t.border).text_size(10.5).text_color(t.foreground)
+    return div().id(id).flex_none().px(6).h(20).flex().items_center().rounded(4).border_1().border_color(t.border).text_size(TYPE.hint).text_color(t.foreground)
       .cursor_pointer().hover((e) => e.bg(t.background)).tooltip(tipText(tip)).on_click((_e, cx) => { cx.stop_propagation(); go(cx); }).child(label);
   },
 
   // A resolved thread: one line, and Unresolve.
   prResolvedRow(t, mono, x, i) {
     return h_flex().id(`pr-thr-${i}`).px(8).py(3).gap(6).items_center().rounded(6).bg(alpha(t.foreground, "05"))
-      .child(div().flex_none().text_size(11).text_color(t.dim).child(x.comments[0].who))
+      .child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child(x.comments[0].who))
       .child(this.prPlace(t, mono, x.path, x.line, null, (cx) => this.gotoLine(x.path, x.line, cx)))
-      .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(x.comments[0].text))
+      .child(div().flex_1().min_w(0).truncate().text_size(TYPE.label).text_color(t.dim).child(x.comments[0].text))
       .child(this.prCardButton(t, `pr-unres-${i}`, x.busy ? "…" : "Unresolve", "Open the thread again on GitHub", (cx) => this.prResolve(x, false, cx)));
   },
 
@@ -1378,16 +1379,16 @@ export const PrMethods = {
       .bg(here ? t.hover : alpha(t.foreground, "08")).cursor_pointer().hover((e) => e.bg(t.hover))
       .on_click((_e, cx) => this.gotoThread(i, cx))
       .child(h_flex().gap(6).items_center()
-        .child(div().flex_none().text_size(11).font_semibold().text_color(c).child(first.who))
+        .child(div().flex_none().text_size(TYPE.label).font_semibold().text_color(c).child(first.who))
         .child(this.prPlace(t, mono, x.path, x.line, null, (cx) => this.gotoThread(i, cx, true)))
-        .when(x.outdated, (e) => e.child(div().flex_none().text_size(10.5).text_color(t.dim).child("outdated")))
+        .when(x.outdated, (e) => e.child(div().flex_none().text_size(TYPE.hint).text_color(t.dim).child("outdated")))
         .child(div().flex_1())
-        .when(replies.length > 0, (e) => e.child(div().flex_none().text_size(10.5).text_color(t.dim).child(`${replies.length} repl${replies.length === 1 ? "y" : "ies"}`)))
+        .when(replies.length > 0, (e) => e.child(div().flex_none().text_size(TYPE.hint).text_color(t.dim).child(`${replies.length} repl${replies.length === 1 ? "y" : "ies"}`)))
         .child(this.prCardButton(t, `pr-res-${i}`, x.busy ? "…" : "Resolve", "Resolve the thread on GitHub (⇧R on the one reached)", (cx) => this.prResolve(x, true, cx))))
-      .child(div().w_full().text_size(12).text_color(t.foreground).when(!whole, (e) => e.max_h(54).overflow_hidden()).child(first.text))
+      .child(div().w_full().text_size(TYPE.meta).text_color(t.foreground).when(!whole, (e) => e.max_h(54).overflow_hidden()).child(first.text))
       .when(whole, (e) => e.children(replies.map((r) => h_flex().gap(6).items_start()
-        .child(div().flex_none().text_size(11).font_semibold().text_color(c).child(r.who))
-        .child(div().flex_1().min_w(0).text_size(11.5).text_color(t.muted).child(r.text)))));
+        .child(div().flex_none().text_size(TYPE.label).font_semibold().text_color(c).child(r.who))
+        .child(div().flex_1().min_w(0).text_size(TYPE.label).text_color(t.muted).child(r.text)))));
   },
 
   // Is a place shown in the PR's diff: its file changed and the line within git's context (3 lines) of a change?
@@ -1525,7 +1526,7 @@ export const PrMethods = {
     if (!this.prReviewing()) return null;
     const stops = this.prStops(), at = this.prStopAt(stops);
     if (!stops.length) return null;
-    return div().flex_none().text_size(11).text_color(at >= 0 ? t.accent : t.dim).tooltip(tipText("The findings, the fix plan's items, the draft's comments, the places to look at and the open threads, in the files' order (n N)"))
+    return div().flex_none().text_size(TYPE.label).text_color(at >= 0 ? t.accent : t.dim).tooltip(tipText("The findings, the fix plan's items, the draft's comments, the places to look at and the open threads, in the files' order (n N)"))
       .child(at >= 0 ? `stop ${at + 1} of ${stops.length} · n N` : `${stops.length} stops · n`);
   },
 
@@ -1548,9 +1549,9 @@ export const PrMethods = {
       : `${c?.hash.slice(0, 8) ?? ""} ${c?.subject ?? ""} · on ${pr.baseRef ?? "the base"}, before the PR`;
     return h_flex().id("pr-fold").h(30).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border).cursor_pointer()
       .hover((e) => e.bg(t.hover)).on_click((_e, cx) => this.toggleGraphFold(cx)).tooltip(tipText("Show the graph (z)"))
-      .child(div().flex_none().text_size(11).text_color(t.dim).child("▸"))
-      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.foreground).child(what))
-      .child(div().flex_none().text_size(11).text_color(t.dim).child("J K step · z the graph"));
+      .child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child("▸"))
+      .child(div().flex_1().min_w(0).truncate().text_size(TYPE.meta).text_color(t.foreground).child(what))
+      .child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child("J K step · z the graph"));
   },
 
   // ---------- the file list in the PR view: what the notes point at first, the noise folded (filenoise)
@@ -1581,8 +1582,8 @@ export const PrMethods = {
     const kinds = Object.entries(f.kinds).map(([k, n]) => `${n} ${k}`).join(", ");
     return h_flex().flex_1().min_w(0).gap(8).items_center()
       .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`▸ ${f.count} more: ${kinds}`))
-      .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`)))
-      .when(f.del > 0, (e) => e.child(div().text_size(11).text_color(t.ansi1).child(`−${f.del}`)));
+      .when(f.add > 0, (e) => e.child(div().text_size(TYPE.label).text_color(t.ansi2).child(`+${f.add}`)))
+      .when(f.del > 0, (e) => e.child(div().text_size(TYPE.label).text_color(t.ansi1).child(`−${f.del}`)));
   },
 
   // ---------- files you've viewed: marked (m) with the version of the file then; a file changed since comes back
@@ -1631,7 +1632,7 @@ export const PrMethods = {
     const files = this.details?.orig?.files ?? this.details?.files ?? [];
     if (!this.prReviewing() || !this.pr.blobs || !files.length) return null;
     const n = files.filter((f) => this.prViewed(f.path)).length;
-    return div().flex_none().text_size(11).text_color(n === files.length ? t.ansi2 : t.dim).tooltip(tipText("Files you've viewed (m marks the selected one); one changed since comes back"))
+    return div().flex_none().text_size(TYPE.label).text_color(n === files.length ? t.ansi2 : t.dim).tooltip(tipText("Files you've viewed (m marks the selected one); one changed since comes back"))
       .child(`${n}/${files.length} viewed`);
   },
 
@@ -1639,7 +1640,7 @@ export const PrMethods = {
   prViewedMark(path, i, t) {
     if (!this.prReviewing() || path === FOLD) return null;
     const on = this.prViewed(path);
-    return div().w(14).flex_none().text_size(11).text_color(on ? t.ansi2 : t.border).child(on ? "✓" : "○");
+    return div().w(14).flex_none().text_size(TYPE.label).text_color(on ? t.ansi2 : t.border).child(on ? "✓" : "○");
   },
 
   // ---------- keys

@@ -1,0 +1,20 @@
+# The fleet dialog: Esc closes one thing at a time (the run list, the open bead), then the dialog.
+close fleet-board  # a fresh board: nothing open from an earlier run
+open fleet-board
+until fleet-board rows != 0
+press fleet-board 1 g
+expect view == "board"
+expect sel != null
+press fleet-board enter
+expect open != null
+press fleet-board e
+expect picking == true
+press fleet-board escape
+expect picking == false
+expect open != null
+# (The filter field isn't here: a text field takes focus only in the active window, and the demo stays behind yours.)
+press fleet-board escape
+expect open == null
+expect shown == true
+press fleet-board escape
+expect shown == false

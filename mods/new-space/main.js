@@ -20,6 +20,7 @@ import { run, props, closeOverlay, theme, focused, spaces, exec, home, pickFolde
 import { fuzzy } from "./lib/fuzzy.js";
 import { codeDir } from "./lib/settings.js";
 import { codeFindArgs, foundRepos } from "./lib/repos.js";
+import { TYPE } from "./lib/type.js";
 
 const SHOWN = 8; // rows in the list
 const RECENT = 10; // picks remembered
@@ -138,12 +139,12 @@ export default class NewSpace extends View {
     const rows = p.machine ? [] : this.rows();
     if (this.at >= rows.length) this.at = Math.max(0, rows.length - 1);
     const ready = Boolean(this.name.value().trim());
-    const label = (text) => div().pt(14).pb(7).text_size(11.5).text_color(t.dim).child(text);
+    const label = (text) => div().pt(14).pb(7).text_size(TYPE.label).text_color(t.dim).child(text);
     const field = (state, key) => Input.new(state).h(36).px(10).rounded(9).border_1()
-      .border_color(this.focus === key ? t.accent : t.input).bg(t.background).text_size(12.8).text_color(t.foreground);
+      .border_color(this.focus === key ? t.accent : t.input).bg(t.background).text_size(TYPE.body).text_color(t.foreground);
     const button = (id, text, primary, action) => h_flex().id(id).h(32).px(14).items_center().rounded(8)
       .border_1().border_color(primary ? t.solid : t.input).bg(primary ? t.solid : t.raised)
-      .text_color(primary ? t.solid_foreground : t.foreground).text_size(12.5).font_medium().cursor_pointer()
+      .text_color(primary ? t.solid_foreground : t.foreground).text_size(TYPE.body).font_medium().cursor_pointer()
       .when(primary && !ready, (el) => el.opacity(0.5))
       .hover((s) => s.opacity(0.88)).on_click(action).child(text);
     // A click picks the row and gives the keyboard back to the filter;
@@ -154,13 +155,13 @@ export default class NewSpace extends View {
         .hover((s) => s.bg(t.hover))
         .on_click((_e, cx) => { this.at = i; if (r.kind === "browse") this.browse(cx); else this.filter.focus(); cx.notify(); });
       if (r.kind !== "repo") return base.when(r.kind === "home", (el) => el.mt(4))
-        .child(div().flex_1().text_size(12.8).text_color(t.muted).child(r.kind === "home" ? "Home folder" : "Browse…"))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(r.kind === "home" ? "~" : "any folder"));
+        .child(div().flex_1().text_size(TYPE.body).text_color(t.muted).child(r.kind === "home" ? "Home folder" : "Browse…"))
+        .child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child(r.kind === "home" ? "~" : "any folder"));
       const rel = this.label(r.path), cut = rel.lastIndexOf("/");
       return base
-        .child(div().flex_none().text_size(12.8).text_color(t.foreground).child(cut < 0 ? rel : rel.slice(cut + 1)))
-        .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(cut < 0 ? "" : rel.slice(0, cut)))
-        .when(r.path === this.first && !this.filter.value().trim(), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child("here")));
+        .child(div().flex_none().text_size(TYPE.body).text_color(t.foreground).child(cut < 0 ? rel : rel.slice(cut + 1)))
+        .child(div().flex_1().min_w(0).truncate().text_size(TYPE.label).text_color(t.dim).child(cut < 0 ? "" : rel.slice(0, cut)))
+        .when(r.path === this.first && !this.filter.value().trim(), (el) => el.child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child("here")));
     };
     return v_flex().id("new-space").track_focus(this.handle)
       .on_key_down((e, cx) => {
@@ -173,19 +174,19 @@ export default class NewSpace extends View {
       })
       .w_full().min_h(0).p(18).bg(t.popover).text_color(t.foreground)
       .child(h_flex().items_center()
-        .child(div().flex_1().text_size(15).font_semibold().child("New space"))
-        .child(div().text_size(11).text_color(t.dim).child("Esc")))
+        .child(div().flex_1().text_size(TYPE.dialog).font_semibold().child("New space"))
+        .child(div().text_size(TYPE.label).text_color(t.dim).child("Esc")))
       .child(label("Name: the space, its first tab and its Claude Remote Control session"))
       .child(field(this.name, "name"))
       .child(label(p.machine ? `Folder: ${p.folder || "home"} on ${p.machine}` : "Folder"))
       .when(!p.machine, (el) => el
         .child(field(this.filter, "filter"))
         .child(v_flex().pt(6).h((SHOWN + 2) * 28 + 10)
-          .when(rows.length === 2, (el) => el.child(div().h(28).px(10).flex().items_center().text_size(12).text_color(t.muted)
+          .when(rows.length === 2, (el) => el.child(div().h(28).px(10).flex().items_center().text_size(TYPE.meta).text_color(t.muted)
             .child(this.repos.length ? "No repository matches" : "Looking for repositories…")))
           .children(rows.map(row))))
       .child(h_flex().pt(16).gap(8).items_center()
-        .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim)
+        .child(div().flex_1().min_w(0).truncate().text_size(TYPE.label).text_color(t.dim)
           .child(p.machine ? "" : "Tab switches field · ↑↓ picks · ⏎ opens"))
         .child(button("ns-cancel", "Cancel", false, () => closeOverlay(p.overlay)))
         .child(button("ns-open", "Open", true, (_e, cx) => this.submit(cx))));

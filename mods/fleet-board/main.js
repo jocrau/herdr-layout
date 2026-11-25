@@ -18,6 +18,8 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle } from "gpui-base";
 import { theme, settings, nextCommand, props, focused, run, shared, setShared, layout } from "herdr";
 import { passBehind } from "./lib/behind.js";
+import { navMove, navIndex, HELP_KEYS } from "./lib/keymap.js";
+import { runTestKey } from "./lib/testkeys.js";
 import { VIEWS, SPANS, HIDDEN_CHECK, dur, shortener, graph, tipText, clampWindow, zoomWindow, panWindow, waveWindow, nextWave } from "./model.js";
 import { closeSide, focusFrame, toTerminal } from "./lib/sidecolumn.js";
 import { splitTarget } from "./env.js";
@@ -73,6 +75,8 @@ export default class FleetBoard extends View {
     cx.spawn(async (cx) => {
       for (;;) {
         const c = String(await nextCommand()).replace(/^fleet-board\./, "");
+        // The demo's scripts press keys here (lib/testkeys.js); off outside the demo.
+        if (await runTestKey("fleet-board", c, cx, (e, kcx) => this.key(e, kcx), () => this.testState())) { cx.notify(); continue; }
         // The window's keys (tabs, spaces, agents, panes): kept while it's a dialog, run when it's docked.
         if (passBehind(c, Boolean(props()?.overlay), run)) { cx.notify(); continue; }
         if (c === "focus") this.h.focus();
@@ -161,15 +165,10 @@ export default class FleetBoard extends View {
       const next = this.openId && this.s?.beads.find((x) => x.id === this.selId);
       if (next) this.openOnly(next);
     };
-    if (this.help && !is("?", "shift-/")) this.help = false; // any key closes the key list
+    if (this.help && !is(...HELP_KEYS)) this.help = false; // any key closes the key list
     if (is("e")) this.togglePicker(); // every run, in the dropdown under the title
     else if (is("1", "2")) { this.view = VIEWS[Number(k) - 1].id; this.reveal = true; }
-    else if (is("j", "down", "ctrl-n", "ctrl-j")) moveTo(at + 1);
-    else if (is("k", "up", "ctrl-p", "ctrl-k")) moveTo(at < 0 ? 0 : at - 1);
-    else if (is("ctrl-d", "pagedown")) moveTo(at + 10);
-    else if (is("ctrl-u", "pageup")) moveTo(at - 10);
-    else if (is("g", "home")) moveTo(0);
-    else if (is("shift-g", "end")) moveTo(order.length - 1);
+    else if (navMove(k)) moveTo(navIndex(k, at, order.length)); // lib/keymap.js: the same on every board
     // ⏎ and ⇥ toggle the details, as in beads and the git graph; l → open them, h ← x close them.
     else if (is("enter", "tab") && b) this.toggle(b.id);
     else if (is("l", "right") && b) { if (this.openId !== b.id) this.openOnly(b); }
@@ -179,7 +178,7 @@ export default class FleetBoard extends View {
     else if (is("a", "f", "i", "t", "v", "o", "d", "p") && b) this.keyAction(b, k, cx);
     else if (is("/")) { this.showFilter = true; this.focusSoon(this.filterState, cx); }
     else if (is("backspace") && this.filter) { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; }
-    else if (is("?", "shift-/")) this.help = !this.help;
+    else if (is(...HELP_KEYS)) this.help = !this.help;
     else if (is("w")) this.tailOn = !this.tailOn;
     else if (is("-") && this.tailOn) this.tailSize.step(-1, this.height, cx);
     else if (is("=") && this.tailOn) this.tailSize.step(1, this.height, cx);
@@ -203,6 +202,17 @@ export default class FleetBoard extends View {
     else if (!props()?.overlay || /(^|-)(cmd|ctrl|alt|fn)-/.test(k)) return;
     cx.stop_propagation();
     cx.notify();
+  }
+
+  // What a test key script checks (lib/testkeys.js): what has the keyboard and what's open.
+  testState() {
+    return {
+      shown: shownHere(), view: this.view, sel: this.selId ?? null, open: this.openId ?? null, rows: this.order?.length ?? 0,
+      picking: this.picking, pickAt: this.pickAt, filtering: Boolean(this.filtering), filter: this.filter ?? "",
+      confirm: Boolean(this.confirm), help: Boolean(this.help), tail: Boolean(this.tailOn), span: this.span ?? null,
+      pinned: Boolean(this.win), run: this.runKey?.() ?? null,
+      index: this.order?.indexOf(this.selId) ?? -1, atEnd: (this.order?.length ?? 0) > 0 && this.order.indexOf(this.selId) === this.order.length - 1,
+    };
   }
 
   // In a dialog, the keyboard back on the board unless one of its fields has it.
@@ -326,9 +336,9 @@ export default class FleetBoard extends View {
       .child(this.tabs(t))
       .when(Boolean(this.confirm) && !this.confirmDrawn, (el) => el.child(this.confirmBar(t, mono))) // about no bead drawn (the wave): at the top
       .when(this.showFilter || Boolean(this.filter), (el) => el.child(h_flex().px(10).py(4).gap(6).items_center().border_b_1().border_color(t.border)
-        .child(div().text_size(12).text_color(this.filtering ? t.accent : t.dim).child("/"))
-        .child(Input.new(this.filterState).flex_1().text_size(12))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(this.filter ? `${this.order.length} of ${this.s.beads.length}` : "esc closes"))))
+        .child(div().text_size(TYPE.meta).text_color(this.filtering ? t.accent : t.dim).child("/"))
+        .child(Input.new(this.filterState).flex_1().text_size(TYPE.meta))
+        .child(div().flex_none().text_size(TYPE.label).text_color(t.dim).child(this.filter ? `${this.order.length} of ${this.s.beads.length}` : "esc closes"))))
       .when(Boolean(this.pinned) && !this.help, (el) => el.child(this.pinned))
       .child(v_flex().id(`fb-${this.view}`).flex_1().min_h(0).pb(8).overflow_y_scrollbar().track_scroll(this.scroll).children(body))
       .when(this.tailOn, (el) => el.child(this.tailPanel(t, mono, short, now)))
@@ -369,4 +379,5 @@ function shownHere() {
 import { AlertsMethods } from "./alerts.js";
 import { ActionsMethods } from "./actions.js";
 import { ViewsMethods } from "./views.js";
+import { TYPE } from "./lib/type.js";
 Object.assign(FleetBoard.prototype, SchedulerMethods, AlertsMethods, ActionsMethods, ViewsMethods);

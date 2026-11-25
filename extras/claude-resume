@@ -11,6 +11,7 @@ label lost its session to the restart. This lists them and, once you say yes, ru
   claude-resume            list, ask, resume
   claude-resume --yes      resume without asking
   claude-resume --list     only list
+  claude-resume --json     only list, as JSON: the sessions it would resume (the status bar's offer)
 
 Sessions resume without Remote Control; run /remote-control in one to turn it back on.
 """
@@ -86,14 +87,18 @@ def lost():
 
 def main():
     args = set(sys.argv[1:])
-    if args - {"--yes", "-y", "--list"}:
+    if args - {"--yes", "-y", "--list", "--json"}:
         print(__doc__.strip())
         return 2
     try:
         rows = lost()
     except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
-        print(f"Can't read herdr's terminals: {e}")
+        print(json.dumps({"error": str(e)}) if "--json" in args else f"Can't read herdr's terminals: {e}")
         return 1
+    if "--json" in args:
+        ready = [r for r in rows if r["here"] and not r["running"]]
+        print(json.dumps([{k: r[k] for k in ("terminal", "where", "session", "folder", "title")} for r in ready]))
+        return 0
     if not rows:
         print("No terminal lost its Claude session: nothing to resume.")
         return 0

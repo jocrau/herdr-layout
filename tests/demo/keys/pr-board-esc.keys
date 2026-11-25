@@ -1,0 +1,13 @@
+# The PR board in its column: Esc closes an open PR's actions, then the PR, then the column.
+show prs
+until pr-board rows != 0
+press pr-board g j
+expect sel != null
+press pr-board enter
+expect open != null
+press pr-board escape
+expect open == null
+expect shown == true
+press pr-board escape
+expect shown == false
+hide prs

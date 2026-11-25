@@ -3,6 +3,7 @@ import { View, div, svg, image } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
 import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, nextCommand } from "herdr";
 import { SHORTCUTS } from "./lib/sidecolumn.js";
+import { TYPE } from "./lib/type.js";
 
 const SIDE = Object.keys(SHORTCUTS); // the side columns: one open at a time
 
@@ -119,7 +120,7 @@ export default class Tabs extends View {
     const item = (c, i) => {
       const program = ps.find(p => p.tab === c.id && p.program?.agent)?.program ?? ps.find(p => p.tab === c.id)?.program;
       const name = /^tb\d+$/.test(c.name) ? program?.name ?? "Terminal" : c.name;
-      return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(12.8)
+      return h_flex().id(`tab-${c.id}`).h(29).px(10).gap(7).rounded(7).items_center().flex_none().text_size(TYPE.body)
         .border(1).border_color(c.active ? t.border : t.chrome).bg(c.active ? t.raised : t.chrome).text_color(c.active ? t.foreground : t.muted)
         .hover(s => s.bg(t.hover))
         // While dragging (as the spaces list): the dragged tab dimmed, a line where it would land.

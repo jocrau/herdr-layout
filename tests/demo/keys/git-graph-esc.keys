@@ -1,0 +1,23 @@
+# The git view as a dialog: Esc closes one thing at a time (the branch list, a mark, the review), then the dialog.
+close git-graph  # a fresh view
+open git-graph
+until git-graph rows != 0
+press git-graph g
+expect cursor == 0
+press git-graph b
+expect branches == true
+press git-graph escape
+expect branches == false
+expect shown == true
+press git-graph j v
+expect mark == true
+press git-graph escape
+expect mark == false
+expect shown == true
+press git-graph enter
+expect review == true
+press git-graph escape
+expect review == false
+expect shown == true
+press git-graph escape
+expect shown == false

@@ -9,6 +9,7 @@ import { unsearched, findArgs, parseFound, FETCH, REMOTES, fetchable, parseRemot
 import { REPO_WATCHES, PAGE, isRefChange, scopeOf, SEEN, keep, depthSetting, tagsShown } from "./common.js";
 import { readFolder, readRepo, folderState } from "./reads.js";
 import { pool } from "./tools.js";
+import { TYPE } from "./lib/type.js";
 
 export const ManygitMethods = {
   stopRepoWatches(keep = new Set()) {
@@ -161,7 +162,7 @@ export const ManygitMethods = {
     let height = 8;
     repos.forEach((r, i) => {
       if (grouped && r.group !== repos[i - 1]?.group) {
-        rows.push(div().h(26).flex_none().px(14).pt(9).text_size(11).text_color(t.dim).truncate().child(r.group ? `${r.group}/` : "./"));
+        rows.push(div().h(26).flex_none().px(14).pt(9).text_size(TYPE.label).text_color(t.dim).truncate().child(r.group ? `${r.group}/` : "./"));
         height += 26;
       }
       rows.push(this.repoRow(r, i, grouped, t));
@@ -206,8 +207,8 @@ export const ManygitMethods = {
       .when(here, (e) => e.bg(t.selected)).hover((s) => s.bg(t.hover))
       .on_click((_e, cx) => { if (here) { this.picking = false; cx.notify(); } else this.open(r.path, cx); })
       .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); if (st && !st.error) this.repoMenu(r, cx); })
-      .child(div().min_w(0).truncate().text_size(11.5).text_color(here ? t.accent : t.foreground).child(r.name))
-      .child(h_flex().flex_none().gap(5).items_center().text_size(11.5)
+      .child(div().min_w(0).truncate().text_size(TYPE.label).text_color(here ? t.accent : t.foreground).child(r.name))
+      .child(h_flex().flex_none().gap(5).items_center().text_size(TYPE.label)
         .when(st?.dirty > 0, (e) => e.child(h_flex().mr(2).gap(4).items_center().text_color(t.blocked)
           .child(div().size(6).rounded(3).bg(t.blocked)).child(String(st.dirty))))
         .when(counts && st.ahead > 0, (e) => e.child(div().text_color(t.ansi2).child(`\u2191${st.ahead}`)))
@@ -216,10 +217,10 @@ export const ManygitMethods = {
       .child(div().flex_1())
       // The newest tag, just before the branch (Show tags).
       .when(Boolean(tag), (e) => e.child(h_flex().flex_none().max_w(120).gap(4).items_center().text_color(t.dim)
-        .child(svg(icon("tag")).size(11).flex_none()).child(div().min_w(0).truncate().text_size(11).child(tag))))
+        .child(svg(icon("tag")).size(11).flex_none()).child(div().min_w(0).truncate().text_size(TYPE.label).child(tag))))
       .when(Boolean(branch), (e) => e.child(h_flex().flex_none().max_w(200).gap(5).items_center().text_color(t.muted)
-        .child(svg(icon("branch")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(11).child(branch))))
-      .when(Boolean(problem), (e) => e.child(div().flex_none().max_w(200).truncate().text_size(11).text_color(t.ansi1).child(problem)));
+        .child(svg(icon("branch")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(TYPE.label).child(branch))))
+      .when(Boolean(problem), (e) => e.child(div().flex_none().max_w(200).truncate().text_size(TYPE.label).text_color(t.ansi1).child(problem)));
   },
 
 };

@@ -3,6 +3,7 @@ import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { spaces, agents, theme, run, readTextFile, home, focused, exec, openOverlay } from "herdr";
 import { footerBar } from "./lib/bars.js";
+import { offerResume } from "./resume.js";
 import { noteFocus } from "./lib/recent.js";
 import { parseStatus, slugOf, repoName, syncMarks, repoMenuProps } from "./lib/gitline.js";
 import { lastQueue, prForBranch, openPrView, STAGE } from "./lib/prflow.js";
@@ -84,6 +85,8 @@ export default class WorkspaceStatus extends View {
     // else every 5 s (a commit, a push, a fetch).
     this.git = null; this.gitKey = null; this.gitAt = 0;
     cx.timer.every(1000, (cx) => this.gitLine(cx));
+    // After a restart, the Claude sessions the terminals lost: offered once, when the terminals are back (resume.js).
+    cx.timer.after(8000, () => { offerResume(); });
   }
 
   gitLine(cx) {
