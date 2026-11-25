@@ -26,6 +26,7 @@ import { TailSize } from "./lib/tailpanel.js";
 
 export default class FleetBoard extends View {
   init(_props, cx) {
+    bindEscape(cx);
     // A view that no longer exists (a block pinned to "tree" before it went into Board) shows Board.
     const asked = props()?.view;
     this.view = VIEWS.some((v) => v.id === asked) ? asked : props()?.overlay ? "lanes" : "board";
@@ -110,10 +111,21 @@ export default class FleetBoard extends View {
 
   // ---------- keyboard
 
-  key(e, cx) {
-    if (this.filtering) { // the filter field has the keyboard: Esc clears it, ⏎ or ↓ goes back to the list
-      if (e.keystroke === "escape") { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; this.h.focus(); }
-      else if (e.keystroke === "enter" || e.keystroke === "down") this.h.focus();
+  // Esc, from its action (see bindEscape): out of an answer field, else the key handler's steps (it closes the board last).
+  escapeKey(cx) {
+    if (this.typing) { this.typing = false; this.h.focus(); }
+    else this.key({ key: "escape", keystroke: "escape", modifiers: {} }, cx, true);
+    this.escAt = Date.now(); cx.notify();
+  }
+
+  key(e, cx, fromAction = false) {
+    if (e.keystroke === "ctrl-[") e = { ...e, key: "escape", keystroke: "escape" }; // ⌃[ is Esc, as in vim
+    if (e.keystroke === "escape" && !fromAction && Date.now() - (this.escAt ?? 0) < 300) return; // the action had it
+    // The filter field has the keyboard: Esc (⏎, ↓) back to the list, the filter kept (⌫ there clears it); an
+    // empty field closes. As every board's text field.
+    if (this.filtering) {
+      if (e.keystroke === "escape") { if (!this.filter) this.showFilter = false; this.h.focus(); }
+      else if (["enter", "down", "ctrl-n", "ctrl-j"].includes(e.keystroke)) this.h.focus();
       else return;
       cx.stop_propagation(); cx.notify(); return;
     }
@@ -128,8 +140,8 @@ export default class FleetBoard extends View {
     // The run list has the keys while it's open: j k move, ⏎ shows the run, esc closes it.
     if (this.picking) {
       const k = e.keystroke, list = this.runList(Date.now()).flat;
-      if (["j", "down", "ctrl-n"].includes(k)) this.pickAt = Math.min(list.length - 1, this.pickAt + 1);
-      else if (["k", "up", "ctrl-p"].includes(k)) this.pickAt = Math.max(0, this.pickAt - 1);
+      if (["j", "down", "ctrl-n", "ctrl-j"].includes(k)) this.pickAt = Math.min(list.length - 1, this.pickAt + 1);
+      else if (["k", "up", "ctrl-p", "ctrl-k"].includes(k)) this.pickAt = Math.max(0, this.pickAt - 1);
       else if (k === "enter" && list[this.pickAt]) { this.picking = false; this.choose(cx, list[this.pickAt]); }
       else if (k === "escape" || k === "q" || k === "e") this.picking = false;
       else return;
@@ -169,10 +181,9 @@ export default class FleetBoard extends View {
     else if (is("-") && this.tailOn) this.tailSize.step(-1, this.height, cx);
     else if (is("=") && this.tailOn) this.tailSize.step(1, this.height, cx);
     else if (is("b") && b) this.inBeads(b);
-    else if (is("escape") && this.filter) { this.filterState.set_value(""); this.filter = ""; this.showFilter = false; }
     else if (is("escape") && this.openId) this.openId = null;
     else if (is("escape") && this.win) this.unpin();
-    // Esc undoes one thing at a time (the filter, then the open bead); with nothing left, it closes the column.
+    // Esc closes one thing at a time (the open bead, a pinned Lanes window), then the column; a filter stays (⌫ clears it).
     else if (is("escape")) closeSide("fleet-board");
     else if (is("0")) this.showDone = !this.showDone; // digits change what's shown
     // [ ] zoom: through the spans up to now, or a window pinned in the past, around its middle.
@@ -281,7 +292,8 @@ export default class FleetBoard extends View {
       .on_mouse_move((e, cx) => { this.tailSize.move(e, cx); this.selMove(e, cx); })
       .on_mouse_up("left", (_e, cx) => { this.tailSize.end(this.height, cx); this.selEnd(cx); })
       .on_hover((hovered, cx) => { if (!hovered) { this.tailSize.end(this.height, cx); this.selEnd(cx); } })
-      .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx)), t, this.h.is_focused() || this.filtering);
+      .track_focus(this.h).key_context("FleetBoard").on_action("fleet_board_escape", (_a, cx) => this.escapeKey(cx))
+      .on_key_down((e, cx) => this.key(e, cx)), t, this.h.is_focused() || this.filtering);
     // No run shown yet: the same header (the run list behind its title), then what's missing.
     if (!this.s) {
       const head = boardHeader(t, { mod: "fleet-board", title: "Fleet", open: this.picking, onTitle: (cx) => { this.togglePicker(); cx.notify(); }, onClose: (cx) => { this.closePicker(); cx.notify(); },
@@ -313,7 +325,7 @@ export default class FleetBoard extends View {
       .when(this.showFilter || Boolean(this.filter), (el) => el.child(h_flex().px(10).py(4).gap(6).items_center().border_b_1().border_color(t.border)
         .child(div().text_size(12).text_color(this.filtering ? t.accent : t.dim).child("/"))
         .child(Input.new(this.filterState).flex_1().text_size(12))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(this.filter ? `${this.order.length} of ${this.s.beads.length}` : "esc clears"))))
+        .child(div().flex_none().text_size(11).text_color(t.dim).child(this.filter ? `${this.order.length} of ${this.s.beads.length}` : "esc closes"))))
       .when(Boolean(this.pinned) && !this.help, (el) => el.child(this.pinned))
       .child(v_flex().id(`fb-${this.view}`).flex_1().min_h(0).pb(8).overflow_y_scrollbar().track_scroll(this.scroll).children(body))
       .when(this.tailOn, (el) => el.child(this.tailPanel(t, mono, short, now)))
@@ -324,6 +336,16 @@ export default class FleetBoard extends View {
         .child(div().flex_1())
         .child(div().flex_none().child("j k · ⏎ details · space act · / · ? keys")));
   }
+}
+
+// Esc (and ⌃[) as an action of this board's own: Herdr binds Esc to close the dialog or popup, and a text field
+// binds it too, both ahead of any key handler. A binding of our own in this board's context, and one for a text
+// field directly in it, come first (as Herdr's own menus do); the board then steps back itself.
+let escBound = false;
+function bindEscape(cx) {
+  if (escBound) return;
+  escBound = true;
+  try { cx.bind_keys(["escape", "ctrl-["].flatMap((keystroke) => [{ keystroke, action: "fleet_board_escape", context: "FleetBoard" }, { keystroke, action: "fleet_board_escape", context: "FleetBoard > Input" }])); } catch {}
 }
 
 // The class's methods live in these modules by topic; `this` is the FleetBoard in all of them.

@@ -49,15 +49,23 @@ export const ReviewMethods = {
 
   loadDetails(commit, cx) {
     const hash = commit.hash, git = (args) => exec("git", [...READ, ...args], { cwd: this.root, on: this.on });
-    const since = this.reviewsSince(commit);
+    // Local change: two commits compared (⌘-click) take the place of the commit or since base.
+    const cmp = this.compare?.to === hash ? this.compare : null;
+    const since = cmp ? "compare" : this.reviewsSince(commit);
     this.detailsSince = since;
     const key = `${this.on}\0${this.root}\0${hash}`, known = !since && !commit.uncommitted && this.commitDetails.get(key);
     if (known) { this.details = known; return; }
-    const current = () => this.selected === hash && this.reviewsSince(commit) === since;
+    const current = () => this.selected === hash && (cmp ? this.compare === cmp : this.reviewsSince(commit) === since);
     cx.spawn(async (cx) => {
       try {
         let details;
-        if (since) {
+        if (cmp) {
+          const args = rangeFileArgs(cmp.from, commit.uncommitted ? null : hash), to = commit.uncommitted ? "HEAD" : hash;
+          const [status, numstat, n] = await Promise.all([git(args.status), git(args.numstat), git(["rev-list", "--count", `${cmp.from}..${to}`])]);
+          if (status.code !== 0) throw new Error(status.stderr.trim());
+          const files = joinFiles(status.stdout, numstat.stdout);
+          details = { since: { from: cmp.from, compare: true, commits: Number(n.stdout.trim()) || 0 }, files: files.slice(0, 500), more: Math.max(0, files.length - 500) };
+        } else if (since) {
           details = await this.loadSince(commit, git);
         } else if (commit.uncommitted) {
           const numstat = this.head ? await git(["diff", "--no-renames", "--no-ext-diff", "--numstat", "HEAD"]) : { stdout: "" };
@@ -164,7 +172,7 @@ export const ReviewMethods = {
     const follow = () => {
       if (this.sinceOnBase && this.sinceOnBase.branch !== this.current) this.sinceOnBase = null; // chosen for one stay on the branch
       const commit = this.selected && this.details ? this.commits[this.index.get(this.selected)] : null;
-      if (commit && this.detailsSince !== this.reviewsSince(commit)) this.reloadReview(commit, cx);
+      if (commit && !this.compare && this.detailsSince !== this.reviewsSince(commit)) this.reloadReview(commit, cx);
     };
     if (this.ask || this.prRevs || !this.root) return;
     if (this.baseRef?.key === key) return follow();
@@ -182,6 +190,8 @@ export const ReviewMethods = {
   // for that branch only, the preference left as it is.
   toggleSince(cx) {
     const commit = this.selected ? this.commits[this.index.get(this.selected)] : null;
+    // Comparing two commits: `c` (or a mode's tab) ends it, back to the commit as it was reviewed before.
+    if (this.compare) { this.compare = null; if (commit) this.reloadReview(commit, cx); cx.notify(); return; }
     if (this.onBase()) {
       this.sinceOnBase = this.sinceOnBase?.branch === this.current ? null : { branch: this.current };
     } else {
@@ -321,15 +331,17 @@ export const ReviewMethods = {
     const zone = this.zone ?? "graph";
     const close = div().id("graph-details-close").px(6).py(1).rounded(4).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
       .on_click((_e, cx) => this.closeDetails(cx)).child("×");
-    const since = this.reviewsSince(commit), s = d?.since;
+    const cmp = this.compare?.to === commit.hash ? this.compare : null;
+    const since = !cmp && this.reviewsSince(commit), s = d?.since;
     const upTo = commit.uncommitted ? "working tree" : commit.hash.slice(0, 8);
-    const title = since ? (s?.base ? `${s.base} … ${upTo} · ${count(s.commits, "commit")}` : `Since base … ${upTo}`)
+    const title = cmp ? `${cmp.from.slice(0, 8)} … ${upTo}${s?.compare ? ` · ${count(s.commits, "commit")}` : ""}` : since ? (s?.base ? `${s.base} … ${upTo} · ${count(s.commits, "commit")}` : `Since base … ${upTo}`)
       : commit.uncommitted ? "Uncommitted changes" : `Commit ${commit.hash.slice(0, 8)}`;
     // This commit ⇄ since base, by click as by `c`.
     const modeTab = (label, on) => div().px(6).py(1).rounded(4).text_color(on ? t.accent : t.dim).when(on, (e) => e.bg(t.hover))
       .when(!on, (e) => e.cursor_pointer().hover((st) => st.bg(t.hover).text_color(t.foreground))).child(label);
     const modes = h_flex().id("graph-review-mode").flex_none().gap(2).on_click((_e, cx) => this.toggleSince(cx))
-      .child(modeTab(commit.uncommitted ? "Changes" : "Commit", !since)).child(modeTab("Since base", since));
+      .child(modeTab(commit.uncommitted ? "Changes" : "Commit", !since && !cmp)).child(modeTab("Since base", since))
+      .when(Boolean(cmp), (e) => e.child(modeTab("Compared", true)));
     const files = d?.files ?? [];
     if (files.length) {
       // A reloaded list (a file staged, added or gone) keeps the highlight, and r, on the same file, not its old position.
@@ -368,7 +380,15 @@ export const ReviewMethods = {
         .child(meta("Branched", s.from?.slice(0, 8) ?? "").font_family(mono))
         .child(meta("Up to", commit.uncommitted ? "uncommitted changes" : commit.subject))
         .child(meta("Commits", String(s.commits))))
-      .when(!since && !commit.uncommitted, (el) => el
+      // Local change: two commits compared (⌘-click): what from, what to, how many commits between.
+      .when(Boolean(cmp), (el) => {
+        const from = this.commits[this.index.get(cmp.from)];
+        return el.child(meta("From", `${cmp.from.slice(0, 8)}  ${from?.subject ?? ""}`, t.accent))
+          .child(meta("To", commit.uncommitted ? "uncommitted changes" : `${commit.hash.slice(0, 8)}  ${commit.subject}`, t.accent))
+          .child(meta("Commits", s?.compare ? String(s.commits) : "…"))
+          .child(div().text_size(11).text_color(t.dim).child("c, or a click without ⌘, ends the comparison"));
+      })
+      .when(!since && !cmp && !commit.uncommitted, (el) => el
         .child(linked(commit.subject, t.foreground, div()).font_semibold())
         .child(meta("Commit", commit.hash, t.accent, web ? commitUrl(web, commit.hash) : null).font_family(mono))
         .child(meta("Parents", commit.parents.map((p) => p.slice(0, 8)).join(", ") || "none"))
@@ -480,14 +500,23 @@ export const ReviewMethods = {
     openDialog({ type: "resetFile", path: now.path, status: now.status, staged: now.staged, untracked: now.untracked }, this.ctx);
   },
 
-  // `o`: the working-tree file in git's editor, to edit it. One not in the working tree
-  // (deleted, or only on a branch not checked out) shows as `d` shows it.
+  // `o`: the file in the file viewer (the file-browser mod), editable: the working-tree file. A PR's file when
+  // its head isn't what the working tree has checked out, or one not in the working tree (deleted), shows as
+  // `v` shows it, read-only at its commit. (Was git's editor, which Herdr's background runner often can't
+  // start: `code` isn't on its PATH.) Works for a repository on another machine too.
   openFile(cx) {
-    const at = this.reviewTarget();
-    if (!at) return;
+    const commit = this.selected ? this.commits[this.index.get(this.selected)] : null, file = this.details?.files?.[this.fileAt ?? 0];
+    if (!commit || !file || file.fold) return;
+    const pr = this.pr?.status === "ready" && this.selected === this.pr.head ? this.pr : null;
+    const root = pr?.root ?? this.root, on = pr ? pr.on ?? null : this.on ?? null;
+    const at = { commit, file, since: this.details?.since, root, on };
     cx.spawn(async () => {
-      const path = `${at.root}/${at.file.path}`;
-      return (await exists(path)) ? openInEditor(path, at) : this.runDiffTool(at);
+      const there = file.status !== "D" && (await exec("test", ["-f", file.path], { cwd: root, on }).then((r) => r.code === 0, () => false));
+      const checkedOut = commit.uncommitted || (await exec("git", ["rev-parse", "HEAD"], { cwd: root, on }).then((r) => r.stdout.trim() === commit.hash, () => false));
+      if (!there || (pr && !checkedOut)) return this.viewAt(at);
+      this.viewing = `${Date.now()}`; // the file list takes the keyboard back when the viewer closes (returnFromViewer)
+      openOverlay({ mod: "file-browser", kind: "dialog", width: 0.92, height: 0.9,
+        props: { folder: root, on, path: file.path, closedKey: VIEWER_CLOSED, closedToken: this.viewing } });
     });
   },
 
@@ -535,13 +564,13 @@ export const ReviewMethods = {
     if (at) this.viewAt(at);
   },
 
-  viewAt({ commit, file, since, root }) {
+  viewAt({ commit, file, since, root, on = this.on ?? null }) {
     const deleted = file.status === "D";
     const rev = commit.uncommitted ? (deleted ? since?.from ?? this.head : null) : deleted ? since?.from ?? commit.parents[0] : commit.hash;
     // The viewer says when it closes (Herdr has no event for that); see returnFromViewer.
     this.viewing = `${Date.now()}`;
     openOverlay({ mod: "file-browser", kind: "dialog", width: 0.92, height: 0.9,
-      props: { folder: root, path: file.path, rev, closedKey: VIEWER_CLOSED, closedToken: this.viewing } });
+      props: { folder: root, on, path: file.path, rev, closedKey: VIEWER_CLOSED, closedToken: this.viewing } });
   },
 
   // Herdr redraws every mod when shared state changes: once the viewer has said it closed,
@@ -567,7 +596,7 @@ export const ReviewMethods = {
     cx.timer.after(150, () => this.handle.focus());
   },
 
-  closeDetails(cx) { this.selected = null; this.details = null; this.diff = null; this.zone = "graph"; this.handle.focus(); cx.notify(); },
+  closeDetails(cx) { this.selected = null; this.compare = null; this.details = null; this.diff = null; this.zone = "graph"; this.handle.focus(); cx.notify(); },
 
   // The diff beside the files follows the selected file (once the cursor rests).
   syncDiff(cx) {

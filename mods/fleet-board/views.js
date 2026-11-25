@@ -747,7 +747,7 @@ export const ViewsMethods = {
       ["w", "its fleet tail at the bottom"],
       ["- =", "the tail three lines shorter / taller (or drag its top edge; double-click: back to 14)"],
       ["b", "it in the beads view"],
-      ["/", "filter by id or title (backspace clears)"],
+      ["/", "filter by id or title (esc back to the list, the filter kept; backspace clears it)"],
       ["1 2", "Board, Lanes (digits change what's shown)"],
       ["e", "every fleet run, in a list under the title (j k, ⏎ shows one, esc closes)"],
       ["⌘← ⌘→", "the previous / next fleet run"],

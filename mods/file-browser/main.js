@@ -513,6 +513,7 @@ export default class FileBrowser extends Viewer {
   }
 
   treeKey(e, cx) {
+    if (e.keystroke === "ctrl-[") e = { ...e, key: "escape", keystroke: "escape" }; // ⌃[ is Esc, as in vim
     if (this.helpKey(e, cx)) return;
     const k = e.keystroke, rows = this.rows(), row = rows[this.at];
     const typing = this.filtering;
@@ -523,11 +524,12 @@ export default class FileBrowser extends Viewer {
     if (k === "pageup") { done(); return this.select(this.at - 30, rows, cx); }
     if (k === "ctrl-d") { done(); return this.select(this.at + 15, rows, cx); }
     if (k === "ctrl-u") { done(); return this.select(this.at - 15, rows, cx); }
-    // Esc clears the filter, then closes the side panel or the window (⌘⇧O opens a window, which hears Esc; opened as
-    // a dialog, by the git graph, the app closes it before any mod sees Esc).
+    // Esc leaves the filter field for the tree, the filter kept (⌫ clears it), then closes the side panel or the
+    // window, as every board's Esc (⌘⇧O opens a window, which hears Esc; opened as a dialog, by the git graph, the
+    // app closes it before any mod sees Esc).
     if (k === "escape") {
       done();
-      if (typing || this.filter) return this.clearFilter(cx);
+      if (typing) { this.treeFocus.focus(); return cx.notify(); }
       return this.closeBrowser();
     }
     if (k === "q" && !typing) { done(); return this.closeBrowser(); }
@@ -734,6 +736,7 @@ export default class FileBrowser extends Viewer {
 
   // The viewer's keys. Letters only when no editor shows, so typing in Source still types.
   keyDown(e, cx) {
+    if (e.keystroke === "ctrl-[") e = { ...e, key: "escape", keystroke: "escape" }; // ⌃[ is Esc, as in vim
     if (this.helpKey(e, cx)) return;
     const k = e.keystroke, file = this.selected?.file, type = file ? kind(file) : null;
     if (this.isCode(type) && this.code && !this.finding) {
@@ -908,7 +911,7 @@ export default class FileBrowser extends Viewer {
         ["i", "insert mode: edit in place (esc: back to normal mode)"], ["V  then y", "select lines, copy them"], ["yy  3yy  Y", "copy the line / three lines / the whole file"],
         ["/  n N", "find in the file, next / previous"], ["h ←  ⇥  ⌃W h", "back to the tree"], ["J K", "next / previous file"],
         ["[ ]  s  c", "Markdown: headings, source, contents"], ["s", "JSON, YAML: the tree (click to fold), or the code again"], ["⌫", "back after following a link"], ["⌘S", "save"], ["o", "open in its app"]]],
-      ["Window", [["?", "this help (any key closes it)"], ["esc", `insert → normal → tree → clear the filter → close the ${panel}`], ["q", `close the ${panel} (from the tree)`],
+      ["Window", [["?", "this help (any key closes it)"], ["esc", `insert → normal → tree (a filter stays: ⌫ clears it) → close the ${panel}`], ["q", `close the ${panel} (from the tree)`],
         ["⌃W <  ⌃W >  ⌃W =", "the tree narrower / wider / as it was (or drag its edge)"]]],
     ];
     return v_flex().id("fb-help").size_full().overflow_y_scrollbar().px(20).py(14).gap(14).text_size(12.5)

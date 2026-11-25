@@ -189,3 +189,41 @@ test("waitingOn: Later says whose PR and when it comes back; Dormant whose and h
     move: { group: "dormant", label: "dormant", waiting_on: null }, next_step: { text: "No activity since …", problem: false }, actions: [] };
   assert.deepEqual([waitingOn(dormant, "me", now).who, waitingOn(dormant, "me", now).since], ["you", "92d"]);
 });
+
+test("a draft whose fix round is done with nothing open says so, not 'Self-check, then mark ready'", () => {
+  const done = { fixPlan: { state: "done", items: 2, fix: 2 }, open: {} };
+  assert.equal(nextStep(row("MY_DRAFT", {}, done)).text, "Fix round done · 2 fixed: mark ready and ask for reviews");
+  assert.equal(nextStep(row("MY_DRAFT", {}, { ...done, open: { high: 1 } })).text, "Self-check, then mark ready and ask for reviews", "a finding still open");
+  assert.equal(nextStep(row("MY_DRAFT", {}, { ...done, fixPlan: { state: "waiting", items: 2, fix: 2 } })).text, "Self-check, then mark ready and ask for reviews");
+  const view = { move: { group: "you", label: "Get ready", order: 8, waiting_on: null }, actions: [] };
+  assert.equal(nextStep(row("MY_DRAFT", { ...view, next_step: { text: "Self-check, then mark ready and ask for reviews", problem: false } }, done)).text,
+    "Fix round done · 2 fixed: mark ready and ask for reviews", "pr-flow's generic sentence replaced");
+  assert.equal(nextStep(row("MY_DRAFT", { ...view, next_step: { text: "Fixed 2 since the self-check · mark ready", problem: false } }, done)).text,
+    "Fixed 2 since the self-check · mark ready", "pr-flow's own word once it says more");
+});
+
+test("pr-flow's oneround: a self-check on your own PR is offered as one fix round, the background check a quiet word; picked items go alone", async () => {
+  const { oneRound, goWords, verbPlan } = await import("../../mods/pr-board/lib/prflow.js");
+  const { actionsFor } = await import("../../mods/pr-board/model.js");
+  const one = new Set(["oneround"]);
+  const draft = [
+    { verb: "ready", label: "Mark ready", kind: "session", role: "primary", outward: true, confirm: "Mark ready?", disabled_reason: null },
+    { verb: "check", label: "Self-check", kind: "job", role: "alternative", outward: false, confirm: null, disabled_reason: null },
+    { verb: "later", label: "Later", kind: "script", role: "housekeeping", outward: false, confirm: null, disabled_reason: null },
+  ];
+  assert.equal(oneRound(draft, "author", new Set()), draft, "an older pr-flow: as it gives them");
+  assert.equal(oneRound(draft, "reviewer", one), draft, "a colleague's PR: as it gives them");
+  const got = oneRound(draft, "author", one);
+  assert.deepEqual(got.map((a) => [a.verb, a.role, a.label]), [["ready", "primary", "Mark ready"], ["fix", "alternative", "Fix round"], ["later", "housekeeping", "Later"], ["check", "housekeeping", "Self-check only"]]);
+  const row = { role: "author", stage: "MY_DRAFT", move: { group: "you", label: "Get ready" }, next_step: { text: "x", problem: false }, actions: got };
+  assert.deepEqual(actionsFor(row), { main: "ready", also: ["fix"], keep: ["later", "check"] });
+  assert.equal(verbPlan(row, "fix").kind, "agent", "a session: the PR's agent tab");
+  const withFix = [{ ...draft[0], verb: "fix", label: "Fix" }, draft[1]];
+  assert.deepEqual(oneRound(withFix, "author", one).map((a) => [a.verb, a.role]), [["fix", "primary"], ["check", "housekeeping"]], "fix offered already: check only quiet");
+
+  const items = ["T1", "F1", "F2", "F3"].map((id) => ({ id }));
+  assert.equal(goWords(items, null), "go");
+  assert.equal(goWords(items, new Set(["T1", "F2"])), "go T1 F2");
+  assert.equal(goWords(items, new Set(["T1", "F1", "F2"])), "go except F3");
+  assert.equal(goWords(items, new Set(["T1", "F1", "F2", "F3"])), "go", "all picked: the whole plan");
+});

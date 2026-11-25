@@ -5,7 +5,7 @@
 // branch; a branch checked out in another worktree goes there) and right-clicks (menus).
 import { div } from "gpui-kit";
 import { v_flex, h_flex, VirtualListScrollHandle, InputState } from "gpui-base";
-import { spaces, exec, watchFolder, theme, settings, props, shared, setShared, nextCommand, run } from "herdr";
+import { spaces, exec, watchFolder, theme, settings, props, shared, setShared, nextCommand, run, closeOverlay } from "herdr";
 import { layoutLanes } from "./lanes.js";
 import { UNCOMMITTED, parseStatus, withUncommitted, labelsOf, READ, STATUS } from "./git.js";
 import { perform } from "./act.js";
@@ -15,6 +15,7 @@ import { platform } from "./tools.js";
 
 export class Graph {
   init(cx) {
+    bindEscape(cx);
     this.folder = props()?.folder ?? null; this.folderOn = props()?.on ?? null;
     // A scrollbar finds its list by name: each copy (panel, pane) needs its own.
     this.listId = `graph-rows-${Math.random().toString(36).slice(2)}`;
@@ -67,7 +68,7 @@ export class Graph {
     this.rpInput = InputState.new({ placeholder: "Repository" });
     this.rpInput.on("change", (_e, cx) => { if (this.rp) { this.rp.query = this.rpInput.value(); this.rp.at = 0; } cx.notify(); });
     this.rpInput.on("submit", (_e, cx) => this.rpChoose(cx));
-    this.bpInput = InputState.new({ placeholder: "Branch" });
+    this.bpInput = InputState.new({ placeholder: "Branch or tag" });
     this.bpInput.on("change", (_e, cx) => { if (this.bp) { this.bp.query = this.bpInput.value(); this.bp.at = 0; } cx.notify(); });
     this.bpInput.on("submit", (e, cx) => this.bpChoose(Boolean(e?.modifiers?.shift), cx));
     if (this.dialog) { this.handle.focus(); cx.timer.after(300, () => this.handle.focus()); }
@@ -252,6 +253,15 @@ export class Graph {
 
   // ---- drawing
 
+  // Esc, from its action (see bindEscape): the key handler's own steps; with nothing of ours left to close, the
+  // dialog closes (an action passed on unhandled reaches Herdr as an unknown command, not as its Esc).
+  escapeKey(cx) {
+    this.escLeft = false;
+    this.onKey?.({ key: "escape", keystroke: "escape", modifiers: {} }, cx);
+    this.escAt = Date.now();
+    if (this.escLeft && props()?.overlay) closeOverlay(props().overlay);
+  }
+
   render(cx) {
     if (this.key() !== this.context) this.refresh(cx);
     const changed = shared("git-graph.changed");
@@ -276,44 +286,53 @@ export class Graph {
     this.prFollow(cx); // the PR view: another PR asked for
     const graph = v_flex().id("git-graph").size_full().min_h(0).when(!this.prMode(), (e) => e.rounded(10).border_1().border_color(t.border)).overflow_hidden().bg(t.background)
       .text_color(t.foreground).text_size(12.5).track_focus(this.handle)
+      .key_context("GitGraph").on_action("git_graph_escape", (_a, cx) => this.escapeKey(cx))
       .on_mouse_move((e, cx) => this.moveDrag(e, cx))
       .on_mouse_up("left", (_e, cx) => this.endDrag(cx))
       // A drag ends when the pointer leaves (a release outside never arrives); in the PR view, the whole frame.
       .on_hover((hovered, cx) => { if (!hovered && !this.prMode()) this.endDrag(cx); })
-      .on_key_down((e, cx) => {
+      .on_key_down(this.onKey = (e, cx) => {
+        if (e.keystroke === "ctrl-[") e = { ...e, key: "escape", keystroke: "escape" }; // ⌃[ is Esc, as in vim
+        if (e.keystroke === "escape" && Date.now() - (this.escAt ?? 0) < 300) return; // the action had it
         const k = e.keystroke;
         // The help panel: any key closes it.
         if (this.help) { if (!/^(shift|ctrl|alt|cmd|platform|fn)$/.test(k)) { this.help = false; cx.notify(); } cx.stop_propagation(); return; }
-        // The repository switcher's field has the keyboard: ↑↓ move, ⇥ back (⏎ arrives as its submit).
+        // The repository switcher's field has the keyboard: ↑↓ move, esc (or ⇥) back (⏎ arrives as its submit).
         if (this.rp) {
           const rows = this.rpRows(), move = (d) => { this.rp.at = Math.max(0, Math.min(rows.length - 1, this.rp.at + d)); this.rpScroll.scroll_to_item(this.rp.at); };
-          if (k === "down" || k === "ctrl-n") move(1);
-          else if (k === "up" || k === "ctrl-p") move(-1);
+          if (k === "down" || k === "ctrl-n" || k === "ctrl-j") move(1);
+          else if (k === "up" || k === "ctrl-p" || k === "ctrl-k") move(-1);
           else if (k === "pagedown") move(15);
           else if (k === "pageup") move(-15);
           else if (k === "tab" || k === "shift-tab") return this.closeRepos(cx), cx.stop_propagation();
+          // Local change: esc back to the graph (the field keeps ⇥); esc there closes the dialog.
+          else if (k === "escape") this.closeRepos(cx);
           else return;
           cx.stop_propagation(); cx.notify(); return;
         }
-        // The branch picker's field has the keyboard: ↑↓ move, ⇥ back (⏎ / ⇧⏎ arrive as its submit).
+        // The branch picker's field has the keyboard: ↑↓ move, esc (or ⇥) back (⏎ / ⇧⏎ arrive as its submit).
         if (this.bp) {
           const rows = this.bpRows(), move = (d) => { this.bp.at = Math.max(0, Math.min(rows.length - 1, this.bp.at + d)); this.bpScroll.scroll_to_item(this.bp.at); };
-          if (k === "down" || k === "ctrl-n") move(1);
-          else if (k === "up" || k === "ctrl-p") move(-1);
+          if (k === "down" || k === "ctrl-n" || k === "ctrl-j") move(1);
+          else if (k === "up" || k === "ctrl-p" || k === "ctrl-k") move(-1);
           else if (k === "pagedown") move(15);
           else if (k === "pageup") move(-15);
           else if (k === "tab" || k === "shift-tab") return this.closeBranches(cx), cx.stop_propagation();
+          else if (k === "escape") this.closeBranches(cx);
           else if (!this.bpAction(k, cx)) return;
           cx.stop_propagation(); cx.notify(); return;
         }
-        // Typing a search: ↑↓ step through matches, ⇥ back to the graph; letters are the query's.
+        // Typing a search: ↑↓ step through matches, esc (or ⇥) back to the graph; letters are the query's.
         if (this.search.typing) {
-          if (k === "down" || k === "ctrl-n") this.searchStep(1, cx);
-          else if (k === "up" || k === "ctrl-p") this.searchStep(-1, cx);
-          else if (k === "tab" || k === "shift-tab") this.handle.focus();
+          if (k === "down" || k === "ctrl-n" || k === "ctrl-j") this.searchStep(1, cx);
+          else if (k === "up" || k === "ctrl-p" || k === "ctrl-k") this.searchStep(-1, cx);
+          // Esc (or ⇥, ⏎) back to the graph with the matches kept for n N (⌫ clears them); esc there goes on as usual.
+          else if (k === "tab" || k === "shift-tab" || k === "escape") this.handle.focus();
           else return;
           cx.stop_propagation(); cx.notify(); return;
         }
+        // Local change: a mark (v) waiting for its second commit: esc drops it first.
+        if (k === "escape" && this.mark && !this.picking && !this.planTyping && !this.prPick) { this.mark = null; cx.stop_propagation(); cx.notify(); return; }
         if (this.prKey(e, cx)) { cx.stop_propagation(); cx.notify(); return; }
         if (k === "shift-r" && !this.search.typing) { this.openRepos(cx); cx.stop_propagation(); return; }
         if (this.state === "ready" && !this.picking && this.zoneKey(e, cx)) { cx.stop_propagation(); return; }
@@ -325,7 +344,7 @@ export class Graph {
           if (act) { act(); cx.stop_propagation(); cx.notify(); return; }
           if (this.navKey(e, cx)) { cx.stop_propagation(); return; }
         }
-        if (e.key !== "escape" || !(this.selected || this.opened)) return;
+        if (e.key !== "escape" || !(this.selected || this.opened)) { if (e.key === "escape") this.escLeft = true; return; }
         // Esc closes the dropdown, then the review (back to the graph, the cursor where it was),
         // then goes back to the Manygit list; with nothing open it closes the dialog.
         if (this.picking) this.picking = false; else if (this.selected) this.closeDetails(cx); else this.back(cx);
@@ -358,6 +377,16 @@ export class Graph {
       .on_hover((hovered, cx) => { if (!hovered) this.endDrag(cx); })
       .when(Boolean(this.railOn), (e) => e.child(this.prRail(t, mono)).child(this.railHandle(t))).child(div().flex_1().min_w(0).h_full().child(graph));
   }
+}
+
+// Esc (and ⌃[) as an action of this board's own: Herdr binds Esc to close the dialog or popup, and a text field
+// binds it too, both ahead of any key handler. A binding of our own in this board's context, and one for a text
+// field directly in it, come first (as Herdr's own menus do); the board then steps back itself.
+let escBound = false;
+function bindEscape(cx) {
+  if (escBound) return;
+  escBound = true;
+  try { cx.bind_keys(["escape", "ctrl-["].flatMap((keystroke) => [{ keystroke, action: "git_graph_escape", context: "GitGraph" }, { keystroke, action: "git_graph_escape", context: "GitGraph > Input" }])); } catch {}
 }
 
 // The class's methods live in these modules by topic; `this` is the Graph in all of them.

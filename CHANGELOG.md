@@ -7,6 +7,49 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- Git view: the branch at the top opens the branch finder (as `b`; the toolbar's "Branches & tags" button is gone),
+  and a right-click on it or on its upstream (`origin/main ↑1`) opens the repository menu: pull, push and fetch first
+  as they fit, commit and stash when there are changes, copy, open on GitHub.
+- `usage-status`: a right-click on the status bar's branch (or its ↑ ↓) opens the same repository menu, with **Open in
+  git view** first (the repository, on its machine). Its pulls and pushes ask in the git view's dialogs and run
+  without the git view open.
+- Git view: `o` edits the file in the file viewer (the working tree) instead of git's editor, which Herdr's
+  background runner often couldn't start (`code` isn't on its PATH). A PR that isn't checked out, or a deleted file,
+  shows read-only at its commit, as `v`. Works for a repository on another machine too.
+- PR view: a click on a finding, place, thread or draft unfolds it in the notes (a file the PR doesn't change no
+  longer opens the file viewer); its place link goes to the diff, or the file.
+- PR view, a finished fix round: it says what it fixed (FIX ROUND `c3f6ba8 → bdd53f2 · 2 of 2 fixed`) and each item's
+  outcome as pr-flow 0.47 records it (fixed, partly fixed, still open, won't fix, left open, already fixed, …); proof
+  reads "will prove" until pr-flow records what it showed; no suggested fix once it's fixed, and no stale plan notes
+  on the diff. The PR board then says "Fix round done · 2 fixed: mark ready".
+- pr-flow 0.48 (`oneround`): on your own PR a self-check is offered as one **Fix round** (a session: it gathers CI,
+  conflicts, threads and comments and runs a missing self-check inside it); "self-check only" stays a quiet word.
+  In a waiting fix plan, space picks items and Go types `go T1 F2` (or `go except F3`); the rest stay open for the
+  next round.
+- PR view: Esc goes back to the git view only when you opened the PR from it (`p`); opened from the PR board, Esc
+  closes it.
+- Git view: a PR's chip shows once, on its head commit (else origin's branch), not also on a local branch behind it;
+  `p` still opens the PR from either row.
+- Esc in a text field of the git view (the branch finder, the switcher, `/` search) or the fleet dialog no longer closes
+  the whole dialog: the boards bind Esc (and ⌃[) themselves, as Herdr's own menus do, so the first Esc leaves the field
+  and only the last one closes the dialog.
+- Git view: ⌘-click a second commit to compare it with the one open: the review shows the diff from the older to the
+  newer (or to the working tree, from the uncommitted row), both rows marked, with the files, the diff, `s`, `d` and
+  `o` as for one commit. `c`, a plain click or another commit ends it. From the keyboard: `v` marks a commit, move, `v`
+  again compares (Esc unmarks).
+- ⌃[ works as Esc in the git view, the file browser, the fleet board and pr-board, and ⌃J ⌃K move down / up from
+  inside their text fields (the git view's finder, switcher and search; the boards' filters) as ⌃N ⌃P do. One Esc rule everywhere (git view,
+  file browser, fleet board, pr-board): Esc leaves a text field for the list with what you typed kept (⌫ clears a
+  filter), then each Esc closes the innermost thing open (details, review, tail), then the board or dialog.
+- Git view: Esc steps back from a text field: it closes the branch finder and the repository switcher, and leaves
+  the `/` search field (n N still step through the matches, ⌫ clears them); the next Esc closes the review, the PR
+  view or the dialog. (⇥ never reached the board from inside a field.)
+- Git view: the branch finder (`b`, or a click on the branch at the top) lists tags too, newest first,
+  fuzzy-filtered as you type: ⏎ jumps to it, ⇧⏎ checks a tag's commit out (detached, asks first), ⌃D deletes a tag,
+  ⌃G shows only the tags.
+- Git view: a double-click on a branch label checks it out here at once, with no dialog; on a remote branch with no
+  local one, it makes a local branch of the same name that tracks it. A new worktree is in the label's right-click
+  menu (Checkout in a new worktree; for a remote branch also "Checkout as…" for another name).
 - `fleet-board`, Lanes (docked and the ⌘⌥F dialog): zoom into a window in the past to look at earlier waves. Drag
   across the time axis, click a wave's number, `< >` the wave before / after, `{ }` (or a sideways swipe) move back /
   on, `[ ]` or ⌘-scroll / pinch zoom; the axis then shows clock times. Esc, a double-click on the axis or the window's

@@ -4,7 +4,7 @@ import { div, svg, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, v_virtual_list, Input } from "gpui-base";
 import { settings, props, setShared, openOverlay, home, notify, run } from "herdr";
 import { LABEL, hitLabel, hitChip, menuFor, menuHeight, fastForwardable, worktreeOf, splitRemote } from "./git.js";
-import { perform, openDialog, goToWorktree } from "./act.js";
+import { perform, openDialog, goToWorktree, checkoutNow } from "./act.js";
 import { icon } from "./menu.js";
 import { splitter, dragTo } from "./lib/splitter.js";
 import { MORE_ROUNDS, PAGE, listsZoom, GRAPH_MIN, COLUMNS, laneColors, ago, tilde, brief, count, depthSetting, ROW, LANE, PAD } from "./common.js";
@@ -30,6 +30,7 @@ export const TableMethods = {
     this.scrollHandle.scroll_to_item(i, "center");
     if (i >= this.commits.length - 3 && this.hasMore && !this.loading) cx.spawn(async (cx) => this.loadMore(cx));
     if (this.selected && this.selected !== commit.hash) {
+      this.compare = null; // another commit: the comparison ends
       this.selected = commit.hash; this.details = null; this.diff = null; this.diffWant = null; this.fileAt = 0;
       const token = this.detailsToken = {};
       // loadDetails answers a commit seen before from its cache without redrawing: redraw here.
@@ -131,6 +132,7 @@ export const TableMethods = {
     if (is("shift-n")) return this.searchStep(-1, cx), true;
     if (is("backspace") && this.search.query) return this.clearSearch(cx), true;
     if (is("b")) return this.openBranches(cx), true;
+    if (is("v")) return this.markKey(cx), true;
     return false;
   },
 
@@ -282,6 +284,8 @@ export const TableMethods = {
     if (key === "more") return this.loadMore(cx);
     const commit = this.commits[this.index.get(key)];
     if (!commit) return;
+    // Local change: ⌘-click compares the open (else the cursor's) commit with this one.
+    if (press?.cmd) return this.compareWith(commit, cx);
     if (press?.count >= 2) {
       const hit = hitLabel(this.labels.get(key), press.x, this.graphWidth(), this.labelLimit());
       if (hit) this.checkout(hit.part, cx);
@@ -298,14 +302,15 @@ export const TableMethods = {
     // Local change: one checked out in another worktree: go there (git won't check it out twice).
     const wt = part.kind === "branch" ? worktreeOf(ctx, part.name) : null;
     if (wt) return goToWorktree(wt, part.name, ctx.on, ctx.overlay, ctx.space);
-    // Here or in a new worktree: the dialog asks, Here ready for ⏎.
-    if (part.kind === "branch" && part.name !== ctx.current) openDialog({ type: "checkout", name: part.name }, ctx);
+    // Local change: checked out here at once (a new worktree is in its right-click menu).
+    if (part.kind === "branch" && part.name !== ctx.current) cx.spawn(async () => { await checkoutNow({ type: "checkout", name: part.name }, "here", ctx); });
     else if (part.kind === "remote") {
       // Local change: as Fork does: the local branch that tracks it (else the one of its name)
       // is checked out and, when it only lacks the remote's commits, fast-forwarded to it.
       const { remote: remoteName, branch } = splitRemote(part.name, ctx.remotes);
       const local = Object.entries(ctx.tracking ?? {}).find(([, t]) => t.short === part.name)?.[0] ?? (ctx.branches.includes(branch) ? branch : null);
-      if (!local) return openDialog({ type: "checkoutRemote", name: part.name, remote: remoteName, branch }, ctx);
+      // None yet: a local branch of its name, tracking it, checked out here (another name: its menu's Checkout as…).
+      if (!local) return void cx.spawn(async () => { await checkoutNow({ type: "checkoutRemote", name: part.name, remote: remoteName, branch }, "here", ctx); });
       const t = ctx.tracking?.[local], tracks = t && t.short === part.name && !t.gone, there = worktreeOf(ctx, local);
       // In another worktree: only gone to. Someone (an agent, perhaps) may be working there, so its files
       // aren't moved without asking; when it's behind, a toast says so and its menu or a pull there levels it.
@@ -326,6 +331,18 @@ export const TableMethods = {
     }
   },
 
+  // Right-click on the branch at the top (or its upstream): the repository menu, as the status bar's branch and
+  // Manygit's rows have it: pull, push and fetch first as fit, commit and stash with changes, copy, GitHub.
+  syncMenu(cx) {
+    if (!this.ctx || !this.root || this.prMode()) return;
+    const tr = this.current ? this.tracking?.[this.current] : null, files = this.files ?? [];
+    const status = { branch: this.current ?? null, upstream: tr?.short ?? null, gone: Boolean(tr?.gone), ahead: tr?.ahead ?? 0, behind: tr?.behind ?? 0,
+      dirty: files.length, staged: files.filter((f) => f.staged).length };
+    const target = { kind: "repo", path: this.root, status, agents: [], web: this.webBase() };
+    const ctx = { ...this.ctx, remotes: this.ctx.remotes ?? [] }, items = menuFor(target, ctx);
+    openOverlay({ mod: "git-graph", kind: "popup", at: "pointer", width: 268, height: menuHeight(items), props: { role: "menu", target, ctx } });
+  },
+
   contextMenu(key, e, cx) {
     const commit = this.commits[this.index.get(key)];
     if (!commit || !this.ctx) return;
@@ -341,7 +358,31 @@ export const TableMethods = {
     openOverlay({ mod: "git-graph", kind: "popup", at: "pointer", width: 268, height: menuHeight(items), props: { role: "menu", target, ctx } });
   },
 
+  // Local change: two commits compared: the review shows the diff from the older to the newer (the uncommitted row:
+  // to the working tree), as "since base" does. ⌘-click the same commit again, or pick another, to end it.
+  // `v` (as vim's visual mode): marks the cursor's commit; moved on, `v` again compares the two (on the mark: unmarks).
+  markKey(cx) {
+    const at = this.cursor ? this.commits[this.index.get(this.cursor)] : null;
+    if (!at) return;
+    if (!this.mark || this.mark === at.hash) { this.mark = this.mark ? null : at.hash; return cx.notify(); }
+    const mark = this.mark; this.mark = null;
+    this.compareWith(at, cx, mark);
+  },
+
+  compareWith(commit, cx, from = null) {
+    const anchor = from ?? this.selected ?? this.cursor, i = this.index.get(anchor), j = this.index.get(commit.hash);
+    if (!anchor || anchor === commit.hash || i === undefined || j === undefined) return this.pick(commit, cx);
+    const newer = this.commits[Math.min(i, j)], older = this.commits[Math.max(i, j)];
+    if (older.uncommitted) return this.pick(commit, cx);
+    this.compare = { from: older.hash, to: newer.hash };
+    this.cursor = newer.hash; this.selected = newer.hash;
+    this.details = null; this.diff = null; this.diffWant = null; this.fileAt = 0;
+    this.loadDetails(newer, cx);
+    this.handle.focus(); this.keepCursorVisible(cx); cx.notify();
+  },
+
   pick(commit, cx) {
+    this.compare = null;
     this.cursor = commit.hash;
     if (this.selected === commit.hash) return this.closeDetails(cx);
     this.selected = commit.hash; this.details = null; this.diff = null; this.diffWant = null; this.fileAt = 0;
@@ -394,7 +435,7 @@ export const TableMethods = {
     const fg = commit.uncommitted ? t.muted : commit.parents.length > 1 ? t.dim : t.foreground;
     return h_flex().id(`c-${commit.hash}`).w_full().h(this.rowH()).flex_none().pr(10).gap(LABEL.GAP).items_center().overflow_hidden()
       .when(commit.head, (e) => e.bg(color + "14")).when(Boolean(this.matchSet?.has(commit.hash)), (e) => e.bg(t.ansi3 + "22"))
-      .when(this.selected === commit.hash, (e) => e.bg(t.selected))
+      .when(this.selected === commit.hash || this.compare?.from === commit.hash || this.mark === commit.hash, (e) => e.bg(t.selected))
       .when(this.cursor === commit.hash && this.selected !== commit.hash, (e) => e.bg(t.accent + "24")).hover((s) => s.bg(t.hover))
       .child(this.graphCell(row, commit, colors, t, width))
       // Labels and description clip together, so many labels never push the fixed columns out.
@@ -444,14 +485,20 @@ export const TableMethods = {
         .child(h_flex().id("graph-repository").h(22).px(7).gap(5).min_w(0).items_center().rounded(6).cursor_pointer()
           .bg(this.picking ? t.selected : t.raised).text_color(t.foreground).hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.togglePicker(cx))
           .child(svg(icon("folder")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(11.5).font_semibold().child(repo.name))))
-      .when(ready && Boolean(where), (e) => e.child(h_flex().h(22).px(7).gap(5).min_w(0).items_center().rounded(6).bg(t.accent + "26").text_color(t.accent)
+      // Local change: the branch is a way to another one, as the repository is (a click: Branches & tags, as b).
+      .when(ready && Boolean(where), (e) => e.child(h_flex().id("graph-where").h(22).px(7).gap(5).min_w(0).items_center().rounded(6).cursor_pointer()
+        .bg(t.accent + (this.bp ? "40" : "26")).text_color(t.accent).hover((s) => s.bg(t.accent + "40"))
+        .tooltip("Click: find a branch or tag (b)\nRight-click: pull, push, fetch").on_click((_e, cx) => (this.bp ? this.closeBranches(cx) : this.openBranches(cx)))
+        .when(!prh, (el) => el.on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.syncMenu(cx); }))
         .child(svg(icon(this.current || prh ? "branch" : "commit")).size(12).flex_none()).child(div().min_w(0).truncate().text_size(11.5).font_semibold().child(where))))
       .when(Boolean(prh?.ahead !== undefined), (e) => e.child(h_flex().gap(4).flex_none().items_center().text_size(11.5)
         .tooltip("The PR's head against its base: commits it adds, commits the base has that it doesn't")
         .when(prh.ahead > 0, (el) => el.child(div().text_color(t.ansi2).child(`\u2191${prh.ahead}`)))
         .when(prh.behind > 0, (el) => el.child(div().text_color(t.ansi1).child(`\u2193${prh.behind} behind`)))))
       .when(this.state === "workspace", (e) => e.child(div().flex_none().text_size(11.5).text_color(t.dim).child(count(ws.repos.length, "repo"))))
-      .when(ready && Boolean(tr), (e) => e.child(h_flex().gap(4).flex_none().items_center().text_size(11.5)
+      .when(ready && Boolean(tr), (e) => e.child(h_flex().id("graph-upstream").h(22).px(5).gap(4).flex_none().items_center().rounded(6).text_size(11.5)
+        .hover((s) => s.bg(t.hover)).tooltip(`${tr.gone ? `${tr.short} no longer exists` : `${tr.ahead ? `${tr.ahead} to push` : ""}${tr.ahead && tr.behind ? ", " : ""}${tr.behind ? `${tr.behind} behind (as of the last fetch)` : ""}${!tr.ahead && !tr.behind ? `Level with ${tr.short}` : ""}`}\nRight-click: pull, push, fetch`)
+        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.syncMenu(cx); })
         .child(div().text_color(t.dim).child(tr.gone ? `${tr.short} (gone)` : tr.short))
         .when(tr.ahead > 0, (el) => el.child(div().text_color(t.ansi2).child(`\u2191${tr.ahead}`)))
         .when(tr.behind > 0, (el) => el.child(div().text_color(t.ansi1).child(`\u2193${tr.behind}`)))))
@@ -493,11 +540,11 @@ export const TableMethods = {
           .child(div().flex_none().text_size(11.5).text_color(t.dim).child("/"))
           .child(Input.new(this.searchInput).flex_1().h_full().text_size(11.5).text_color(t.foreground))
           .child(div().flex_none().text_size(11).text_color(t.dim).child(this.search.query ? `${at >= 0 ? at + 1 : "–"}/${m.length}${this.hasMore ? "+" : ""}` : ""))
-          .child(div().flex_none().text_size(11).text_color(t.dim).child("n N next/prev · ⇥ graph · ⌫ clear")));
+          .child(div().flex_none().text_size(11).text_color(t.dim).child("n N next/prev · esc graph · ⌫ clear")));
       })
       .when(this.dialog && !this.search.open && !this.search.typing && !this.search.query, (e) => e.child(div().flex_1().min_w(0).pl(12).truncate().text_right().text_size(11).text_color(t.dim)
-        .child(this.selected ? "j k files · J K commits · c since base · v view · o open · d diff · r reset · \u2190 out · ? help"
-          : "j k move · / search · b branches · \u23ce review · \u21e7P push · \u21e7F ff · ? help")));
+        .child(this.mark ? `marked ${this.mark.slice(0, 8)} · j k move · v compare with it · esc unmark` : this.selected ? "j k files · J K commits · c since base · \u2318-click compare · v view · o edit · d diff · r reset · \u2190 out · ? help"
+          : "j k move · v mark · / search · b branches & tags · \u23ce review · \u21e7P push · \u21e7F ff · ? help")));
   },
 
   columns(t, width) {
@@ -514,7 +561,7 @@ export const TableMethods = {
   list(t, mono) {
     const colors = laneColors(t), width = this.graphWidth(), count = this.commits.length + (this.hasMore ? 1 : 0);
     return div().flex_1().min_h(0).relative()
-      .on_mouse_down("left", (e) => { this.press = { x: (e.local_position?.x ?? 0) / this.unit(), count: e.click_count }; })
+      .on_mouse_down("left", (e) => { this.press = { x: (e.local_position?.x ?? 0) / this.unit(), count: e.click_count, cmd: Boolean(e.modifiers?.platform) }; })
       .child(v_virtual_list(this.listId, count, this.listRow(), (i) => this.commits[i]?.hash ?? "more",
         (range, cx) => {
           // Scrolling to the end loads the next page, as Git Graph does; the row also takes a click.

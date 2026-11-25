@@ -69,6 +69,7 @@ function shown() {
 
 export default class PrBoard extends View {
   init(_props, cx) {
+    bindEscape(cx);
     this.h = cx.focus_handle();
     this.q = lastQueue(); this.err = null; this.loading = null; this.lastSync = 0; this.readAt = 0;
     this.sel = null; this.openKey = null; this.fold = new Map(); // section letter -> open (pr-flow's default otherwise)
@@ -325,12 +326,21 @@ export default class PrBoard extends View {
 
   // ---------- keyboard
 
-  key(e, cx) {
+  // Esc, from its action (see bindEscape): the key handler's steps (it closes the column last).
+  escapeKey(cx) {
+    this.key({ key: "escape", keystroke: "escape", modifiers: {} }, cx, true);
+    this.escAt = Date.now(); cx.notify();
+  }
+
+  key(e, cx, fromAction = false) {
+    if (e.keystroke === "ctrl-[") e = { ...e, key: "escape", keystroke: "escape" }; // ⌃[ is Esc, as in vim
+    if (e.keystroke === "escape" && !fromAction && Date.now() - (this.escAt ?? 0) < 300) return; // the action had it
     const k = e.keystroke;
     this.touched();
+    // The filter field: Esc (⏎, ↓) back to the list with the filter kept (⌫ clears it), as every board's text field.
     if (this.filtering) {
-      if (k === "escape") { this.filterState.set_value(""); this.filter = ""; this.h.focus(); }
-      else if (k === "enter" || k === "down") this.h.focus();
+      if (k === "escape") this.h.focus();
+      else if (["enter", "down", "ctrl-n", "ctrl-j"].includes(k)) this.h.focus();
       else return;
       cx.stop_propagation(); cx.notify(); return;
     }
@@ -363,8 +373,8 @@ export default class PrBoard extends View {
       cx.stop_propagation(); cx.notify(); return;
     }
     const firstOf = (g) => order.find((x) => !isGrp(x) && this.groupOf?.get(x) === g);
-    if (is("j", "down", "ctrl-n")) moveTo(at + 1);
-    else if (is("k", "up", "ctrl-p")) moveTo(at < 0 ? 0 : at - 1);
+    if (is("j", "down", "ctrl-n", "ctrl-j")) moveTo(at + 1);
+    else if (is("k", "up", "ctrl-p", "ctrl-k")) moveTo(at < 0 ? 0 : at - 1);
     else if (is("g", "home")) moveTo(0);
     else if (is("shift-g", "end")) moveTo(order.length - 1);
     // A heading: ⏎ ⇥ fold or unfold; → unfolds, then goes to its first PR; ← folds.
@@ -392,7 +402,6 @@ export default class PrBoard extends View {
     else if (is("/")) cx.timer.after(0, () => this.filterState.focus());
     else if (is("backspace") && this.filter) { this.filterState.set_value(""); this.filter = ""; }
     // Esc undoes one thing at a time (the filter, then the open PR, above); with nothing left, it closes the column.
-    else if (is("escape") && this.filter) { this.filterState.set_value(""); this.filter = ""; }
     else if (is("escape")) closeSide("pr-board");
     else if (is("?", "shift-/")) this.help = !this.help;
     else return;
@@ -602,7 +611,7 @@ export default class PrBoard extends View {
         ["j k ↑ ↓", "move over PRs and section headings"], ["g G", "top, bottom"],
         ["l →", "in: open a section, its first PR, a PR's details, then its actions (← → between them, ⏎ runs one)"],
         ["h ←", "out, the same steps back"], ["⏎ ⇥", "a PR's details open or closed; a section folded or not"],
-        ["esc", "back one step (actions, tail, details, filter); then closes the column"], ["/", "filter (esc clears)"],
+        ["esc", "back one step (actions, tail, details); then closes the column"], ["/", "filter (esc back to the list, the filter kept; ⌫ clears it)"],
       ]],
       ["ACT (the same key on every PR; shown on its button)", [
         ["space", "the PR's main action, whichever it is; its agent tab when the agent waits for you; a fix plan in the PR view"],
@@ -829,7 +838,8 @@ export default class PrBoard extends View {
         if (this.hovered !== Boolean(hovered)) { this.hovered = Boolean(hovered); cx.notify(); }
       })
       .on_mouse_down("left", () => this.touched())
-      .track_focus(this.h).on_key_down((e, cx) => this.key(e, cx))
+      .track_focus(this.h).key_context("PrBoard").on_action("pr_board_escape", (_a, cx) => this.escapeKey(cx))
+      .on_key_down((e, cx) => this.key(e, cx))
       .when(true, (e) => focusFrame(e, t, this.h.is_focused() || this.filtering))
       .child(this.header(t))
       .when(Boolean(this.confirm) && !this.confirmDrawn, (e) => e.child(this.confirmBar(t)))
@@ -844,4 +854,14 @@ export default class PrBoard extends View {
           : div().flex_1().min_w(0).truncate().child(this.q?.data?.nextSweep ? `next sweep ${hhmm(new Date(this.q.data.nextSweep))}` : ""))
         .child(div().flex_none().child("j k · ← → · space act · d diff · ? keys")));
   }
+}
+
+// Esc (and ⌃[) as an action of this board's own: Herdr binds Esc to close the dialog or popup, and a text field
+// binds it too, both ahead of any key handler. A binding of our own in this board's context, and one for a text
+// field directly in it, come first (as Herdr's own menus do); the board then steps back itself.
+let escBound = false;
+function bindEscape(cx) {
+  if (escBound) return;
+  escBound = true;
+  try { cx.bind_keys(["escape", "ctrl-["].flatMap((keystroke) => [{ keystroke, action: "pr_board_escape", context: "PrBoard" }, { keystroke, action: "pr_board_escape", context: "PrBoard > Input" }])); } catch {}
 }

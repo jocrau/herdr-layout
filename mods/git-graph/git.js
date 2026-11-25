@@ -301,7 +301,9 @@ export function menuFor(target, ctx) {
     sections = [
       // Checked out in another worktree: go there; git won't check it out here or delete it.
       section(wt && item(`Open its worktree here (${folderName(wt)})`, "folder", { type: "goWorktree", name, path: wt }),
-        !current && !wt && item("Checkout branch…", "branch", { type: "checkout", name }),
+        // Local change: Checkout runs at once, here; a new worktree is the second item (a double-click checks out here).
+        !current && !wt && item("Checkout", "branch", { type: "checkout", name, where: "here" }),
+        !current && !wt && item("Checkout in a new worktree", "folder", { type: "checkout", name, where: "worktree" }),
         item("Rename branch…", "rename", { type: "renameBranch", name }),
         !current && !wt && item("Delete branch…", "trash", { type: "deleteBranch", name })),
       section(!current && item(`Merge into ${cur}…`, "merge", { type: "merge", ref: name, what: `branch ${name}` }),
@@ -326,9 +328,13 @@ export function menuFor(target, ctx) {
     const name = target.name, { remote, branch } = splitRemote(name, ctx.remotes);
     const local = ctx.branches.includes(branch), wt = local && worktreeOf(ctx, branch);
     sections = [
-      section(branch !== ctx.current && (wt ? item(`Open ${branch}'s worktree here`, "folder", { type: "goWorktree", name: branch, path: wt })
-        : local ? item(`Checkout ${branch}…`, "branch", { type: "checkout", name: branch })
-        : item("Checkout branch…", "branch", { type: "checkoutRemote", name, remote, branch }))),
+      // Local change: as for a local branch, here or in a new worktree at once; "Checkout as…" for another name.
+      section(...(branch === ctx.current ? [] : wt ? [item(`Open ${branch}'s worktree here`, "folder", { type: "goWorktree", name: branch, path: wt })]
+        : local ? [item(`Checkout ${branch}`, "branch", { type: "checkout", name: branch, where: "here" }),
+          item(`Checkout ${branch} in a new worktree`, "folder", { type: "checkout", name: branch, where: "worktree" })]
+        : [item(`Checkout as ${branch}`, "branch", { type: "checkoutRemote", name, remote, branch, where: "here" }),
+          item(`Checkout as ${branch} in a new worktree`, "folder", { type: "checkoutRemote", name, remote, branch, where: "worktree" }),
+          item("Checkout as…", "rename", { type: "checkoutRemote", name, remote, branch })])),
       section(item(`Merge into ${cur}…`, "merge", { type: "merge", ref: name, what: `remote branch ${name}` })),
       section(item("Delete remote branch…", "trash", { type: "deleteRemoteBranch", name, remote, branch })),
       section(ctx.web && remote === "origin" && item("Open branch on GitHub", "cloud", { type: "openUrl", url: branchUrl(ctx.web, branch) }),
@@ -385,7 +391,9 @@ function repoMenu(r, ctx) {
   const sync = st.behind && !st.ahead ? [pull, fetch, push] : st.ahead && !st.behind ? [push, fetch, pull]
     : !st.upstream ? [push, fetch] : [fetch, pull, push];
   return [
-    [...r.agents.slice(0, 3).map((a) => ({ ...item(`New ${a.name} tab`, a.icon ?? "plus", { type: "newTab", folder: r.path, name: a.name, argv: a.run }), image: Boolean(a.icon) && !a.tint })),
+    // From outside the git view (the status bar's branch): the repository in it.
+    [...(r.gitView ? [item("Open in git view", "graph", { type: "openGitView", folder: r.path })] : []),
+      ...r.agents.slice(0, 3).map((a) => ({ ...item(`New ${a.name} tab`, a.icon ?? "plus", { type: "newTab", folder: r.path, name: a.name, argv: a.run }), image: Boolean(a.icon) && !a.tint })),
       item("New terminal tab", "plus", { type: "newTab", folder: r.path })],
     section(...sync),
     st.dirty > 0 ? section(item("Commit…", "commit", { type: "commit", staged: st.staged > 0 }),

@@ -2,9 +2,9 @@
 // { role: "menu", target, ctx }. Styled like Herdr's own menu.
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, closeOverlay, notify, theme, run } from "herdr";
+import { props, closeOverlay, openOverlay, notify, theme, run } from "herdr";
 import { menuFor } from "./git.js";
-import { perform, openDialog, showChanges, goToWorktree } from "./act.js";
+import { perform, openDialog, showChanges, goToWorktree, checkoutNow } from "./act.js";
 
 // A glyph of this mod, or another mod's icon by its path (Herdr's own Changes icon).
 export const icon = (name) => (name.includes("/") ? name : `mods/git-graph/icons/${name}.svg`);
@@ -26,6 +26,9 @@ export class Menu {
       // As Herdr's + menu: a tab in the selected space, here in the repository.
       closeOverlay(overlay);
       run("tab.new", { folder: a.folder, ...(a.argv ? { name: a.name, argv: a.argv } : {}) });
+    } else if (a.type === "openGitView") {
+      closeOverlay(overlay);
+      openOverlay({ mod: "git-graph", kind: "dialog", width: 0.92, height: 0.9, props: { folder: a.folder, ...(ctx.on ? { on: ctx.on } : {}) } });
     } else if (a.type === "openUrl") {
       closeOverlay(overlay);
       cx.open_url(a.url);
@@ -43,6 +46,10 @@ export class Menu {
       // Its dialog reads the repository's config first: this popup stays until it's open.
       this.busy = i;
       cx.spawn(async (cx) => { await openDialog(a, ctx); closeOverlay(overlay); cx.notify(); });
+    } else if (a.where) {
+      // A checkout that says where: runs at once, no dialog.
+      this.busy = i;
+      cx.spawn(async (cx) => { await checkoutNow(a, a.where, ctx); closeOverlay(overlay); cx.notify(); });
     } else if (openDialog(a, ctx)) {
       closeOverlay(overlay);
     } else {

@@ -216,3 +216,15 @@ test("a file as it is after a change: every line numbered, added lines marked, r
   assert.deepEqual(rows.map((r) => `${r.kind}${r.number ?? ""}${r.start ? "*" : ""}`), [" 1", "+2*", " 3", "+4*", "+5", " 6", "r*", " 7", " 8", "r*"]);
   assert.equal(rows[6].text, "⋯ 2 lines removed here");
 });
+
+test("checkout from the menu: here or in a new worktree, at once; a remote branch as its own name, or as… another", () => {
+  const c = ctx({ current: "main", branches: ["main", "feat"], worktrees: {} });
+  const acts = (t) => menuFor(t, c).filter((i) => !i.separator).map((i) => [i.label, i.action.where ?? null]);
+  const local = acts({ kind: "branch", name: "feat", commit: {} });
+  assert.deepEqual(local.filter(([l]) => l.startsWith("Checkout")), [["Checkout", "here"], ["Checkout in a new worktree", "worktree"]]);
+  const remote = acts({ kind: "remote", name: "origin/csv", commit: {} });
+  assert.deepEqual(remote.filter(([l]) => l.startsWith("Checkout")), [["Checkout as csv", "here"], ["Checkout as csv in a new worktree", "worktree"], ["Checkout as…", null]]);
+  // A remote branch run at once becomes a local branch of its name, tracking it.
+  assert.deepEqual(commandsFor({ type: "checkoutRemote", name: "origin/csv", remote: "origin", branch: "csv" }, { where: "here", name: "csv" }, c), [["checkout", "-b", "csv", "--track", "origin/csv"]]);
+  assert.deepEqual(commandsFor({ type: "checkout", name: "feat" }, { where: "worktree" }, c), [["worktree", "add", "/r/main/.worktrees/feat", "feat"]]);
+});

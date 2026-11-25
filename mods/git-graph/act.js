@@ -1,5 +1,5 @@
 import { exec, notify, setShared, openOverlay, closeOverlay, run, spaces, panes } from "herdr";
-import { dialogFor, dialogHeight, doneText, DIALOG_WIDTH } from "./git.js";
+import { dialogFor, dialogHeight, doneText, DIALOG_WIDTH, validate, createdWorktree } from "./git.js";
 import { executeAction } from "./execute.js";
 import { branchTitle } from "./lib/names.js";
 
@@ -24,6 +24,19 @@ export async function perform(action, values, ctx, { toast = true } = {}) {
   } finally {
     setShared("git-graph.changed", Date.now());
   }
+}
+
+// Local change: a checkout without its dialog (a double-click, the menu's Checkout / Checkout in a new worktree):
+// `where` "here" or "worktree" (then opened in a tab, as the dialog does); a remote branch becomes a local branch of
+// its name. The menu's "Checkout as…" still asks for another name.
+export async function checkoutNow(action, where, ctx) {
+  const values = { where, ...(action.type === "checkoutRemote" ? { name: action.branch } : {}) };
+  const problem = validate(action, values, ctx);
+  if (problem) { notify({ title: "Couldn't do that", body: problem, level: "error" }); return { ok: false, message: problem }; }
+  const r = await perform(action, values, ctx);
+  const made = r.ok && createdWorktree(action, values, ctx);
+  if (made) goToWorktree(made.path, made.branch, ctx.on, ctx.overlay, ctx.space);
+  return r;
 }
 
 // Opens the action's dialog; false when it has none and should run at once (a promise of

@@ -90,7 +90,7 @@ test("a tracked PR's notes in the plain graph (lite) are shown while its head is
 
 test("a note on a range heads it (above its first line); a note on one line goes under it", async () => {
   const { PrMethods } = await import("../../mods/git-graph/pr.js");
-  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prFindings: PrMethods.prFindings, prPlanFindingIds: PrMethods.prPlanFindingIds,
+  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prFindings: PrMethods.prFindings, prPlanFindingIds: PrMethods.prPlanFindingIds, prPlanItems: PrMethods.prPlanItems, prPlanLive: PrMethods.prPlanLive,
     pr: { findings: [{ id: "F1", severity: "high", title: "t", path: "a.js", line: 3 }], fAt: -1, lAt: -1, tAt: -1, threads: [] },
     prLooks: () => [{ path: "a.js", line: 2, end_line: 4, why: "w" }], prDraftComments: () => [] };
   const rows = [1, 2, 3, 4, 5].map((n) => ({ kind: " ", number: n, text: `l${n}` }));
@@ -142,7 +142,7 @@ test("draft comments sit on their lines in the diff, marked Draft; one on the ol
   const { PrMethods } = await import("../../mods/git-graph/pr.js");
   const { draftOf, draftNotes } = await import("../../lib/prflow.js");
   const notes = draftNotes(draftOf(VIEW));
-  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prLooks: () => [], prDraftComments: () => notes, prFindings: PrMethods.prFindings, prPlanFindingIds: PrMethods.prPlanFindingIds,
+  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prLooks: () => [], prDraftComments: () => notes, prFindings: PrMethods.prFindings, prPlanFindingIds: PrMethods.prPlanFindingIds, prPlanItems: PrMethods.prPlanItems, prPlanLive: PrMethods.prPlanLive,
     pr: { findings: [{ id: "F2", severity: "medium", title: "t", path: "lib/x.js", line: 12 }], fAt: -1, lAt: -1, tAt: -1, dAt: 0, threads: [] } };
   const rows = [6, 7, 8, 9, 10, 11, 12].map((n) => ({ kind: " ", number: n, text: `l${n}` }));
   const label = (r) => (r.kind === "F" ? `[${r.severity}:${r.text.split(":")[0]}${r.cur ? "*" : ""}]` : r.number);
@@ -304,7 +304,7 @@ test("plan items with a code place are stops on the reading path, after findings
 test("a finding the fix plan takes up is said once, by the plan: out of FINDINGS and the diff, its mark naming the item and verdict", async () => {
   const { PrMethods } = await import("../../mods/git-graph/pr.js");
   const findings = [{ id: "F2", severity: "low", title: "nit", path: "a.py", line: 3, fix: "rename it" }, { id: "F5", severity: "medium", title: "other", path: "a.py", line: 5 }];
-  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prLooks: () => [], prDraftComments: () => [], prFindings: PrMethods.prFindings, prPlanFindingIds: PrMethods.prPlanFindingIds,
+  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prLooks: () => [], prDraftComments: () => [], prFindings: PrMethods.prFindings, prPlanFindingIds: PrMethods.prPlanFindingIds, prPlanItems: PrMethods.prPlanItems, prPlanLive: PrMethods.prPlanLive,
     pr: { findings, plan: PLAN, fAt: -1, lAt: -1, tAt: -1, dAt: -1, pAt: -1, threads: [] } };
   assert.deepEqual(PrMethods.prFindings.call(g).map((f) => f.id), ["F5"], "F2 is the plan's item F2");
   assert.deepEqual(PrMethods.prFindings.call({ ...g, pr: { ...g.pr, plan: null } }).map((f) => f.id), ["F2", "F5"], "no plan: all of them");
@@ -352,4 +352,38 @@ test("the review is the commit on the base branch and since base again on anothe
     g.ask = { head: "c1", base: "origin/main" }; g.current = "main"; g.sinceBase = true;
     assert.equal(g.reviewsSince(commit), true, "a review another mod asked for keeps since base, on any branch");
   } finally { globalThis.__herdrStubs = undefined; }
+});
+
+test("a finished fix round is history: no stops or notes on the diff, its findings still out of FINDINGS, each item's outcome from its finding", async () => {
+  const { PrMethods } = await import("../../mods/git-graph/pr.js");
+  const done = { ...PLAN, state: "done", items: PLAN.items.map((x) => (x.id === "F2" ? { ...x, verdict: "fix" } : x)) };
+  const findings = [{ id: "F2", severity: "low", title: "nit", path: "a.py", line: 3, status: "fixed" }];
+  const g = { prReviewing: () => true, filesWidth: () => 300, width: 900, prLooks: () => [], prDraftComments: () => [], prFindings: PrMethods.prFindings, prPlanFindingIds: PrMethods.prPlanFindingIds,
+    prPlanItems: PrMethods.prPlanItems, prPlanLive: PrMethods.prPlanLive, prPlanOutcome: PrMethods.prPlanOutcome,
+    pr: { findings: [], view: { findings }, plan: done, fAt: -1, lAt: -1, tAt: -1, dAt: -1, pAt: -1, threads: [] } };
+  assert.deepEqual(PrMethods.prPlanItems.call(g), [], "no stops");
+  assert.deepEqual(PrMethods.prDiffRows.call(g, "a.py", [{ kind: " ", number: 3, text: "l3" }]).filter((r) => r.kind === "F"), [], "no notes on the old head's lines");
+  assert.deepEqual(PrMethods.prPlanOutcome.call(g, done.items[2]), { status: "fixed" });
+  assert.equal(PrMethods.prPlanOutcome.call(g, done.items[0]), null, "a thread: unknown until pr-flow records it");
+  assert.deepEqual(PrMethods.prPlanOutcome.call(g, { ...done.items[0], outcome: { status: "fixed", sha: "bdd53f2", proven: "rendered" } }).proven, "rendered", "pr-flow's own outcome first");
+  const t = { ansi1: "r", ansi2: "g", ansi3: "y", dim: "d", muted: "m", accent: "a" };
+  assert.equal(PrMethods.prPlanChip.call(g, t, done.items[2], false).text, "fixed ✓");
+  assert.equal(PrMethods.prPlanChip.call(g, t, done.items[1], false).text, "answered");
+  assert.equal(PrMethods.prPlanChip.call(g, t, done.items[2], true).text, "fix", "while live: the verdict");
+  const said = (status) => PrMethods.prPlanChip.call(g, t, { ...done.items[0], outcome: { status } }, false).text;
+  assert.deepEqual(["won't-fix", "skipped", "already-fixed", "partial"].map(said), ["won't fix", "left open", "already fixed", "partly fixed"], "pr-flow 0.47's outcome words");
+  const open = [{ id: "F2", severity: "low", title: "nit", path: "a.py", line: 3, status: "partial" }];
+  assert.deepEqual(PrMethods.prFindings.call({ ...g, pr: { ...g.pr, findings: open } }), [], "a partly fixed one is the round's to say");
+  assert.deepEqual(PrMethods.prFindings.call({ ...g, pr: { ...g.pr, findings: open, plan: { ...done, state: "dropped" } } }).map((f) => f.id), ["F2"], "a dropped plan lists its findings again");
+});
+
+test("a click on a note's card stays in the notes for a file outside the diff; its place link goes to the file", async () => {
+  const { PrMethods } = await import("../../mods/git-graph/pr.js");
+  const went = [];
+  const g = { details: { files: [{ path: "ci.yml" }] }, gotoLine: (p, l) => went.push(p + ":" + l) };
+  const cx = { notify: () => went.push("notify") };
+  PrMethods.prGo.call(g, "README.md", 667, cx);
+  PrMethods.prGo.call(g, "README.md", 667, cx, true);
+  PrMethods.prGo.call(g, "ci.yml", 590, cx);
+  assert.deepEqual(went, ["notify", "README.md:667", "ci.yml:590"]);
 });

@@ -1,10 +1,10 @@
 // Modified by Jochen Rau, 2026-11, from Herdr's workspace-status mod: see NOTICE.md in this folder.
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, agents, theme, run, readTextFile, home, focused, exec } from "herdr";
+import { spaces, agents, theme, run, readTextFile, home, focused, exec, openOverlay } from "herdr";
 import { footerBar } from "./lib/bars.js";
 import { noteFocus } from "./lib/recent.js";
-import { parseStatus, slugOf, repoName, syncMarks } from "./lib/gitline.js";
+import { parseStatus, slugOf, repoName, syncMarks, repoMenuProps } from "./lib/gitline.js";
 import { lastQueue, prForBranch, openPrView, STAGE } from "./lib/prflow.js";
 
 // Claude subscription usage, saved by the Claude Code status line on each response
@@ -100,9 +100,10 @@ export default class WorkspaceStatus extends View {
         // Writes nothing under .git (no index refresh, no fsmonitor cookie).
         const st = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v2", "--branch", "--untracked-files=no"], opt);
         if (st.code === 0) {
-          const common = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], opt);
+          const top = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"], opt);
+          const [common, root] = top.stdout.split("\n");
           const url = await exec("git", ["remote", "get-url", "origin"], opt);
-          g = { ...parseStatus(st.stdout), repo: repoName(common.stdout), slug: url.code === 0 ? slugOf(url.stdout) : null };
+          g = { ...parseStatus(st.stdout), repo: repoName(common), root: root?.trim() || null, on, slug: url.code === 0 ? slugOf(url.stdout) : null };
         }
       } catch { g = this.git; } // couldn't ask (a machine away): keep what it showed
       this.gitBusy = false; this.gitKey = key; this.gitAt = Date.now();
@@ -115,6 +116,18 @@ export default class WorkspaceStatus extends View {
       try { this.usage = JSON.parse(await readTextFile(home() + USAGE)); }
       catch { this.usage = null; }
       cx.notify();
+    });
+  }
+
+  // Right-click on the branch: the git view's repository menu (pull, push, fetch, …) for that repository.
+  syncMenu(cx) {
+    const g = this.git;
+    if (!g?.root) return;
+    cx.spawn(async () => {
+      const rs = await exec("git", ["remote"], g.on ? { cwd: g.root, on: g.on } : { cwd: g.root }).catch(() => null);
+      const m = repoMenuProps(g, (rs?.stdout ?? "").split("\n").map((x) => x.trim()).filter(Boolean), { root: g.root, on: g.on });
+      if (m) openOverlay({ mod: "git-graph", kind: "popup", at: "pointer", width: 268, height: m.height, props: { role: "menu", target: m.target, ctx: m.ctx } });
+      this.gitAt = 0; // ask git again soon: a pull or push changes the marks
     });
   }
 
@@ -138,9 +151,12 @@ export default class WorkspaceStatus extends View {
       // you (the sidebar lists them all, but it can be hidden).
       .when(Boolean(space?.machine), el => el.child(label("server", space.machine)))
       .when(Boolean(g?.repo), el => el.child(label("folder", g.repo)))
-      .when(Boolean(g), el => el.child(h_flex().gap(6).items_center()
-        .child(label("branch", g.branch ?? "detached"))
-        .children(syncMarks(g).map((m, i) => div().id(`git-mark-${i}`).text_color(m.tone === "push" ? t.ansi2 : m.tone === "pull" ? t.ansi3 : t.dim).tooltip(m.tip).child(m.text)))))
+      // A right-click on the branch and its marks: pull, push, fetch (the git view's menu).
+      .when(Boolean(g), el => el.child(h_flex().id("git-branch").gap(6).px(6).py(1).rounded(5).items_center()
+        .hover(s => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.syncMenu(cx); })
+        .child(div().id("git-branch-name").tooltip("Right-click: pull, push, fetch").child(label("branch", g.branch ?? "detached")))
+        .children(syncMarks(g).map((m, i) => div().id(`git-mark-${i}`).text_color(m.tone === "push" ? t.ansi2 : m.tone === "pull" ? t.ansi3 : t.dim).tooltip(`${m.tip}\nRight-click: pull, push, fetch`).child(m.text)))))
       .when(Boolean(pr), el => el.child(h_flex().id("branch-pr").gap(6).px(6).py(1).rounded(5).items_center().cursor_pointer()
         .hover(s => s.bg(t.hover).text_color(t.foreground))
         .tooltip(`${pr.short} · ${pr.title}${pr.next_step?.text ? `\n${pr.next_step.text}` : ""}\nClick: the PR view`)
