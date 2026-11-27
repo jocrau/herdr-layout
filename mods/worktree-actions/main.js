@@ -67,7 +67,9 @@ export function items(p) {
     ] : []),
     ...folderItems(p),
     ["Rename space", "square-pen", () => run("space.rename", { id: p.space }), true],
-    ...(p.linked ? [herdrRemove(p.space)] : []),
+    ...(p.finishedCount > 0 ? [[`Clean up finished (${p.finishedCount})…`, "@git-graph/icons/trash", () =>
+      sendRequest({ action: "askCleanupAll", repoKey: p.repoKey })]] : []),
+    ...(p.linked ? [p.branch ? gitRemove(p) : herdrRemove(p.space)] : []),
     ["Close space", "x", () => run("space.close", { id: p.space })],
   ];
   const at = p.machine ? { machine: p.machine } : {};
@@ -104,14 +106,16 @@ export function items(p) {
   if (p.pr) list.push([...w("prOnGitHub"), (cx) => cx.open_url(p.pr), true]);
   list.push(...folderItems(p).map((it, i) => (i === 0 && p.pr ? it.slice(0, 3) : it)));
   if (p.space) list.push(["Close space", "x", () => run("space.close", { id: p.space }), true]);
-  if (p.remove) {
-    const cmd = customRemove(p.remove, p.path, p.branch ?? "");
+  // The git view's own dialog (it reads the repository, then asks as the graph does); Herdr's without a branch.
+  if (p.branch) list.push(gitRemove(p, !p.space));
+  else if (p.remove) {
+    const cmd = customRemove(p.remove, p.path, "");
     list.push([...w("removeWorktree"), () => openOverlay({
       mod: "confirm", kind: "dialog", width: 420, height: 180,
       props: {
-        title: `Remove ${p.branch ?? p.path}?`,
+        title: `Remove ${p.path}?`,
         detail: cmd,
-        command: { name: "tab.new", args: { space: p.repoSpace, folder: p.main, name: `remove ${p.branch ?? ""}`.trim(), argv: ["sh", "-c", cmd] } },
+        command: { name: "tab.new", args: { space: p.repoSpace, folder: p.main, name: "remove", argv: ["sh", "-c", cmd] } },
       },
     }), !p.space]);
   } else if (p.space) list.push(herdrRemove(p.space));
@@ -153,6 +157,10 @@ function gitItems(p) {
   return [...list, changes, ...work];
 }
 
+// Removing a worktree as the git view asks: its dialog, opened over the window (git-graph's "remove" role).
+const gitRemove = (p, apart) => [...w("removeWorktree"), () => openOverlay({ mod: "git-graph", kind: "dialog", width: 320, height: 90,
+  props: { role: "remove", folder: p.path, ...(p.machine ? { on: p.machine } : {}) } }), apart];
+
 // Herdr's own removal of a worktree space, as the shipped menu offers it.
 const herdrRemove = (space, apart) => [...w("removeWorktree"),
   () => openOverlay({ mod: "worktree", kind: "dialog", width: 440, height: 260, props: { space, action: "remove" } }), apart];
@@ -188,7 +196,8 @@ export default class WorktreeActions extends View {
       .child(h_flex().items_center()
         .child(div().flex_1().text_size(TYPE.dialog).font_semibold().text_color(t.foreground).child(c.title))
         .child(div().text_size(TYPE.label).text_color(t.dim).child("⏎ confirms · Esc")))
-      .child(div().flex_1().min_h(0).overflow_y_scrollbar().text_color(t.muted).child(c.detail ?? ""))
+      .child(v_flex().id("worktree-confirm-detail").flex_1().min_h(0).overflow_y_scrollbar().text_color(t.muted)
+        .children(String(c.detail ?? "").split("\n").map((line) => div().child(line))))
       .child(h_flex().justify_end().gap(8).text_size(TYPE.meta)
         .child(button("no", "Cancel", t.raised, t.foreground, t.input, () => closeOverlay(props().overlay)))
         .child(c.danger ? button("yes", c.button ?? "Force push", t.ansi1, t.background, t.ansi1, () => this.confirm())

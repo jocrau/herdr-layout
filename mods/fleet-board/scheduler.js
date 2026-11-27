@@ -34,7 +34,8 @@ export const SchedulerMethods = {
     if (want && !this.sameRun(want)) { // another run chosen: its last snapshot now, a fresh one next
       const cached = this.snaps.get(want);
       if (cached) this.show(cx, cached, want, true);
-      this.refresh(cx, true);
+      // Not again while that read is under way: a second one would start the moment it shows.
+      if (this.reading !== want) this.refresh(cx, true);
     }
     // With the fleet on another machine nothing is watched (its files are there): read it more often instead.
     else if (Date.now() - this.last > (this.machine ? REMOTE_POLL : IDLE_POLL)) this.refresh(cx);
@@ -79,7 +80,8 @@ export const SchedulerMethods = {
         if (shown()) {
           if (await this.readStep(cx, gen)) continue;
           if (await this.tailStep(cx)) continue;
-          await this.scanStep(cx);
+          if (await this.scanStep(cx)) continue;
+          await this.warmStep(cx);
         } else if (!props()?.overlay) await this.lookStep(cx);
       } catch { /* the next pass tries again */ }
     }
@@ -92,6 +94,7 @@ export const SchedulerMethods = {
     if (this.hidden) return !props()?.overlay && now >= this.nextLook;
     if (this.request && (this.request === "force" || now - this.last >= MIN_GAP)) return true;
     if (this.tailDue()) return true;
+    if (this.warmNext()) return true;
     return now - this.scanAt > SCAN_EVERY || this.dirty.has("*")
       || (this.dirty.size > 0 && now - (this.rescanAt ?? 0) >= DIRTY_EVERY);
   },
@@ -105,13 +108,14 @@ export const SchedulerMethods = {
     if (want !== "force" && Date.now() - this.last < MIN_GAP) return false; // waits its turn
     this.request = null;
     this.loading = true;
+    this.reading = cwd;
     cx.notify();
     try {
       this.machine = await fleetMachine();
       const r = await this.timed(cx, cwd);
       if (gen !== this.gen) return true; // a newer worker took over meanwhile
       // You moved on while it read (a chip, ⌘← ⌘→, another folder): drop it, don't flip back to that run.
-      if (this.wanted() !== cwd) { this.loading = false; this.request ??= "force"; return true; }
+      if (this.wanted() !== cwd) { this.loading = false; this.reading = null; this.request ??= "force"; return true; }
       this.last = Date.now();
       if (r.ok) {
         this.problem = null;
@@ -119,6 +123,7 @@ export const SchedulerMethods = {
         this.show(cx, r.snap, cwd);
       } else {
         this.tried.set(cwd, Date.now()); // not again for a minute, whatever went wrong
+        if (this.pending?.target === cwd) this.pending = null; // the run picked can't be read: the last one shows again
         // The last run stays on screen; the footer says the focused folder has none.
         this.problem = { ...r, cwd };
         // Nothing shown yet (a fresh start somewhere without a run): the repo shown last time,
@@ -136,6 +141,7 @@ export const SchedulerMethods = {
     // A command's row said what ran until this read showed where the bead went: keep it on screen there.
     if (this.busy?.until === "read") { if (this.selId === this.busy.bead) this.reveal = true; this.busy = null; }
     this.loading = false;
+    this.reading = null;
     cx.notify();
     return true;
   },
@@ -167,11 +173,16 @@ export const SchedulerMethods = {
   // picked), shown while a fresh one is read. this.cwd is the folder: fleet's commands run there.
   show(cx, snap, target, cached = false) {
     this.s = snap;
+    this.pending = null;
     this.target = target;
     this.cwd = splitTarget(target).cwd;
     if (this.confirm && this.confirm.key !== this.runKey()) this.confirm = null; // asked about another run
     this.remember(target, snap);
     const sum = this.summary(snap, this.cwd);
+    // Also under the run list's name for it (its repository's folder and the epic), which picking it looks up:
+    // a run first shown for a folder alone (the focused terminal's, a worktree) is then kept for the way back.
+    const listed = targetOf(this.runs.get(sum.key)?.cwd ?? this.cwd, snap.epic.id);
+    if (listed !== target) this.remember(listed, snap);
     this.runs.set(sum.key, sum);
     if (!cached) this.alertParked(snap);
     save(target);
@@ -258,6 +269,8 @@ export const SchedulerMethods = {
     const current = this.s ? this.summary(this.s, this.cwd).key : null;
     for (const run of [...this.runs.values()]) {
       if (run.key === current || !changed.has(run.repoName)) continue;
+      // A run picked meanwhile goes first: the repositories not read yet stay changed, for the next pass.
+      if (this.request) { for (const r of changed) this.dirty.add(r); this.rescanAt = 0; return; }
       const target = targetOf(run.cwd, run.epic), r = await this.timed(cx, target);
       if (r.ok) { this.remember(target, r.snap); const sum = summarize(r.snap, run.cwd); this.runs.delete(run.key); this.runs.set(sum.key, sum); }
     }
@@ -291,9 +304,10 @@ export const SchedulerMethods = {
     return { active, done, flat: [...active, ...done] };
   },
 
-  // ⌘← ⌘→ (keys.json, while the pane has focus): the run before or after the one shown, in the list's order.
-  stepRun(cx, dir) {
-    const list = this.runList(Date.now()).flat;
+  // ⌘← ⌘→ (keys.json, while the pane has focus): the active run before or after the one shown, in the list's
+  // order; ⌘⇧← ⌘⇧→ (`all`) the finished ones of the last week too. With no active run, every run.
+  stepRun(cx, dir, all = false) {
+    const { active, flat } = this.runList(Date.now()), list = all || !active.length ? flat : active;
     if (!list.length) return;
     const at = list.findIndex((r) => r.key === this.runKey());
     // Not in the list: → goes to the first run, ← to the last.
@@ -322,6 +336,8 @@ export const SchedulerMethods = {
     // At once from the last snapshot of that run; the fresh read replaces it a moment later.
     const cached = this.snaps.get(target);
     if (cached) { this.show(cx, cached, target, true); this.reveal = true; }
+    // None yet: the run picked shows at once as being read (title, repository), never the last run as if nothing happened.
+    else this.pending = { target, key: run.key, epic: run.epic, repoName: run.repoName, cwd: run.cwd };
     this.request = "force";
     cx.notify();
   },
@@ -348,7 +364,33 @@ export const SchedulerMethods = {
     });
   },
 
-  runKey() { return this.s ? this.summary(this.s, this.cwd).key : null; },
+  runKey() { return this.pending?.key ?? (this.s ? this.summary(this.s, this.cwd).key : null); },
+
+  // The next run of the run list with no snapshot kept yet, read in the background one per pass (when nothing
+  // else is due) so that picking it shows at once. Each run once: after that, the watch's rescans keep it fresh,
+  // and picking it reads it anyway. null when there's none (or the pane is hidden).
+  warmNext() {
+    if (this.hidden || !this.scanAt || !this.runs.size) return null;
+    const warmed = (this.warmed ??= new Set());
+    return this.runList(Date.now()).flat.find((r) => {
+      const target = targetOf(r.cwd, r.epic);
+      return !warmed.has(target) && !this.snaps.has(target);
+    }) ?? null;
+  },
+
+  async warmStep(cx) {
+    const run = this.warmNext();
+    if (!run) return false;
+    const target = targetOf(run.cwd, run.epic);
+    this.warmed.add(target);
+    const r = await this.timed(cx, target);
+    if (r.ok && !this.snaps.has(target)) {
+      this.remember(target, r.snap);
+      const sum = summarize(r.snap, run.cwd); this.runs.delete(run.key); this.runs.set(sum.key, sum);
+      cx.notify();
+    }
+    return true;
+  },
 
   // summarize() once per snapshot and folder: the strip, ⌘← ⌘→ and the confirm bar ask for it on every frame.
   summary(snap, cwd) {

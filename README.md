@@ -60,7 +60,7 @@ subscription usage (see below).
 
 The dialogs and both boards use the same keys, for vim and arrow users alike: `j k` or `↑ ↓` move,
 `l →` go in, `h ←` come out (⏎ ⇥ toggle), `/` searches, `?` lists every key, Esc steps back and
-finally closes. In the boards `space` runs the selected item's main action; ⌘← ⌘→ switch fleet runs.
+finally closes. In the boards `space` runs the selected item's main action; ⌘← ⌘→ switch active fleet runs (⌘⇧← ⌘⇧→ finished ones too).
 ⌘⌥← in a side column (the boards, the side panel's files) hands the keyboard back to the terminal beside it;
 a board that has the keyboard shows the same blue line as a focused pane.
 
@@ -139,7 +139,7 @@ splits and its columns) looks and works the same way.
 "Active" (a wave running, beads waiting for you, or unfinished with activity in the last two
 weeks), then "Finished this week". A row has a dot while its wave runs, a red count of beads
 waiting for you and the last activity. Click one or ⏎ to show it (esc or a click outside closes the list), or step
-through them with ⌘← ⌘→; it stays until you pick another.
+through the active ones with ⌘← ⌘→ (⌘⇧← ⌘⇧→ the finished ones too); it stays until you pick another.
 
 **Notifications.** A bead that starts waiting for you posts a notification, also while the
 pane is hidden (it then looks every 2 minutes); clicking it shows the pane.
@@ -157,7 +157,8 @@ pane is hidden (it then looks every 2 minutes); clicking it shows the pane.
 | `-` `=` | the tail three lines shorter or taller |
 | `[ ]` | zoom the lanes |
 | `r` | read again |
-| ⌘← ⌘→ | previous or next run |
+| ⌘← ⌘→ | previous or next active run |
+| ⌘⇧← ⌘⇧→ | previous or next run, finished ones too |
 | `?` | every key |
 
 **Setting it up.** It needs agent-fleet 0.37 or later (`fleet status --json`, `fleet runs --json`

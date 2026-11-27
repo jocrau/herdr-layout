@@ -14,12 +14,15 @@ edits the bead's labels, Delete (or forward delete) closes the bead after a
 y/n, Ctrl-A switches between open and all beads, s syncs the beads with their Dolt remote (`bd sync`:
 pull, conflict check, push), typing filters, Esc quits. The view refreshes by itself when beads change.
 
-f picks a label filter (Shift-F clears it): only beads with the ticked
-labels and priorities, where labels of one namespace (owner:alice, owner:bob)
-and the priorities (P0-P4) are alternatives, everything else must all match;
-a glob like `owner:*` or `!label` can be typed. Their parents stay, dimmed, so the tree
+f picks a filter (Shift-F clears it): only beads of the ticked types
+(type:bug), statuses (status:blocked), priorities (P0-P4), assignees
+(assignee:alice, assignee:none), readiness (is:ready: open and nothing open
+blocks it; is:blocked) and labels. Values of one kind, and labels of one
+namespace (owner:alice, owner:bob), are alternatives; everything else must
+all match. A glob like `owner:*` or `!term` (`!type:epic`) can be typed;
+status:closed lists closed beads without Ctrl-A. Their parents stay, dimmed, so the tree
 still shows where they are. In this picker and Ctrl-L's, Enter or Space
-ticks, Esc applies, Ctrl-C cancels. `beads-view filter owner:bob P1` sets it too.
+ticks, Esc applies, Ctrl-C cancels. `beads-view filter type:bug P1` sets it too.
 
 Right on a bead whose details show (or Ctrl-E anywhere) edits it in place: in
 the detail pane itself, the tree staying beside it, with the title, status,
@@ -140,7 +143,7 @@ def load():
     state.setdefault("stack", [])      # focused bead IDs, outermost first
     state.setdefault("collapsed", [])  # bead IDs whose children are folded
     state.setdefault("all", False)     # include closed beads
-    state.setdefault("filter", [])     # label globs / P0-P4 a bead must match (f)
+    state.setdefault("filter", [])     # terms a bead must match (f): type:bug, P1, a label, … (see parse_term)
     return state
 
 
@@ -214,7 +217,7 @@ def has_children(bead_id, state):
 
 def list_args(state):
     args = ["list", "--limit", "0"]
-    if state["all"]:
+    if shows_closed(state):
         args.append("--all")
     if state["stack"]:
         args += ["--parent", state["stack"][-1]]
@@ -294,40 +297,108 @@ def beads(state, fresh=False):
     return rows
 
 
+# The filter (f): terms a bead must match. `type:bug`, `status:blocked`, `assignee:alice` (`assignee:none`: nobody)
+# and `is:ready` / `is:blocked` look at the bead's own fields, P0-P4 at its priority; anything else is a label
+# (`label:` in front when its namespace is one of those field names). Values are globs; `!` in front excludes.
+FIELDS = ("type", "status", "assignee", "is")
 PRIORITY_TERM = re.compile(r"^[Pp]([0-4])$")
+
+
+def parse_term(term):
+    """(excluded, field, value) for a filter term; the field is "priority", one of FIELDS or "label"."""
+    negate = term.startswith("!")
+    body = term[negate:]
+    m = PRIORITY_TERM.match(body)
+    if m:
+        return negate, "priority", m.group(1)
+    field, sep, value = body.partition(":")
+    if sep and (field in FIELDS or field == "label"):
+        return negate, field, value
+    return negate, "label", body
+
+
+def open_blockers(issue, issues):
+    """Whether a bead it depends on (`blocks`) is still open. A blocker missing from `issues` is closed (the open
+    view doesn't list it)."""
+    return any((d.get("type") or d.get("dependency_type")) == "blocks"
+               and issues.get(d.get("depends_on_id"), {}).get("status", "closed") != "closed"
+               for d in issue.get("dependencies") or [])
+
+
+def values(issue, field, issues):
+    """The bead's values for a filter field. `is`: ready (open, nothing open blocks it), as `bd ready`; blocked
+    (its status, or an open blocker), as `bd blocked`."""
+    if field == "priority":
+        return [str(issue.get("priority"))]
+    if field == "type":
+        return [issue.get("issue_type") or ""]
+    if field == "status":
+        return [issue.get("status") or ""]
+    if field == "assignee":
+        return [issue.get("assignee") or "none"]
+    if field == "is":
+        status = issue.get("status")
+        if status == "blocked" or (status not in ("closed", "deferred") and open_blockers(issue, issues)):
+            return ["blocked"]
+        return ["ready"] if status == "open" else []
+    return issue.get("labels") or []
 
 
 def filter_groups(terms):
     """The filter's terms as groups a bead must match one term of: the
-    priorities form one group, labels of one namespace (`owner:…`) another,
-    and every plain label or `!label` is a group of its own. So `owner:alice
-    owner:bob P1 P2 risk:high` means (owner:alice or owner:bob) and (P1 or P2)
-    and risk:high."""
+    values of one field form a group (`type:bug type:feature`, P1 P2), labels
+    of one namespace (`owner:…`) another, and every plain label or excluded
+    term is a group of its own. So `type:bug P1 P2 owner:alice owner:bob
+    !risk:low` means bug and (P1 or P2) and (owner:alice or owner:bob) and
+    not risk:low."""
     groups = {}
     for term in terms:
-        if PRIORITY_TERM.match(term):
-            key = "priority"
-        elif ":" in term and not term.startswith("!"):
-            key = "ns:" + term.split(":", 1)[0]
+        negate, field, value = parse_term(term)
+        if negate:
+            key = "term:" + term
+        elif field != "label":
+            key = field
+        elif ":" in value:
+            key = "ns:" + value.split(":", 1)[0]
         else:
             key = "term:" + term
         groups.setdefault(key, []).append(term)
     return list(groups.values())
 
 
-def selects(issue, terms):
-    """Whether a bead passes the label filter: one term of every group (see
-    filter_groups); a label term is a glob, `!label` excludes."""
-    labels = issue.get("labels") or []
+def selects(issue, terms, issues=None):
+    """Whether a bead passes the filter: one term of every group (see filter_groups)."""
 
     def hit(term):
-        m = PRIORITY_TERM.match(term)
-        if m:
-            return issue.get("priority") == int(m.group(1))
-        negate = term.startswith("!")
-        return any(fnmatch.fnmatchcase(l, term[negate:]) for l in labels) != negate
+        negate, field, value = parse_term(term)
+        return any(fnmatch.fnmatchcase(v, value) for v in values(issue, field, issues or {})) != negate
 
     return all(any(hit(t) for t in group) for group in filter_groups(terms))
+
+
+def shows_closed(state):
+    """Whether closed beads are listed: Ctrl-A's all, or a filter asking for closed ones (status:closed)."""
+    return state["all"] or any(not negate and field == "status" and fnmatch.fnmatchcase("closed", value)
+                               for negate, field, value in map(parse_term, state.get("filter") or []))
+
+
+def filter_choices(issues):
+    """What f offers, in its order: the types, statuses, priorities, ready/blocked and assignees the beads have
+    (closed always), then their labels."""
+    by_id = {i["id"]: i for i in issues}
+
+    def used(field):
+        return {v for i in issues for v in values(i, field, by_id)}
+    statuses = used("status") | {"closed"}
+    assignees = used("assignee")
+    labels = [f"label:{l}" if l.split(":", 1)[0] in FIELDS + ("label",) and ":" in l else l
+              for l in grouped(used("label"))]
+    return ([f"type:{v}" for v in sorted(used("type")) if v]
+            + [f"status:{v}" for v in STATUSES if v in statuses]
+            + [f"P{v}" for v in sorted(used("priority")) if v.isdigit()]
+            + [f"is:{v}" for v in ("ready", "blocked") if v in used("is")]
+            + [f"assignee:{v}" for v in sorted(assignees - {"none"})] + (["assignee:none"] if "none" in assignees else [])
+            + labels)
 
 
 def tree_prefix(rows):
@@ -349,7 +420,7 @@ def tree_prefix(rows):
 
 
 def visible(state, fresh=False):
-    """The view's rows with the label filter applied: (depth, id, line,
+    """The view's rows with the filter (f) applied: (depth, id, line,
     matched). Beads that pass, and their ancestors (matched False) so the tree
     still shows where they are; the tree lines are redrawn to fit."""
     rows = beads(state, fresh)
@@ -360,7 +431,7 @@ def visible(state, fresh=False):
     keep, path = {}, []  # row index -> matched; path: indexes of the current row's ancestors
     for i, (depth, bead_id, _) in enumerate(rows):
         path[depth:] = [i]
-        if selects(issues.get(bead_id, {}), terms):
+        if selects(issues.get(bead_id, {}), terms, issues):
             keep[i] = True
             for j in path[:-1]:
                 keep.setdefault(j, False)
@@ -505,7 +576,7 @@ def header(state):
         trail.append(short_id(bead_id, parent, prefix))
         parent = bead_id
     where = " › ".join([os.path.basename(ROOT)] + trail)
-    line = f"{BOLD}{where}{RESET}  {DIM}{'all' if state['all'] else 'open'}{RESET}"
+    line = f"{BOLD}{where}{RESET}  {DIM}{'all' if shows_closed(state) else 'open'}{RESET}"
     if state["filter"]:
         found = sum(1 for row in visible(state) if row[3])
         shown = f"{RESET}{DIM} · {RESET}{ACCENT}".join(
@@ -790,19 +861,17 @@ def pick_labels(bead_id, current, state):
 
 
 def pick_filter(state):
-    """f: pick the label filter, the labels and priorities in use offered."""
-    issues = fetch(state)[1]
+    """f: pick the filter, from the types, statuses, priorities, assignees and labels in use."""
     current = state["filter"]
-    priorities = sorted({f"P{i['priority']}" for i in issues if isinstance(i.get("priority"), int)})
-    used = grouped({l for i in issues for l in i.get("labels") or []})
-    others = [c for c in priorities + used if c not in current]
+    offered = filter_choices(fetch(state)[1])
+    others = [c for c in offered if c not in current]
     wanted = multi_pick("only › ", current, others,
-                        "⏎ space tick · owner:a owner:b, P1 P2: either · others: all · "
-                        "type a glob (owner:*) or !label, ⏎ · esc applies · ctrl-c cancels",
+                        "⏎ space tick · one kind (type:, P1 P2, owner:…): any of them · kinds: all · "
+                        "type a glob (owner:*) or !term, ⏎ · esc applies · ctrl-c cancels",
                         lambda query: True)
     if wanted is not None:
-        # Priorities first, then labels in the order offered, typed ones last.
-        order = {c: n for n, c in enumerate(priorities + used)}
+        # In the order offered (types, statuses, priorities, … labels), typed ones last.
+        order = {c: n for n, c in enumerate(offered)}
         state["filter"] = sorted(wanted, key=lambda t: order.get(t, len(order)))
         save(state)
 
@@ -1610,7 +1679,7 @@ def watch():
         moved, last_state = saved != last_state and last_state is not None, saved
         try:
             state = load()
-            # A key changed the view (focus, folds, the label filter): its binding
+            # A key changed the view (focus, folds, the filter): its binding
             # reloaded fzf itself, from the cache. That is what fzf shows now; if
             # bd has changed since, the next tick reloads (a second reload at the
             # same moment as the key's can leave fzf, with --track, taking no keys).
@@ -1651,9 +1720,10 @@ Navigate (the filter hidden)
   J K                       move and show details
   1-9  0                    show that many levels / unfold all (digits change what's shown)
   /                         filter: every word must appear (!word excludes, 'word is fuzzy; esc clears and hides it)
-  f                         only beads with these labels and priorities (one namespace or P0-P4: any of them):
+  f                         only beads of these types, statuses, priorities, assignees, is:ready/blocked and labels
+                              (one kind or label namespace: any of them; !term excludes):
                               ⏎ space tick, esc applies, ctrl-c cancels
-  F                         clear that label filter
+  F                         clear that filter
   ctrl-e                    edit the bead
   ctrl-l                    labels: ⏎ space tick, esc applies, ctrl-c cancels
   ⌫ ⌦  (delete)             close the bead, after a y/n
@@ -1673,7 +1743,7 @@ def row_of(bead_id, state):
 
 def reveal(bead_id, state):
     """Change the view as little as needed for the bead to show: unfold its ancestors,
-    then leave a focus it isn't under, then show closed beads, then drop the label filter."""
+    then leave a focus it isn't under, then show closed beads, then drop the filter."""
     # Ancestors by bd's parent links (a child's id needn't extend its parent's), and by dot prefixes too.
     ancestors = {bead_id.rsplit(".", n)[0] for n in range(1, bead_id.count(".") + 1)}
     parents = {i["id"]: i.get("parent") for i in fetch(dict(state, stack=[], all=True, filter=[]))[1]}
@@ -1755,7 +1825,7 @@ def view(select=None):
         # Starts in navigate mode (input hidden): letters are keys, as in the file and git
         # viewers; / shows the filter, esc hides it again (and quits from navigate mode).
         "--no-input",
-        "--footer=j k move · l → in · h ← out · ⏎ ⇥ space details · ⌫ close · / filter · f labels · s sync · ? help · esc quit",
+        "--footer=j k move · l → in · h ← out · ⏎ ⇥ space details · ⌫ close · / filter · f only · s sync · ? help · esc quit",
         # The cached pane when there is one (instant), else bd (and cache it).
         f"--preview=cat {shlex.quote(DETAIL_DIR)}/{{1}}@{{2}}@$FZF_PREVIEW_COLUMNS 2>/dev/null || {RUN} show {{1}} {{2}}",
         "--preview-window=right,50%,wrap-word,border-left,noinfo,hidden",

@@ -66,6 +66,13 @@ function closing(path, machine = null) {
   }
   return out;
 }
+// Why "Clean up all finished" keeps a worktree (null: it goes): uncommitted changes, commits on no remote and
+// not in its base (unless its PR merged: a squash leaves them so), or facts it couldn't read (null).
+export function keepReason({ dirty, unpushed, why }) {
+  if (dirty === null || unpushed === null) return "couldn't look";
+  if (dirty) return `${dirty} uncommitted change${dirty === 1 ? "" : "s"}`;
+  return unpushed && why !== "merged" ? `${unpushed} unpushed commit${unpushed === 1 ? "" : "s"}` : null;
+}
 const names = (xs) => xs.map((x) => `"${x}"`).join(", ");
 const q = quote;
 // The worktree menu's git operations (`worktree-actions` names them by key).
@@ -238,6 +245,8 @@ export default class Spaces extends View {
     if (req.action === "git") return this.runGit(req, cx);
     if (req.action === "cleanup") return this.cleanup(req, cx);
     if (req.action === "askCleanup") return void this.askCleanup(req);
+    if (req.action === "cleanupAll") return this.cleanupAll(req, cx);
+    if (req.action === "askCleanupAll") return void this.askCleanupAll(req);
     if (req.action !== "changes") return;
     const s = this.spaceAt(req.path);
     if (s) return run("tab.new", { space: s.id, mod: "changes", name: "changes" });
@@ -277,15 +286,17 @@ export default class Spaces extends View {
     const only = sha ? await exec("git", ["rev-list", "--count", sha, "--not", "--remotes", ...(p.base ? [p.base] : []), "--"], { cwd: p.main, on }).catch(() => null) : null;
     const n = only?.code === 0 ? parseInt(only.stdout, 10) || 0 : null;
     const closes = closing(p.path, on);
+    // Short lines: what goes, then only what's worth a second look.
+    const folder = p.path.startsWith(`${p.main}/`) ? p.path.slice(p.main.length + 1) : p.path.split("/").pop();
     const lines = [
-      `Removes the worktree ${p.path}${p.remove ? " (with the repository's herdr.worktreeRemove command)" : ""} and deletes the branch ${p.branch}.`,
-      p.dirty ? "It has uncommitted changes: they are lost." : "It has no uncommitted changes.",
-      n === null ? "Couldn't count the commits that are on no remote: some may be lost." : n ? `${n} commit${n === 1 ? " is" : "s are"} on no remote${p.base ? ` and not in ${p.base}` : ""}${p.finished === "merged" ? " (a squash merge leaves them like that)" : ""}.` : "Every commit is on a remote or in the base branch.",
-      closes.spaces.length ? `${closes.spaces.length === 1 ? "The space" : "The spaces"} ${names(closes.spaces.map((s) => s.name))} ${closes.spaces.length === 1 ? "closes" : "close"}, with ${closes.spaces.length === 1 ? "its" : "their"} terminals and agents.` : "",
-      closes.tabs.length ? `${closes.tabs.length === 1 ? "The tab" : "The tabs"} ${names(closes.tabs.map((t) => `${t.name} in ${t.space}`))} ${closes.tabs.length === 1 ? "closes" : "close"}; the rest of ${closes.tabs.length === 1 ? "its space" : "their spaces"} stays.` : "",
+      `Removes ${folder} and the branch${p.remove ? " (with the repository's remove command)" : ""}.`,
+      p.dirty ? "Its uncommitted changes are lost." : "",
+      n === null ? "Couldn't count its unpushed commits: some may be lost." : n ? `${n} commit${n === 1 ? "" : "s"} on no remote ${n === 1 ? "is" : "are"} lost${p.finished === "merged" ? " (as a squash merge leaves them)" : ""}.` : "",
+      closes.spaces.length ? `Closes the space${closes.spaces.length === 1 ? "" : "s"} ${names(closes.spaces.map((s) => s.name))}.` : "",
+      closes.tabs.length ? `Closes the tab${closes.tabs.length === 1 ? "" : "s"} ${names(closes.tabs.map((t) => t.name))}.` : "",
     ].filter(Boolean);
-    openOverlay({ mod: "worktree-actions", kind: "dialog", width: 480, height: 250, props: { confirm: {
-      title: `Clean up ${p.branch}?`, detail: lines.join(" "), button: "Clean up", danger: Boolean(p.dirty || n || n === null),
+    openOverlay({ mod: "worktree-actions", kind: "dialog", width: 480, height: 128 + lines.reduce((h, l) => h + Math.ceil(l.length / 50) * 21, 0), props: { confirm: {
+      title: `Clean up ${p.branch}?`, detail: lines.join("\n"), button: "Clean up", danger: Boolean(p.dirty || n || n === null),
       request: { action: "cleanup", path: p.path, branch: p.branch, sha, machine: p.machine ?? null, main: p.main, repoKey: p.repoKey ?? null,
         close: { spaces: closes.spaces.map((s) => s.id), tabs: closes.tabs.map((t) => t.id) }, remove: p.remove ?? null, dirty: Boolean(p.dirty) },
     } } });
@@ -295,44 +306,109 @@ export default class Spaces extends View {
   // removed (the repo's herdr.worktreeRemove command when it sets one), its branch deleted,
   // then the space or tab the dialog named closed. Stops at the first failure, with a toast.
   cleanup(req, cx) {
+    cx.spawn(async (cx) => {
+      const r = await this.cleanOne(req);
+      if (r.failed) notify({ title: `${r.failed} failed`, body: r.body, level: "error" });
+      if (r.branch) notify({ title: "Deleting the branch failed", body: r.branch, level: "error" });
+      if (r.ok && !r.branch) notify({ title: "Cleaned up", body: `${req.branch}: worktree removed, branch deleted`, level: "success", timeout: 4000 });
+      // The repository's own key (its git folder, as listed): `<main>/.git` is wrong for a bare or symlinked one.
+      await this.listTrees(req.repoKey ?? JSON.stringify([req.machine ?? null, `${req.main}/.git`]), cx).catch(() => {});
+      cx.notify();
+    });
+  }
+
+  // One clean-up, as asked: { ok } once the worktree is gone (branch: why the branch stayed, if it did),
+  // else { failed: what, body: why } with nothing removed.
+  async cleanOne(req) {
     const on = req.machine ?? null, sh = (cmd) => exec("sh", ["-c", cmd], { cwd: req.main, on, timeout: 120000 })
       .catch((e) => ({ code: -1, stdout: "", stderr: String(e) }));
-    const fail = (what, r) => notify({ title: `${what} failed`, body: `${r.stderr ?? ""}\n${r.stdout ?? ""}`.trim().split("\n").filter(Boolean).slice(-4).join("\n") || `exit ${r.code}`, level: "error" });
+    const why = (r) => `${r.stderr ?? ""}\n${r.stdout ?? ""}`.trim().split("\n").filter(Boolean).slice(-4).join("\n") || `exit ${r.code}`;
+    const remove = req.remove ? customRemove(req.remove, req.path, req.branch)
+      : ["git", ...removeWorktreeArgs(req.path, req.dirty)].map(q).join(" ");
+    // What closes: only what the dialog named and is still wholly inside the worktree now (before removing it).
+    const now = closing(req.path, on), named = req.close ?? { spaces: [], tabs: [] };
+    const closeSpaces = now.spaces.filter((s) => named.spaces.includes(s.id));
+    const closeTabs = now.tabs.filter((t) => named.tabs.includes(t.id));
+    // The branch must still be where the dialog saw it: an agent may have committed there since.
+    const ref = `refs/heads/${req.branch}`;
+    if (req.sha) {
+      const now = await sh(`git rev-parse --verify -q ${q(ref)}`);
+      if (now.code === 0 && now.stdout.trim() !== req.sha)
+        return { failed: "Clean-up stopped", body: `${req.branch} has new commits since you were asked. Nothing was removed: look again, then clean up.` };
+    }
+    // Changes since the dialog said "no uncommitted changes" (its look may be a minute old; a custom remove
+    // command wouldn't check): stop before anything goes.
+    if (!req.dirty) {
+      const st = await sh(`git -C ${q(req.path)} status --porcelain`);
+      if (st.code === 0 && st.stdout.trim()) return { failed: "Clean-up stopped", body: `${req.path.split("/").pop()} has uncommitted changes now. Nothing was removed: look again, then clean up.` };
+    }
+    let r = await sh(remove);
+    if (r.code !== 0) return { failed: "Removing the worktree", body: why(r) };
+    // A remove command that deletes the branch itself leaves nothing to delete: that's fine.
+    const exists = await sh(`git rev-parse --verify -q ${q(ref)}`);
+    // The dialog said how many of its commits are on no remote and not in the base branch, so it goes even
+    // unmerged (a squash merge leaves it so), but only if it still points where the dialog saw it
+    // (update-ref's old-value check). Without that look (sha unknown), only as merged: `git branch -d`.
+    r = exists.code !== 0 ? { code: 0 } : req.sha ? await sh(`git update-ref -d ${q(ref)} ${q(req.sha)}`)
+      : await sh(["git", ...deleteBranchArgs(req.branch)].map(q).join(" "));
+    for (const s of closeSpaces) run("space.close", { id: s.id, confirmed: true });
+    for (const t of closeTabs) run("tab.close", { id: t.id, confirmed: true });
+    return { ok: true, branch: r.code !== 0 ? why(r) : null };
+  }
+
+  // Local change: every finished worktree of a repository (its PR merged or closed, its remote branch gone) in
+  // one dialog. Only ones that lose nothing go: no uncommitted changes, and every commit on a remote or in the
+  // base branch (a merged PR's squash leaves commits so: those go too). The rest are named and kept.
+  finishedTrees(repo) {
+    return (this.trees[repo] ?? []).filter((wt) => wt.branch).map((wt) => ({ wt, g: this.git[wt.key] ?? null, repo }))
+      .map((r) => ({ ...r, why: this.finished(r) })).filter((r) => r.why);
+  }
+
+  async askCleanupAll(p) {
+    const repo = p.repoKey, [on, dir] = JSON.parse(repo), main = dir.endsWith("/.git") ? dir.slice(0, -5) : dir;
+    const go = [], kept = [];
+    const looked = await Promise.all(this.finishedTrees(repo).map(async (r) => {
+      const { path, branch } = r.wt, base = r.g?.base && r.g.base !== branch ? r.g.base : null;
+      const tip = await exec("git", ["rev-parse", "--verify", "-q", `refs/heads/${branch}`], { cwd: main, on }).catch(() => null);
+      const sha = tip?.code === 0 ? tip.stdout.trim() : null;
+      const only = sha ? await exec("git", ["rev-list", "--count", sha, "--not", "--remotes", ...(base ? [base] : []), "--"], { cwd: main, on }).catch(() => null) : null;
+      const n = only?.code === 0 ? parseInt(only.stdout, 10) || 0 : null;
+      const st = await exec("git", ["-C", path, "status", "--porcelain"], { cwd: main, on }).catch(() => null);
+      const dirty = st?.code === 0 ? st.stdout.split("\n").filter(Boolean).length : null;
+      const keep = keepReason({ dirty, unpushed: n, why: r.why });
+      return { r, sha, keep };
+    }));
+    for (const { r, sha, keep } of looked) {
+      const { path, branch } = r.wt;
+      if (keep) { kept.push(`${branch}: ${keep}`); continue; }
+      const closes = closing(path, on);
+      go.push({ line: `${branch} (${r.why})`, closes, request: { action: "cleanup", path, branch, sha, machine: on, main, repoKey: repo,
+        close: { spaces: closes.spaces.map((s) => s.id), tabs: closes.tabs.map((t) => t.id) }, remove: this.removeCmd[repo] ?? null, dirty: false } });
+    }
+    if (!go.length) return void notify({ title: "Nothing to clean up", body: kept.length ? `Kept: ${kept.join("; ")}` : "No finished worktrees.", level: "info", timeout: 6000 });
+    const tabs = go.reduce((n, x) => n + x.closes.tabs.length, 0), sps = go.reduce((n, x) => n + x.closes.spaces.length, 0);
+    const lines = [...go.map((x) => x.line),
+      ...(sps || tabs ? [`Closes ${[sps && `${sps} space${sps === 1 ? "" : "s"}`, tabs && `${tabs} tab${tabs === 1 ? "" : "s"}`].filter(Boolean).join(" and ")} open there.`] : []),
+      ...(kept.length ? ["", "Kept:", ...kept] : [])];
+    openOverlay({ mod: "worktree-actions", kind: "dialog", width: 480, height: Math.min(560, 128 + lines.reduce((h, l) => h + Math.max(1, Math.ceil(l.length / 50)) * 21, 0)), props: { confirm: {
+      title: `Clean up ${go.length} finished worktree${go.length === 1 ? "" : "s"}?`, detail: lines.join("\n"), button: "Clean up",
+      request: { action: "cleanupAll", repoKey: repo, items: go.map((x) => x.request) },
+    } } });
+  }
+
+  // One after another (git's locks), then one toast for them all and one look at the list.
+  cleanupAll(req, cx) {
     cx.spawn(async (cx) => {
-      const remove = req.remove ? customRemove(req.remove, req.path, req.branch)
-        : ["git", ...removeWorktreeArgs(req.path, req.dirty)].map(q).join(" ");
-      // What closes: only what the dialog named and is still wholly inside the worktree now (before removing it).
-      const now = closing(req.path, on), named = req.close ?? { spaces: [], tabs: [] };
-      const closeSpaces = now.spaces.filter((s) => named.spaces.includes(s.id));
-      const closeTabs = now.tabs.filter((t) => named.tabs.includes(t.id));
-      // The branch must still be where the dialog saw it: an agent may have committed there since.
-      const ref = `refs/heads/${req.branch}`;
-      if (req.sha) {
-        const now = await sh(`git rev-parse --verify -q ${q(ref)}`);
-        if (now.code === 0 && now.stdout.trim() !== req.sha)
-          return fail("Clean-up stopped", { stderr: `${req.branch} has new commits since you were asked. Nothing was removed: look again, then clean up.` });
+      const done = [], failed = [];
+      for (const it of req.items ?? []) {
+        const r = await this.cleanOne(it);
+        if (r.ok) done.push(it.branch);
+        if (r.failed || r.branch) failed.push(`${it.branch}: ${(r.body ?? r.branch).split("\n")[0]}`);
       }
-      // Changes since the dialog said "no uncommitted changes" (its look may be a minute old; a custom remove
-      // command wouldn't check): stop before anything goes.
-      if (!req.dirty) {
-        const st = await sh(`git -C ${q(req.path)} status --porcelain`);
-        if (st.code === 0 && st.stdout.trim()) return fail("Clean-up stopped", { stderr: `${req.path.split("/").pop()} has uncommitted changes now. Nothing was removed: look again, then clean up.` });
-      }
-      let r = await sh(remove);
-      if (r.code !== 0) return fail("Removing the worktree", r);
-      // A remove command that deletes the branch itself leaves nothing to delete: that's fine.
-      const exists = await sh(`git rev-parse --verify -q ${q(`refs/heads/${req.branch}`)}`);
-      // The dialog said how many of its commits are on no remote and not in the base branch, so it goes even
-      // unmerged (a squash merge leaves it so), but only if it still points where the dialog saw it
-      // (update-ref's old-value check). Without that look (sha unknown), only as merged: `git branch -d`.
-      r = exists.code !== 0 ? { code: 0 } : req.sha ? await sh(`git update-ref -d ${q(ref)} ${q(req.sha)}`)
-        : await sh(["git", ...deleteBranchArgs(req.branch)].map(q).join(" "));
-      if (r.code !== 0) fail("Deleting the branch", r);
-      for (const s of closeSpaces) run("space.close", { id: s.id, confirmed: true });
-      for (const t of closeTabs) run("tab.close", { id: t.id, confirmed: true });
-      if (r.code === 0) notify({ title: "Cleaned up", body: `${req.branch}: worktree removed, branch deleted`, level: "success", timeout: 4000 });
-      // The repository's own key (its git folder, as listed): `<main>/.git` is wrong for a bare or symlinked one.
-      await this.listTrees(req.repoKey ?? JSON.stringify([on, `${req.main}/.git`]), cx).catch(() => {});
+      if (done.length) notify({ title: `Cleaned up ${done.length} worktree${done.length === 1 ? "" : "s"}`, body: failed.length ? `Not all of it: ${failed.join("; ")}` : undefined,
+        level: failed.length ? "warning" : "success", timeout: failed.length ? 10000 : 4000 });
+      else notify({ title: "Clean-up failed", body: failed.join("; "), level: "error" });
+      await this.listTrees(req.repoKey, cx).catch(() => {});
       cx.notify();
     });
   }
@@ -605,11 +681,13 @@ export default class Spaces extends View {
   menu(w) {
     // A popup is as tall as its items; height is only the most.
     const { g } = this.spaceGit(w, panes());
-    openOverlay({ mod: "worktree-actions", kind: "popup", width: 230, height: 400, props: {
+    openOverlay({ mod: "worktree-actions", kind: "popup", width: 250, height: 0.9, props: {
       kind: "space", path: place(w, panes()), machine: w.machine ?? null, space: w.id, editors: this.editors,
       git: Boolean(g),
       branch: g?.branch && g.branch !== "(detached)" ? g.branch : null,
       linked: Boolean(g?.linked),
+      // Its repository's finished worktrees: the menu offers to clean them up at once.
+      finishedCount: g ? this.finishedTrees(g.repo).length : 0, repoKey: g?.repo ?? null,
     } });
   }
 
@@ -653,7 +731,7 @@ export default class Spaces extends View {
     const elsewhere = spaces().find((s) => s.id !== r.parent.id && (s.machine ?? null) === (r.parent.machine ?? null) && this.tabIn(s, path));
     const tabHere = this.tabIn(r.parent, path);
     const tabSpace = tabHere ? r.parent : elsewhere ?? null;
-    openOverlay({ mod: "worktree-actions", kind: "popup", width: 250, height: 640, props: {
+    openOverlay({ mod: "worktree-actions", kind: "popup", width: 250, height: 0.9, props: {
       path, branch,
       tab: tabHere ?? (elsewhere ? this.tabIn(elsewhere, path) : null), tabHere: Boolean(tabHere),
       tabSpace: tabSpace?.id ?? null, tabSpaceName: tabSpace?.name ?? null,

@@ -235,7 +235,7 @@ mixed in from `table.js`, `review.js`, `pickers.js` and `manygit.js`, with `read
 `common.js` beside them; the git plumbing is `git.js`, `execute.js`, `repos.js`, `lanes.js`), `beads` (a launcher popup that starts
 `mods/beads/beads-view` with `hc run --bg` in the nearest folder with `.beads`, closes itself and
 opens a dialog on the terminal once `terminals()` lists it). `sidebar-footer` (the footer of Herdr's
-`workspace-chrome`, Settings only), `fleet-board` (original: `snapshot.js` normalizes `fleet status --json` schema 1 and `fleet runs --json`,
+`workspace-chrome`, Settings only), `fleet-board` (original: `snapshot.js` normalizes `fleet status --json` schema 1 or 2 and `fleet runs --json`,
 `fleet.js` runs them, `model.js` computes what the views show; `main.js` is the class, its methods mixed in
 from `scheduler.js`, `alerts.js`, `actions.js` and `views.js`). Herdr's `workspace-chrome`,
 `changes`, `pane`, `menu`, `new-menu`, `confirm`, `worktree` are used as shipped.

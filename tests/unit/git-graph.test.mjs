@@ -1,7 +1,7 @@
 // git-graph's git plumbing (git.js, execute.js): run with `node --test 'tests/unit/*.test.mjs'`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { READ, commandsFor, parseBranches, menuFor, worktreePath, parseStatus, splitRemote, childrenFirst, parseRevParse, REV_PARSE, logArgs } from "../../mods/git-graph/git.js";
+import { READ, commandsFor, parseBranches, menuFor, worktreePath, parseStatus, splitRemote, childrenFirst, parseRevParse, REV_PARSE, logArgs, removeDialog } from "../../mods/git-graph/git.js";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -227,4 +227,46 @@ test("checkout from the menu: here or in a new worktree, at once; a remote branc
   // A remote branch run at once becomes a local branch of its name, tracking it.
   assert.deepEqual(commandsFor({ type: "checkoutRemote", name: "origin/csv", remote: "origin", branch: "csv" }, { where: "here", name: "csv" }, c), [["checkout", "-b", "csv", "--track", "origin/csv"]]);
   assert.deepEqual(commandsFor({ type: "checkout", name: "feat" }, { where: "worktree" }, c), [["worktree", "add", "/r/main/.worktrees/feat", "feat"]]);
+});
+
+test("Remove worktree: its branch goes too by default, unless it has unpushed commits of its own", () => {
+  const ctx = { root: "/r/main", mainRoot: "/r/main", tracking: { gone: { gone: true } } };
+  const a = { type: "removeWorktree", name: "fix/x", path: "/r/main/.claude/worktrees/fix-x", custom: null, open: false };
+  const clean = removeDialog({ ...a, dirty: 0, unmerged: 0 }, ctx);
+  assert.equal(clean.detail, ".claude/worktrees/fix-x");
+  assert.deepEqual(clean.checks.map((c) => [c.id, c.value]), [["branchForce", true]], "merged, clean: one tick, on");
+  const own = removeDialog({ ...a, dirty: 2, unmerged: 3 }, ctx);
+  assert.match(own.checks[0].label, /its 3 unmerged commits are lost/);
+  assert.equal(own.checks[0].value, false, "commits only it has, never pushed: kept unless ticked");
+  assert.match(own.checks[1].label, /Discard its 2 uncommitted changes/);
+  assert.equal(removeDialog({ ...a, name: "gone", dirty: 0, unmerged: 1 }, ctx).checks[0].value, true, "upstream gone (merged on GitHub): on");
+  const unknown = removeDialog({ ...a, dirty: null, unmerged: null }, ctx);
+  assert.deepEqual(unknown.checks.map((c) => [c.id, c.value]), [["branch", true], ["force", false]], "facts unknown: git branch -d keeps an unmerged one");
+});
+
+test("Remove worktree: the remote branch only when ticked, its PR named; what can't go is kept and said", async () => {
+  const c = { root: "/r/main", mainRoot: "/r/main", head: "a".repeat(40), current: "feat", remotes: ["origin"], branches: ["feat", "fix"],
+    tracking: {}, worktrees: { fix: "/r/main/.worktrees/fix" }, on: null };
+  const a = { type: "removeWorktree", name: "fix", path: "/r/main/.worktrees/fix", custom: null, dirty: 0, unmerged: 0,
+    remote: { remote: "origin", branch: "fix", pr: { number: 7, state: "OPEN" } } };
+  const tick = removeDialog(a, c).checks.find((x) => x.id === "remoteBranch");
+  assert.equal(tick.value, false, "never by default");
+  assert.equal(tick.label, "Also delete origin/fix (PR #7 is open and would close)");
+  assert.ok(!removeDialog({ ...a, remote: null }, c).checks.some((x) => x.id === "remoteBranch"), "no upstream left: no tick");
+  assert.deepEqual(commandsFor(a, { branchForce: true, remoteBranch: true }, c).slice(1), [["branch", "-D", "fix"], ["push", "origin", "--delete", "refs/heads/fix"]]);
+  assert.equal(commandsFor(a, { branchForce: true }, c).length, 2);
+  assert.throws(() => commandsFor({ ...a, remote: { remote: "evil", branch: "fix" } }, { remoteBranch: true }, c), /remote branch/);
+  // The branch kept (unmerged), the push still runs; both said in one warning.
+  const calls = [];
+  const exec = async (program, args) => {
+    calls.push(args);
+    if (args.includes("rev-parse") && args.includes("HEAD")) return { code: 0, stdout: c.head + "\n", stderr: "" };
+    if (args.includes("symbolic-ref")) return { code: 0, stdout: "feat\n", stderr: "" };
+    if (args[0] === "branch") return { code: 1, stdout: "", stderr: "error: the branch 'fix' is not fully merged." };
+    return { code: 0, stdout: "", stderr: "" };
+  };
+  const r = await executeAction(a, { branch: true, remoteBranch: true }, c, exec);
+  assert.equal(r.ok, true);
+  assert.match(r.warning, /Kept the branch fix/);
+  assert.ok(calls.some((x) => x.includes("--delete")), "the remote branch was still deleted");
 });

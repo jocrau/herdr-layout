@@ -419,8 +419,10 @@ export const TableMethods = {
         const fg = current || part.kind === "head" ? t.background : part.kind === "tag" ? t.ansi3 : i > 0 ? t.muted : t.foreground;
         // A folder: checked out in another worktree (double-click goes there).
         const glyph = part.kind === "branch" ? (part.head ? "check" : part.worktree ? "folder" : "branch") : part.kind === "tag" ? "tag" : "cloud";
-        return h_flex().w(part.width).h_full().flex_none().px(LABEL.PAD).gap(3).items_center().overflow_hidden()
+        // Under the pointer: lit, so it's clear which one a right-click or double-click takes (hitLabel's part).
+        return h_flex().id(`lp-${label.kind}-${part.name ?? i}-${i}`).w(part.width).h_full().flex_none().px(LABEL.PAD).gap(3).items_center().overflow_hidden()
           .when(i > 0, (e) => e.border_l(1).border_color(edge).bg(current ? t.background + "33" : edge + "1f"))
+          .when(part.kind !== "head", (e) => e.cursor_pointer().hover((s) => s.bg(current ? t.background + "55" : edge + "59")))
           .when(Boolean(part.icon), (e) => e.child(svg(icon(glyph)).size(10).flex_none().text_color(fg)))
           .child(div().font_family(mono).text_size(LABEL.FONT).when(current, (e) => e.font_semibold()).text_color(fg).child(part.text));
       }));

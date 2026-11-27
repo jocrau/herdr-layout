@@ -56,22 +56,26 @@ export async function executeAction(action, values, ctx, exec) {
     const r = await exec("sh", ["-c", cmd], { cwd: ctx.mainRoot ?? ctx.root, on: ctx.on, timeout: 120000 });
     if (r.code !== 0) return { ok: false, message: `The repository's remove command failed.\n\n${gitError(r)}` };
     commands.shift();
-    if (commands.length) {
+    if (commands[0]?.[0] === "branch") {
       const still = await git([...READ, "rev-parse", "--verify", "-q", `refs/heads/${action.name}`]);
-      if (still.code !== 0) commands.length = 0; // the command deleted the branch too
+      if (still.code !== 0) commands.shift(); // the command deleted the branch too
     }
   }
   // Git has no transaction spanning these commands and other terminals. This
   // preflight detects an already changed context; it cannot lock out future edits.
-  let moved, failed; // fast-forward all's branches, each on its own
+  let moved, failed, kept; // fast-forward all's branches, each on its own; what Remove worktree kept
   for (const [i, args] of commands.entries()) {
     const result = await (networked(args) ? remoteGit(args) : git(args));
-    // Local change: the worktree is gone once its removal ran; a branch git won't delete
-    // (unmerged commits) is kept and said so, rather than failing an action that can't run again.
+    // Local change: the worktree is gone once its removal ran; a branch git won't delete (unmerged
+    // commits), or a remote branch the push couldn't delete, is kept and said so, and the rest goes on,
+    // rather than failing an action that can't run again.
     if (result.code !== 0 && action.type === "removeWorktree" && (i > 0 || action.custom)) {
-      return { ok: true, warning: unmerged(result.stderr)
-        ? `Kept the branch ${action.name}: it has commits that aren't merged anywhere. To delete it anyway, right-click it, Delete branch…, and tick "Force delete".`
-        : `Kept the branch ${action.name}: git wouldn't delete it.\n\n${gitError(result)}` };
+      (kept ??= []).push(args[0] === "push"
+        ? `Kept ${action.remote.remote}/${action.remote.branch}: the push to delete it failed.\n\n${gitError(result)}`
+        : unmerged(result.stderr)
+          ? `Kept the branch ${action.name}: it has commits that aren't merged anywhere. To delete it anyway, right-click it, Delete branch…, and tick "Force delete".`
+          : `Kept the branch ${action.name}: git wouldn't delete it.\n\n${gitError(result)}`);
+      continue;
     }
     // Fast-forward all: one branch failing doesn't stop the others; the toast says which moved and which didn't.
     if (action.type === "ffAll") {
@@ -81,6 +85,7 @@ export async function executeAction(action, values, ctx, exec) {
     }
     if (result.code !== 0) return { ok: false, message: gitError(result) };
   }
+  if (kept) return { ok: true, warning: kept.join("\n\n") };
   if (failed?.length) return moved?.length
     ? { ok: true, warning: `Fast-forwarded ${moved.join(", ")}. Not: ${failed.join("; ")}` }
     : { ok: false, message: `Nothing fast-forwarded. ${failed.join("; ")}` };

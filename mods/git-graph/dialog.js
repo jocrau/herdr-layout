@@ -132,7 +132,7 @@ export class Dialog {
       // Local change: the overlay keeps the height it opened with, so what doesn't fit scrolls,
       // and the error and the buttons below stay in view.
       .child(v_flex().id("gd-body").flex_1().min_h(0).overflow_y_scrollbar()
-      .when(Boolean(s.detail), (el) => el.child(div().pt(8).text_color(t.muted).child(s.detail)))
+      .when(Boolean(s.detail), (el) => el.child(v_flex().pt(8).text_color(t.muted).children(s.detail.split("\n").map((line) => div().child(line)))))
       .children(this.inputs.map(({ field, state }, i) => v_flex()
         .child(label(field.label))
         .child(Input.new(state).h(36).px(10).rounded(9).border_1().border_color(this.focusedInput === i ? t.accent : t.input).bg(t.background).text_size(TYPE.body).text_color(t.foreground))))

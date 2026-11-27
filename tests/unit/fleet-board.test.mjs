@@ -42,7 +42,9 @@ test("a run has one key whether summarized from a snapshot or listed by fleet ru
   const listed = parseRuns(JSON.stringify({ schema: 1, runs: [{ repo: "/code/acme-web", repo_name: "acme-web", epic: "acme.ep", beads: { total: 3 } }] }));
   assert.equal(listed[0].key, sum.key);
   assert.equal(parseRuns("not json"), null);
-  assert.equal(parseRuns(JSON.stringify({ schema: 2, runs: [] })), null);
+  // Schema 2 (agent-fleet 0.52) changed only metrics.stages, which the board doesn't read; it rises with status's.
+  assert.equal(parseRuns(JSON.stringify({ schema: 2, runs: [{ repo: "/code/acme-web", repo_name: "acme-web", epic: "acme.ep" }] }))[0].key, sum.key);
+  assert.equal(parseRuns(JSON.stringify({ schema: 3, runs: [] })), null);
   // A run recorded before agent-fleet kept its repository's path has nowhere to read it from: no chip.
   assert.deepEqual(parseRuns(JSON.stringify({ schema: 1, runs: [{ repo: null, repo_name: "old", epic: "old.ep" }] })), []);
   // Every epic, not only a repository's current one; a run without its folder is looked for in the code folder.
@@ -68,6 +70,10 @@ test("waits for the person come from gates[]; an open one on a bead that went on
 test("parseSnapshot and failure say what went wrong", () => {
   assert.equal(parseSnapshot(JSON.stringify(raw()), "/r").ok, true);
   assert.equal(parseSnapshot(JSON.stringify(raw({ schema: 9 })), "/r").kind, "error");
+  // agent-fleet 0.52: schema 2, metrics.stages per stage now {beads, median, p90}.
+  const two = parseSnapshot(JSON.stringify(raw({ schema: 2, metrics: { stages: { implement: { beads: 3, median: 600, p90: 900 } } } })), "/r");
+  assert.equal(two.ok, true);
+  assert.deepEqual(two.snap, parseSnapshot(JSON.stringify(raw()), "/r").snap);
   assert.equal(failure(2, "fleet: error: unrecognized arguments: --json").kind, "old");
   assert.equal(failure(1, "fleet: /r/.fleet.toml is missing or empty").kind, "none");
   assert.equal(failure(127, "").kind, "missing");

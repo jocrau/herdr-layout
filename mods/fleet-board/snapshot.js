@@ -1,8 +1,9 @@
-// Reading agent-fleet's JSON (`fleet status --json`, schema 1; `fleet runs --json`) into what the views draw.
+// Reading agent-fleet's JSON (`fleet status --json` and `fleet runs --json`, schema 1 or 2) into what the views draw.
+// Schema 2 (agent-fleet 0.52) changed only `metrics.stages`, which the board doesn't read.
 // The schema is in agent-fleet's README ("fleet status --json"): times UTC ISO 8601, durations seconds, usage
 // windows fractions. Pure: no Herdr imports, so the tests import it; fleet.js runs the commands.
 
-export const SCHEMA = 1;
+export const SCHEMAS = [1, 2];
 export const ms = (iso) => {
   if (!iso) return null;
   const t = Date.parse(iso);
@@ -194,7 +195,7 @@ export function failure(code, stderr, bin = "fleet") {
 export function parseSnapshot(stdout, cwd) {
   let raw;
   try { raw = JSON.parse(stdout); } catch { return { ok: false, kind: "error", message: "fleet status --json printed no JSON." }; }
-  if (raw?.schema !== SCHEMA) return { ok: false, kind: "error", message: `Unknown snapshot schema ${raw?.schema} (this pane reads ${SCHEMA}).` };
+  if (!SCHEMAS.includes(raw?.schema)) return { ok: false, kind: "error", message: `Unknown snapshot schema ${raw?.schema} (this pane reads ${SCHEMAS.join(" and ")}).` };
   return { ok: true, snap: normalize(raw, cwd) };
 }
 
@@ -204,7 +205,7 @@ export function parseSnapshot(stdout, cwd) {
 export function parseRuns(stdout, codeDir = null) {
   let raw;
   try { raw = JSON.parse(stdout); } catch { return null; }
-  if (raw?.schema !== 1 || !Array.isArray(raw.runs)) return null;
+  if (!SCHEMAS.includes(raw?.schema) || !Array.isArray(raw.runs)) return null;
   return raw.runs.map((x) => {
     const repoName = x.repo_name ?? x.repo?.split("/").pop() ?? null;
     const cwd = x.repo ?? (repoName && codeDir ? `${codeDir}/${repoName}` : null);

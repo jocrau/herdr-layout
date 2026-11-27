@@ -1,5 +1,5 @@
 import { exec, notify, setShared, openOverlay, closeOverlay, run, spaces, panes } from "herdr";
-import { dialogFor, dialogHeight, doneText, DIALOG_WIDTH, validate, createdWorktree } from "./git.js";
+import { dialogFor, dialogHeight, doneText, DIALOG_WIDTH, validate, createdWorktree, READ, REV_PARSE, BRANCHES, parseRevParse, parseBranches } from "./git.js";
 import { executeAction } from "./execute.js";
 import { branchTitle } from "./lib/names.js";
 
@@ -55,9 +55,48 @@ export function openDialog(action, ctx) {
 }
 
 async function prepareRemove(action, ctx) {
-  const at = openAt(action.path, ctx.on);
-  const r = await exec("git", ["config", "--get", "herdr.worktreeRemove"], { cwd: ctx.root, on: ctx.on }).catch(() => null);
-  return { ...action, open: Boolean(at.space || at.pane), custom: r?.code === 0 ? r.stdout.trim() || null : null };
+  const at = openAt(action.path, ctx.on), opts = { cwd: ctx.root, on: ctx.on };
+  const read = (args) => exec("git", args, opts).catch(() => null);
+  const [cfg, st, only] = await Promise.all([
+    read(["config", "--get", "herdr.worktreeRemove"]),
+    read(["-C", action.path, ...READ, "status", "--porcelain"]),
+    // The commits only this branch has: on no other branch, no remote branch.
+    read([...READ, "rev-list", "--count", `refs/heads/${action.name}`, "--not", `--exclude=refs/heads/${action.name}`, "--branches", "--remotes"])]);
+  const remote = await remoteOf(action.name, read, ctx);
+  const count = (r) => (r?.code === 0 && /^\d+$/.test(r.stdout.trim()) ? Number(r.stdout.trim()) : null);
+  return { ...action, open: Boolean(at.space || at.pane), custom: cfg?.code === 0 ? cfg.stdout.trim() || null : null,
+    dirty: st?.code === 0 ? st.stdout.split("\n").filter(Boolean).length : null, unmerged: count(only), remote };
+}
+
+// The branch's upstream when it's still on the remote ({ remote, branch, pr }), else null; pr: its latest
+// pull request ({ number, state: OPEN | MERGED | CLOSED }) when gh knows one.
+async function remoteOf(name, read, ctx) {
+  const r = await read([...READ, "for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)%00%(upstream:track)", `refs/heads/${name}`]);
+  const [remote = "", ref = "", track = ""] = r?.code === 0 ? r.stdout.trim().split("\0") : [];
+  if (!remote || !ref.startsWith("refs/heads/") || track.includes("gone") || !(ctx.remotes ?? []).includes(remote)) return null;
+  const branch = ref.slice(11);
+  const p = await exec("gh", ["pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", "number,state"], { cwd: ctx.root, on: ctx.on, timeout: 8000 }).catch(() => null);
+  let pr = null;
+  try { pr = p?.code === 0 ? JSON.parse(p.stdout)[0] ?? null : null; } catch {}
+  return { remote, branch, pr: pr && Number.isInteger(pr.number) ? { number: pr.number, state: String(pr.state) } : null };
+}
+
+// Removing a worktree from outside the git view (the sidebar): the worktree `folder` is in, and the
+// repository as the graph would see it from the main checkout, so its dialog asks as the graph's does.
+export async function removeFrom(folder, on) {
+  const git = (cwd, args) => exec("git", [...READ, ...args], { cwd, on });
+  const where = parseRevParse((await git(folder, REV_PARSE)).stdout);
+  if (!where) throw new Error("That folder isn't in a git repository.");
+  const main = where.common.endsWith("/.git") ? where.common.slice(0, -5) : null;
+  if (!main || main === where.root) throw new Error("That's the main checkout, not a worktree.");
+  if (!where.current) throw new Error("No branch is checked out there.");
+  const [rev, branches, remotes] = await Promise.all([git(main, REV_PARSE), git(main, BRANCHES), git(main, ["remote"])]);
+  const m = parseRevParse(rev.stdout);
+  if (!m) throw new Error("Couldn't read the main checkout.");
+  const parsed = parseBranches(branches.stdout, m.root);
+  const ctx = { root: m.root, on, current: m.current, head: m.head, branches: parsed.names, tracking: parsed.tracking,
+    worktrees: parsed.worktrees, mainRoot: null, remotes: remotes.stdout.split("\n").filter(Boolean), overlay: null, space: null };
+  return { action: { type: "removeWorktree", name: where.current, path: where.root }, ctx };
 }
 
 export function showChanges() {

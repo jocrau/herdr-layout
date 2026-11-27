@@ -414,18 +414,35 @@ function repoMenu(r, ctx) {
   ].filter((s) => s.length).flatMap((s, i) => (i ? [{ separator: true }, ...s] : s));
 }
 
+// Removing a worktree: its folder (relative to the main checkout), then a tick or two. What it
+// read first (act.js prepareRemove): `dirty`, its uncommitted changes, and `unmerged`, the commits
+// only its branch has (null: unknown), and `remote`, its upstream still on the remote ({ remote, branch,
+// pr: { number, state } | null }, else null). The branch goes too by default, unless it has commits of its
+// own still on no remote (a gone upstream reads as merged on GitHub, a squash merge perhaps). The remote
+// branch never by default: it's shared, and deleting an open PR's branch closes the PR.
+const prNote = (pr) => !pr ? "" : pr.state === "OPEN" ? ` (PR #${pr.number} is open and would close)`
+  : pr.state === "MERGED" ? ` (PR #${pr.number} is merged)` : ` (PR #${pr.number} is closed)`;
+export function removeDialog(a, ctx) {
+  const root = ctx.mainRoot ?? ctx.root, where = a.path.startsWith(`${root}/`) ? a.path.slice(root.length + 1) : a.path;
+  const known = Number.isInteger(a.unmerged), gone = Boolean(ctx.tracking?.[a.name]?.gone);
+  const lost = known && a.unmerged > 0 ? ` (${a.unmerged === 1 ? "its unmerged commit is" : `its ${a.unmerged} unmerged commits are`} lost)` : "";
+  const notes = [a.custom && "The repository's own remove command does it.", a.open && "It's open in a space or tab: close that first."].filter(Boolean);
+  return { title: "Remove worktree", detail: [where, ...notes].join("\n"),
+    checks: [
+      // Known: -D, as the label says what's lost; unknown: -d, which keeps an unmerged branch.
+      { id: known ? "branchForce" : "branch", label: `Delete the branch ${a.name} too${lost}`, value: !lost || gone },
+      ...(a.remote ? [{ id: "remoteBranch", label: `Also delete ${a.remote.remote}/${a.remote.branch}${prNote(a.remote.pr)}`, value: false }] : []),
+      ...(a.custom || a.dirty === 0 ? [] : [{ id: "force", label: a.dirty ? `Discard ${a.dirty === 1 ? "its uncommitted change" : `its ${a.dirty} uncommitted changes`}` : "Discard uncommitted changes, if any", value: false }])],
+    confirm: "Remove", danger: true };
+}
+
 export function dialogFor(action, ctx) {
   const cur = currentName(ctx), a = action;
   switch (a.type) {
     case "checkout": return { title: "Checkout branch", detail: `Check out ${a.name}.`, choice: whereChoice("here"), confirm: "Checkout" };
     case "checkoutRemote": return { title: "Checkout remote branch", detail: `Create a local branch that tracks ${a.name}, and check it out.`,
       inputs: [{ id: "name", label: "Local branch name", value: a.branch }], choice: whereChoice("here"), confirm: "Checkout" };
-    case "removeWorktree": return { title: "Remove worktree", detail: `Remove the worktree ${a.path}, where ${a.name} is checked out?${a.custom ? ` The repository's own remove command does it (${a.custom}).` : ""}${a.open ? " A space or tab is open there: close it first, or its terminals are left in a deleted folder." : ""}`,
-      checks: [...(a.custom ? [] : [{ id: "force", label: "Even with uncommitted changes (they're lost)", value: false }]),
-        { id: "branch", label: `Delete the branch ${a.name} too (kept if it has unmerged commits)`, value: false },
-        // As the spaces list's clean-up: an unmerged branch goes only when the dialog said its commits are lost.
-        { id: "branchForce", label: "Delete it even if it isn't merged (its unmerged commits are lost)", value: false }],
-      confirm: "Remove", danger: true };
+    case "removeWorktree": return removeDialog(a, ctx);
     case "checkoutCommit": return { title: "Checkout commit", detail: `Check out commit ${a.short}? You'll be on a detached HEAD: new commits belong to no branch until you create one.`, confirm: "Checkout" };
     case "createBranch": return { title: "New branch", detail: `At commit ${a.short}.`,
       inputs: [{ id: "name", label: "Branch name", value: "" }],
@@ -480,7 +497,7 @@ export function dialogFor(action, ctx) {
 export const DIALOG_WIDTH = 460;
 export function dialogHeight(spec) {
   const lines = (text, per) => Math.ceil(text.length / per);
-  const detail = spec.detail ? lines(spec.detail, 56) * 19 + 8 : 0;
+  const detail = spec.detail ? spec.detail.split("\n").reduce((n, l) => n + lines(l, 56), 0) * 19 + 8 : 0;
   const checks = (spec.checks ?? []).reduce((n, c) => n + 16 + lines(c.label, 50) * 19, 0);
   return Math.ceil(36 + 26 + detail + (spec.inputs ?? []).length * 66 + checks
     + (spec.choice ? 24 + spec.choice.options.length * 42 : 0) + 30 + 52 + 44);
@@ -518,6 +535,7 @@ export function commandsFor(a, v = {}, ctx = {}) {
   if (names.includes(a.type) && !refName(a.name)) throw new Error("Invalid ref name");
   if (["merge", "rebase"].includes(a.type) && !refName(a.ref)) throw new Error("Invalid ref name");
   if (a.type === "deleteRemoteBranch" && (!refName(a.remote) || !refName(a.branch))) throw new Error("Invalid remote branch");
+  if (a.type === "removeWorktree" && v.remoteBranch && (!refName(a.remote?.remote) || !refName(a.remote?.branch) || !ctx.remotes?.includes(a.remote.remote))) throw new Error("Invalid remote branch");
   if (["checkoutRemote", "createBranch", "addTag", "renameBranch"].includes(a.type) && !refName(String(v.name ?? "").trim())) throw new Error("Invalid ref name");
   if (["push", "pushTag"].includes(a.type) && (!refName(v.remote) || !ctx.remotes?.includes(v.remote))) throw new Error("Invalid remote");
   if (a.type === "reset" && !["soft", "mixed", "hard"].includes(v.mode)) throw new Error("Invalid reset mode");
@@ -526,6 +544,7 @@ export function commandsFor(a, v = {}, ctx = {}) {
   if (a.type === "commit" && !String(v.message ?? "").trim()) throw new Error("Empty commit message");
   if (["checkout", "checkoutRemote"].includes(a.type) && v.where !== undefined && !["here", "worktree"].includes(v.where)) throw new Error("Invalid place");
   if (a.type === "createBranch" && !["none", "here", "worktree"].includes(v.where)) throw new Error("Invalid place");
+  if (a.type === "removeWorktree" && [a.dirty, a.unmerged].some((n) => n !== undefined && n !== null && !(Number.isInteger(n) && n >= 0))) throw new Error("Invalid worktree facts");
   if (a.type === "removeWorktree" && a.custom !== undefined && a.custom !== null && typeof a.custom !== "string") throw new Error("Invalid remove command");
   if (a.type === "removeWorktree" && (!refName(a.name) || !worktreeOf(ctx, a.name) || worktreeOf(ctx, a.name) !== a.path)) throw new Error("Not a worktree of this repository");
   if (a.type === "removeWorktree" && a.path === ctx.mainRoot) throw new Error("That is the main checkout, not a worktree you can remove");
@@ -540,7 +559,8 @@ export function commandsFor(a, v = {}, ctx = {}) {
     // In a new worktree: git makes the folder, checks the branch out there, and leaves this one be.
     case "checkout": return [v.where === "worktree" ? ["worktree", "add", worktreePath(ctx, a.name), a.name] : ["checkout", a.name]];
     case "checkoutRemote": return [v.where === "worktree" ? ["worktree", "add", "--track", "-b", name, worktreePath(ctx, name), a.name] : ["checkout", "-b", name, "--track", a.name]];
-    case "removeWorktree": return [removeWorktreeArgs(a.path, v.force), ...(v.branch || v.branchForce ? [deleteBranchArgs(a.name, v.branchForce)] : [])];
+    case "removeWorktree": return [removeWorktreeArgs(a.path, v.force), ...(v.branch || v.branchForce ? [deleteBranchArgs(a.name, v.branchForce)] : []),
+      ...(v.remoteBranch ? [["push", a.remote.remote, "--delete", `refs/heads/${a.remote.branch}`]] : [])];
     case "checkoutCommit": return [["checkout", "--detach", a.hash]];
     case "createBranch": return [v.where === "worktree" ? ["worktree", "add", "-b", name, worktreePath(ctx, name), a.hash]
       : v.where === "here" ? ["checkout", "-b", name, a.hash] : ["branch", name, a.hash]];
@@ -587,7 +607,8 @@ export function doneText(a, v = {}) {
   const name = String(v.name ?? "").trim();
   switch (a.type) {
     case "checkout": return v.where === "worktree" ? `${a.name} is in ${WORKTREES}/${a.name.replaceAll("/", "-")}` : `Checked out ${a.name}`;
-    case "removeWorktree": return `Removed the worktree ${folderName(a.path)}${(v.branch || v.branchForce) && !a.kept ? ` and the branch ${a.name}` : ""}`;
+    case "removeWorktree": return `Removed the worktree ${folderName(a.path)}${a.kept ? "" : [(v.branch || v.branchForce) && ` the branch ${a.name}`,
+      v.remoteBranch && ` ${a.remote.remote}/${a.remote.branch}`].filter(Boolean).map((s, i, all) => (i === all.length - 1 ? " and" : ",") + s).join("")}`;
     case "checkoutRemote": return v.where === "worktree" ? `Created ${name} in ${WORKTREES}/${name.replaceAll("/", "-")}, tracking ${a.name}` : `Checked out ${name}, tracking ${a.name}`;
     case "checkoutCommit": return `Checked out ${a.short}`;
     case "createBranch": return v.where === "worktree" ? `Created ${name} in ${WORKTREES}/${name.replaceAll("/", "-")}` : v.where === "here" ? `Created and checked out ${name}` : `Created branch ${name}`;

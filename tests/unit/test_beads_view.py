@@ -45,6 +45,51 @@ class BeadsView(unittest.TestCase):
     def state(self):
         return {"all": False, "stack": [], "collapsed": ["zz"], "filter": ["owner:alice"]}
 
+    ISSUES = [
+        {"id": "x-1", "issue_type": "bug", "status": "open", "priority": 1, "labels": ["owner:alice"]},
+        {"id": "x-2", "issue_type": "feature", "status": "open", "priority": 2, "assignee": "Bo Li",
+         "dependencies": [{"depends_on_id": "x-1", "type": "blocks"}]},
+        {"id": "x-3", "issue_type": "epic", "status": "in_progress", "priority": 1, "labels": ["risk", "type:odd"]},
+        {"id": "x-4", "issue_type": "task", "status": "open", "priority": 3,
+         "dependencies": [{"depends_on_id": "x-gone", "type": "blocks"}, {"depends_on_id": "x-3", "type": "parent-child"}]},
+    ]
+
+    def matching(self, *terms):
+        issues = {i["id"]: i for i in self.ISSUES}
+        return [i["id"] for i in self.ISSUES if self.bv.selects(i, list(terms), issues)]
+
+    def test_filter_by_type_status_priority_and_assignee(self):
+        self.assertEqual(self.matching("type:bug"), ["x-1"])
+        self.assertEqual(self.matching("type:bug", "type:feature"), ["x-1", "x-2"])  # one kind: either
+        self.assertEqual(self.matching("type:bug", "P2"), [])                       # kinds: all
+        self.assertEqual(self.matching("status:in_progress"), ["x-3"])
+        self.assertEqual(self.matching("P1", "!type:epic"), ["x-1"])
+        self.assertEqual(self.matching("assignee:none"), ["x-1", "x-3", "x-4"])
+        self.assertEqual(self.matching("assignee:Bo*"), ["x-2"])
+
+    def test_ready_and_blocked_follow_open_blockers(self):
+        # x-2 waits on the open x-1; x-4's blocker isn't listed (closed); x-3 is in progress, so not ready.
+        self.assertEqual(self.matching("is:blocked"), ["x-2"])
+        self.assertEqual(self.matching("is:ready"), ["x-1", "x-4"])
+
+    def test_labels_keep_working_and_label_escapes_a_field_name(self):
+        self.assertEqual(self.matching("owner:alice"), ["x-1"])
+        self.assertEqual(self.matching("risk"), ["x-3"])
+        self.assertEqual(self.matching("!risk", "P1"), ["x-1"])
+        self.assertEqual(self.matching("label:type:odd"), ["x-3"])
+
+    def test_status_closed_lists_closed_beads(self):
+        st = self.state() | {"filter": ["status:closed"]}
+        self.assertIn("--all", self.bv.list_args(st))
+        self.assertNotIn("--all", self.bv.list_args(self.state() | {"filter": ["!status:closed"]}))
+
+    def test_the_picker_offers_every_kind_in_order(self):
+        self.assertEqual(self.bv.filter_choices(self.ISSUES), [
+            "type:bug", "type:epic", "type:feature", "type:task",
+            "status:open", "status:in_progress", "status:closed",
+            "P1", "P2", "P3", "is:ready", "is:blocked", "assignee:Bo Li", "assignee:none",
+            "risk", "owner:alice", "label:type:odd"])
+
     def test_a_failing_bd_keeps_the_last_list(self):
         st = self.state()
         good = self.bv.fetch(st, fresh=True)

@@ -10,7 +10,7 @@
 // space act · a f i approve, resume, drop · p answer · t session · v gate · d diff · o PR · w tail · b in the beads
 // view · / filter · ? keys · 1 2 views · 0 done · [ ] zoom lanes · < > a wave · { } move back / on · r refresh
 // (pr-board's letters where they match). Lanes: drag across the time axis, click a wave or ⌘-scroll to zoom into the past;
-// esc goes back to now. ⌘← ⌘→ (keys.json, mod:fleet-board) the previous / next run.
+// esc goes back to now. ⌘← ⌘→ (keys.json, mod:fleet-board) the previous / next active run; ⌘⇧← ⌘⇧→ finished ones too.
 // A bead that starts waiting for you posts a notification; while the docked pane is hidden it still looks every
 // 2 minutes (`fleet runs --json` when agent-fleet has it, else one `fleet status --json` of the last run shown).
 
@@ -70,6 +70,8 @@ export default class FleetBoard extends View {
     this.last = 0;
     this.watching = null;
     this.loading = false;
+    this.pending = null; // a run picked with no snapshot kept yet: { target, key, epic, repoName, cwd } until it's read
+    this.reading = null; // the target readStep is reading now
     // Focus moves and the clock: cheap, no fleet call unless the repo changed or it's time.
     cx.timer.every(2000, (cx) => this.tick(cx));
     cx.spawn(async (cx) => {
@@ -84,6 +86,7 @@ export default class FleetBoard extends View {
         else if (VIEWS.some((v) => v.id === c)) this.view = c;
         else if (c === "refresh") this.refresh(cx, true);
         else if (c === "next-run" || c === "prev-run") this.stepRun(cx, c === "next-run" ? 1 : -1);
+        else if (c === "next-any-run" || c === "prev-any-run") this.stepRun(cx, c === "next-any-run" ? 1 : -1, true);
         cx.notify();
       }
     });
@@ -102,6 +105,10 @@ export default class FleetBoard extends View {
     cx.spawn((cx) => this.worker(cx, this.gen));
     // Shown (⌘⇧F): the keyboard comes here. Not when the layout loads with it shown already.
     this.wasShown = shownHere();
+    // The keyboard came or went (a click in the terminal, say): redraw, so the blue line follows it.
+    // Herdr sends a board no blur, so it asks every 50 ms (one check; a redraw only on a change).
+    this.hadKeys = false;
+    cx.timer.every(50, (cx) => { const keys = this.h.is_focused() || this.filtering; if (keys !== this.hadKeys) { this.hadKeys = keys; cx.notify(); } });
     cx.timer.every(200, (cx) => {
       const now = shownHere(); if (now && !this.wasShown) { this.h.focus(); cx.notify(); } this.wasShown = now;
       // A dialog keeps the keyboard: when it slips away (a click on something that takes no focus), it comes back,
@@ -155,8 +162,9 @@ export default class FleetBoard extends View {
       cx.stop_propagation(); cx.notify(); return;
     }
     // The same keys as the git graph and the beads view: j k move, ⏎ ⇥ l → in, h ← x out, / filter, ? keys.
-    const k = e.keystroke, order = this.order, at = order.indexOf(this.selId);
-    const b = this.s?.beads.find((x) => x.id === this.selId);
+    // While a picked run is read, the last run's beads aren't on screen: nothing acts on them.
+    const k = e.keystroke, order = this.pending ? [] : this.order, at = order.indexOf(this.selId);
+    const b = this.pending ? null : this.s?.beads.find((x) => x.id === this.selId);
     const is = (...names) => names.includes(k);
     const moveTo = (i) => {
       this.selId = order[Math.max(0, Math.min(order.length - 1, i))] ?? this.selId;
@@ -305,11 +313,14 @@ export default class FleetBoard extends View {
       .on_mouse_move((e, cx) => { this.tailSize.move(e, cx); this.selMove(e, cx); })
       .on_mouse_up("left", (_e, cx) => { this.tailSize.end(this.height, cx); this.selEnd(cx); })
       .on_hover((hovered, cx) => { if (!hovered) { this.tailSize.end(this.height, cx); this.selEnd(cx); } })
+      // A click anywhere on the board gives it the keyboard (and its blue line); a text field in use keeps it.
+      .on_click((_e, cx) => { if (!this.filtering && !this.typing && !this.h.is_focused()) { this.h.focus(); cx.notify(); } })
       .track_focus(this.h).key_context("FleetBoard").on_action("fleet_board_escape", (_a, cx) => this.escapeKey(cx))
       .on_key_down((e, cx) => this.key(e, cx)), t, this.h.is_focused() || this.filtering);
     // No run shown yet: the same header (the run list behind its title), then what's missing.
-    if (!this.s) {
-      const head = boardHeader(t, { mod: "fleet-board", title: "Fleet", open: this.picking, onTitle: (cx) => { this.togglePicker(); cx.notify(); }, onClose: (cx) => { this.closePicker(); cx.notify(); },
+    // A run picked with no snapshot kept yet: its name, and that it's being read.
+    if (!this.s || this.pending) {
+      const head = boardHeader(t, { mod: "fleet-board", title: this.pending?.epic ?? "Fleet", open: this.picking, onTitle: (cx) => { this.togglePicker(); cx.notify(); }, onClose: (cx) => { this.closePicker(); cx.notify(); },
         menu: this.picking ? this.runPicker(t, now) : null, titleTip: "Every run (click or e)" });
       return root.child(boardTop(t, head)).child(this.empty(t));
     }

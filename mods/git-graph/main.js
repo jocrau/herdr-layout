@@ -4,6 +4,7 @@ import { Graph } from "./graph.js";
 import { Menu } from "./menu.js";
 import { Dialog } from "./dialog.js";
 import { Settings } from "./settings.js";
+import { Remover } from "./remove.js";
 
 export const POPUPS = "git-graph.popups";
 
@@ -12,7 +13,7 @@ export const POPUPS = "git-graph.popups";
 export default class GitGraph extends View {
   init(_props, cx) {
     const role = props()?.role;
-    this.part = role === "menu" ? new Menu() : role === "dialog" ? new Dialog() : role === "settings" ? new Settings() : new Graph();
+    this.part = role === "menu" ? new Menu() : role === "dialog" ? new Dialog() : role === "settings" ? new Settings() : role === "remove" ? new Remover() : new Graph();
     this.part.init(cx);
     // Local change: menus and dialogs count themselves open, so the graph takes the keyboard
     // back once the last one closes, however it closed (Esc never reaches them: Herdr closes it).

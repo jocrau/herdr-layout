@@ -69,6 +69,8 @@
     "cmd-shift-f": "layout.hide:fleet",
     "cmd-left": "fleet-board.prev-run",
     "cmd-right": "fleet-board.next-run",
+    "cmd-shift-left": "fleet-board.prev-any-run",
+    "cmd-shift-right": "fleet-board.next-any-run",
     "cmd-alt-left": "fleet-board.leave",
     "cmd-up": "fleet-board.behind.space.prev",
     "cmd-down": "fleet-board.behind.space.next",

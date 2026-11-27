@@ -108,6 +108,10 @@ export default class PrBoard extends View {
     cx.timer.every(1000, (cx) => { this.tailRead(cx); this.settle(cx); });
     // Shown (⌘⇧R): the keyboard comes here, on the first PR. Not when the layout loads with it shown already.
     this.wasShown = shown();
+    // The keyboard came or went (a click in the terminal, say): redraw, so the blue line follows it.
+    // Herdr sends a board no blur, so it asks every 50 ms (one check; a redraw only on a change).
+    this.hadKeys = false;
+    cx.timer.every(50, (cx) => { const keys = this.h.is_focused() || this.filtering; if (keys !== this.hadKeys) { this.hadKeys = keys; cx.notify(); } });
     cx.timer.every(200, (cx) => {
       const now = shown();
       if (now && !this.wasShown) { this.h.focus(); this.act = null; this.sel = this.order.find((x) => !isGrp(x)) ?? this.order[0] ?? null; this.reveal = true; cx.notify(); }
@@ -810,9 +814,9 @@ export default class PrBoard extends View {
         .child(div().text_size(TYPE.meta).font_semibold().text_color(t.foreground).child(label.toUpperCase()))
         .child(div().text_size(TYPE.meta).font_semibold().text_color(t.accent).child(String(rows.length)))
         .child(div().flex_1()).child(div().text_size(TYPE.label).text_color(t.dim).child(open ? "▾" : "▸")));
-      // Folded: the PRs' numbers; a click on one opens the section, that PR selected and its details open.
+      // Folded: the PRs' numbers, starting where the open sections' titles do; a click on one opens the section, that PR selected and its details open.
       if (!open) {
-        out.push(h_flex().pl(8 + 2 + 8 + GAP - 4).pr(10).pb(2).flex_wrap().font_family(mono).text_size(TYPE.meta).text_color(t.dim)
+        out.push(h_flex().pl(textAt(numW) - 4).pr(10).pb(2).flex_wrap().font_family(mono).text_size(TYPE.meta).text_color(t.dim)
           .children(rows.map((r) => ({ r, to: leaving(r, mine.find((b) => b.rows.includes(r))) })).map(({ r, to }) => div().id(`pr-fold-${r.key}`).px(4).rounded(4).cursor_pointer().hover((e) => e.bg(t.hover).text_color(t.foreground))
             // One that's leaving for Your move (the order holds it here): red, as the header's count.
             .when(Boolean(to) && moveOf(r)[0] === "you", (e) => e.text_color(t.ansi1))
@@ -862,6 +866,8 @@ export default class PrBoard extends View {
         if (this.hovered !== Boolean(hovered)) { this.hovered = Boolean(hovered); cx.notify(); }
       })
       .on_mouse_down("left", () => this.touched())
+      // A click anywhere on the board gives it the keyboard (and its blue line); a text field in use keeps it.
+      .on_click((_e, cx) => { if (!this.filtering && !this.h.is_focused()) { this.h.focus(); cx.notify(); } })
       .track_focus(this.h).key_context("PrBoard").on_action("pr_board_escape", (_a, cx) => this.escapeKey(cx))
       .on_key_down((e, cx) => this.key(e, cx))
       .when(true, (e) => focusFrame(e, t, this.h.is_focused() || this.filtering))

@@ -7,6 +7,31 @@ First version: the `workbench` layout with `file-browser` (⌘O), `git-graph` (�
 `tabs-graph`, `usage-status` and `sidebar-footer`, and one keymap across the
 dialogs and the fleet pane.
 
+- The blue line follows the keyboard: a board or the file panel drops it when you click into a terminal,
+  within 50 ms.
+- fleet-board, pr-board: a click anywhere on the board gives it the keyboard and its blue line.
+- pr-board: a folded section's PR numbers start where the open sections' titles do.
+- fleet-board: ⌘← ⌘→ step through the active runs only; ⌘⇧← ⌘⇧→ include the runs finished this week.
+- fleet-board: switching runs answers at once. A run not read yet shows its name and "Reading …" instead of the
+  last run, its read goes ahead of the background re-reads, and every run in the run list is read once in the
+  background, so most switches come from what's kept.
+- beads-view: f filters by more than labels: type (type:bug), status, priority, assignee (assignee:none for
+  nobody's), is:ready / is:blocked and labels. One kind's values are alternatives, kinds must all match, `!term`
+  excludes; status:closed lists closed beads without Ctrl-A. The footer calls it "f only".
+- The fleet pane reads agent-fleet 0.52's `fleet status --json` (schema 2) instead of keeping the last snapshot
+  it could read, which showed a finished wave while the next one ran; schema 1 still works.
+- A repository space's menu offers "Clean up finished (N)…": one dialog lists the merged / remote-gone ones
+  that lose nothing (no uncommitted changes; every commit on a remote, in the base, or squash-merged) and names the
+  ones it keeps and why; they go one after another, with one toast.
+- The sidebar's Remove worktree… asks with the git view's dialog (same ticks: branch, remote branch, uncommitted
+  changes); its menus are no longer cut off at the bottom; Clean up says what goes in a few short lines.
+- Remove worktree… can delete the remote branch too: an unticked box when the upstream still exists, naming its PR
+  (open and would close, merged, closed). Whatever can't go (an unmerged branch, a refused push) is kept and said
+  in one message while the rest goes.
+- The git view's Remove worktree… deletes the branch too by default and asks less: the folder relative to the main
+  checkout, one tick for the branch (off, with the count, when it has commits never pushed; a gone upstream reads as
+  merged), a Discard tick only when there are uncommitted changes. Branch, remote and tag labels light up under the
+  pointer, so it's clear which one a right-click takes.
 - Seven text sizes instead of ten: sizes half a pixel apart are merged (10 → 10.5 for badges and hints, 11 → 11.5
   for secondary facts and the git view's diff, 12.8 → 12.5 for dialog fields and sidebar rows); 12 / 12.5 / 13 stay.
 - Menus and text sizes in one place: the git view's, the status bar's and the sidebar's menus take their shared

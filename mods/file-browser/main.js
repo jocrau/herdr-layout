@@ -174,6 +174,9 @@ export default class FileBrowser extends Viewer {
     this.treeFocus.focus();
     // The dialog takes the keyboard a moment after it opens; a window (⌘⇧O) not at all, so it is focused here.
     cx.timer.after(300, () => { if (!this.filtering && !this.inView()) this.treeFocus.focus(); });
+    // The keyboard came or went (a click in the terminal, say): redraw, so the docked panel's blue line follows it.
+    // Herdr sends no blur, so it asks every 50 ms (one check; a redraw only on a change).
+    if (this.docked) cx.timer.every(50, (cx) => { const keys = this.treeFocus.is_focused() || this.inView() || this.filtering; if (keys !== this.hadKeys) { this.hadKeys = keys; cx.notify(); } });
     this.openAt(s, cx);
   }
 

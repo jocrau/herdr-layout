@@ -64,7 +64,7 @@ export const ViewsMethods = {
     if (active.length) out.push(head("Active", active.length), ...active.map(row));
     if (done.length) out.push(head("Finished this week", done.length), ...done.map(row));
     if (!flat.length) out.push(div().p(14).text_size(TYPE.meta).text_color(t.dim).child(this.scanAt ? "No fleet runs." : "Listing the fleet's runs…"));
-    out.push(div().px(10).pt(8).pb(4).mt(4).border_t_1().border_color(t.border).text_size(TYPE.label).text_color(t.dim).child("j k · ⏎ show · e esc close · ⌘← ⌘→ step"));
+    out.push(div().px(10).pt(8).pb(4).mt(4).border_t_1().border_color(t.border).text_size(TYPE.label).text_color(t.dim).child("j k · ⏎ show · e esc close · ⌘← ⌘→ active · ⌘⇧← ⌘⇧→ all"));
     return out;
   },
 
@@ -254,7 +254,7 @@ export const ViewsMethods = {
     const head = boardHeader(t, {
       mod: "fleet-board", title: e.id, open: this.picking, onTitle: (cx) => { this.togglePicker(); cx.notify(); }, onClose: (cx) => { this.closePicker(); cx.notify(); },
       menu: this.picking ? this.runPicker(t, now) : null,
-      titleTip: [`Epic: ${e.id}`, e.link && `Link: ${e.link}`, e.integration && `Integration branch: ${e.integration}`, `Repository: ${this.cwd}`, "Every run: click or e (⌘← ⌘→ step through them)"].filter(Boolean).join("\n"),
+      titleTip: [`Epic: ${e.id}`, e.link && `Link: ${e.link}`, e.integration && `Integration branch: ${e.integration}`, `Repository: ${this.cwd}`, "Every run: click or e (⌘← ⌘→ the active ones, ⌘⇧← ⌘⇧→ finished ones too)"].filter(Boolean).join("\n"),
       facts: [
         { id: "repo", text: this.summary(s, this.cwd).repoName, tip: this.cwd },
         e.mode && e.mode !== "real" ? { id: "mode", text: e.mode, color: t.ansi3 } : null,
@@ -752,7 +752,8 @@ export const ViewsMethods = {
       ["/", "filter by id or title (esc back to the list, the filter kept; backspace clears it)"],
       ["1 2", "Board, Lanes (digits change what's shown)"],
       ["e", "every fleet run, in a list under the title (j k, ⏎ shows one, esc closes)"],
-      ["⌘← ⌘→", "the previous / next fleet run"],
+      ["⌘← ⌘→", "the previous / next active fleet run"],
+      ["⌘⇧← ⌘⇧→", "the same, finished runs of the last week too"],
       ["0", "show or fold Done"],
       ["[ ]", "zoom Lanes (or drag across its time axis, ⌘-scroll)"],
       ["< >", "Lanes: the wave before / after (click a wave's number); after the last, back to now"],
@@ -768,6 +769,11 @@ export const ViewsMethods = {
   },
 
   empty(t) {
+    if (this.pending) {
+      return v_flex().p(14).gap(6)
+        .child(div().text_size(TYPE.heading).font_semibold().text_color(t.foreground).child(`Reading ${this.pending.epic}…`))
+        .child(div().text_size(TYPE.label).text_color(t.dim).child(this.pending.cwd));
+    }
     const p = this.problem;
     const title = !p ? (this.loading ? "Reading the fleet run…" : "Focus a terminal in a repository with a fleet run") : p.kind === "none" ? "No fleet run here" : p.kind === "old" ? "agent-fleet is too old" : p.kind === "missing" ? "No fleet command" : "Can't read the run";
     const hint = !p ? "" : p.kind === "none" ? "Focus a terminal in a repository where `fleet run <epic>` has run (it has a .fleet.toml)."
